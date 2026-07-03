@@ -1,0 +1,1074 @@
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Formik, Form, useField } from "formik";
+import { toast } from "react-toastify";
+import * as Yup from "yup";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  FaCheckCircle, FaSearch, FaTrash, FaSave, FaTimes,
+  FaTruck, FaMoneyBill, FaUniversity, FaPlus,
+  FaArrowLeft, FaPercent, FaBox, FaCalendarAlt,
+  FaFileInvoice, FaShoppingBag, FaEdit, FaPrint,
+  FaPaperclip
+} from "react-icons/fa";
+import { MdClose } from "react-icons/md";
+import api from "../../api/api";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const terms = ["Credit", "Cash", "Bank"];
+
+const VARIANT_BY_BRANCH: Record<string, string[]> = {
+  fashion: ["size", "color"],
+  electronics: ["size", "color", "srno", "warrantydate"],
+  mart: ["size"],
+};
+
+// ─── Validation ───────────────────────────────────────────────────────────────
+
+const validationSchema = Yup.object({
+  billNo: Yup.string().required("Required").max(20, "Max 20 chars"),
+  date: Yup.date().required("Required"),
+  account: Yup.number().when("terms", {
+    is: (t: string) => t === "Cash" || t === "Bank",
+    then: (schema) => schema.required("Account required"),
+    otherwise: (schema) => schema.notRequired(),
+  }),
+  partyName: Yup.number().required("Required"),
+  terms: Yup.string().required("Required"),
+  items: Yup.array()
+    .of(
+      Yup.object().shape({
+        itemId: Yup.number().test("itemName-required", "Required", function (value) {
+          const { quantity, price, unit } = this.parent;
+          if (quantity || price || unit) return !!value;
+          return true;
+        }),
+        hsnCode: Yup.string().max(20, "Max 20 chars"),
+        quantity: Yup.number()
+          .typeError("Must be a number")
+          .test("quantity-required", "Required", function (value) {
+            const { itemId, price, unit } = this.parent;
+            if (itemId || price || unit) return value !== undefined && value >= 0;
+            return true;
+          })
+          .min(0, "Non-negative"),
+        altQuantity: Yup.number().typeError("Must be a number").min(0, "Non-negative"),
+        price: Yup.number()
+          .typeError("Must be a number")
+          .test("price-required", "Required", function (value) {
+            const { itemId, quantity, unit } = this.parent;
+            if (itemId || quantity || unit) return value !== undefined && value >= 0;
+            return true;
+          })
+          .min(0, "Non-negative"),
+        unit: Yup.string().test("per-required", "Required", function (value) {
+          const { itemId, quantity, price } = this.parent;
+          if (itemId || quantity || price) return !!value;
+          return true;
+        }),
+        discountPercent: Yup.number()
+          .typeError("Must be a number")
+          .min(0, "Non-negative")
+          .max(100, "Max 100"),
+      })
+    )
+    .min(0, "At least one item required for submission"),
+});
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface Item {
+  id: number;
+  itemId: number;
+  variantId: number | null;
+  accountId: number;
+  bank_account: number;
+  case_account: number;
+  itemName: string;
+  hsnCode: string;
+  quantity: number;
+  altQuantity: number;
+  price: number;
+  unit: string;
+  discountPercent: number;
+  basicAmount: number;
+  discountAmount: number;
+  taxAmount: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  netValue: number;
+  taxSlab: string;
+}
+
+interface Supplier {
+  id: number;
+  account_name: string;
+}
+
+interface Props {
+  name: string;
+  terms: string;
+}
+
+interface Account {
+  id: number;
+  account_name: string;
+  group: string;
+}
+
+// ─── Formik-connected Form Components ────────────────────────────────────────
+
+const FormInput: React.FC<any> = ({ label, icon: Icon, ...props }) => {
+  const [field, meta] = useField(props);
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+        {Icon && <Icon className="text-gray-400 text-sm" />}
+        {label}
+      </label>
+      <input
+        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm
+          ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
+        {...field}
+        {...props}
+      />
+      {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
+    </div>
+  );
+};
+
+const FormSelect: React.FC<any> = ({ label, options, icon: Icon, ...props }) => {
+  const [field, meta] = useField(props);
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+        {Icon && <Icon className="text-gray-400 text-sm" />}
+        {label}
+      </label>
+      <select
+        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 transition-all text-sm bg-white
+          ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
+        {...field}
+        {...props}
+      >
+        <option value="" disabled>Select</option>
+        {options.map((opt: any) => <option key={opt} value={opt}>{opt}</option>)}
+      </select>
+      {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
+    </div>
+  );
+};
+
+const FormTextArea: React.FC<any> = ({ label, rows, icon: Icon, ...props }) => {
+  const [field, meta] = useField(props);
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+        {Icon && <Icon className="text-gray-400 text-sm" />}
+        {label}
+      </label>
+      <textarea
+        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm
+          ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
+        rows={rows}
+        {...field}
+        {...props}
+      />
+      {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
+    </div>
+  );
+};
+
+const DisplayField: React.FC<{ label: string; value: string | number; icon?: any }> = ({ label, value, icon: Icon }) => (
+  <div className="space-y-1">
+    <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+      {Icon && <Icon className="text-gray-400 text-sm" />}
+      {label}
+    </label>
+    <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-700 font-mono">
+      {value || "-"}
+    </div>
+  </div>
+);
+
+// ─── Items Table ──────────────────────────────────────────────────────────────
+
+const ItemsTable = ({ data, onDelete, totals }: any) => (
+  <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
+    <div className="overflow-x-auto" style={{ maxHeight: "300px" }}>
+      <table className="w-full text-sm min-w-[900px]">
+        <thead className="bg-gradient-to-r from-blue-600 to-blue-700 text-white sticky top-0 z-10">
+          <tr>
+            <th className="px-3 py-3 text-center w-10">#</th>
+            <th className="px-3 py-3 text-left">Item</th>
+            <th className="px-3 py-3 text-center">HSN</th>
+            <th className="px-3 py-3 text-center">Qty</th>
+            <th className="px-3 py-3 text-right">Price</th>
+            <th className="px-3 py-3 text-center">Unit</th>
+            <th className="px-3 py-3 text-center">Disc%</th>
+            <th className="px-3 py-3 text-right">Basic Amt</th>
+            <th className="px-3 py-3 text-right">Disc Amt</th>
+            <th className="px-3 py-3 text-right">Tax Amt</th>
+            <th className="px-3 py-3 text-right">Net Amt</th>
+            <th className="px-3 py-3 text-center w-12">Del</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.length > 0 ? (
+            data.map((item: any, idx: number) => (
+              <motion.tr
+                key={item.id}
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="border-b border-gray-100 hover:bg-gray-50 transition"
+              >
+                <td className="px-3 py-2 text-center text-gray-500">{idx + 1}</td>
+                <td className="px-3 py-2 font-medium">{item.itemName}</td>
+                <td className="px-3 py-2 text-center font-mono text-xs">{item.hsnCode}</td>
+                <td className="px-3 py-2 text-center">{item.quantity}</td>
+                <td className="px-3 py-2 text-right">₹{Number(item.price).toFixed(2)}</td>
+                <td className="px-3 py-2 text-center">{item.unit}</td>
+                <td className="px-3 py-2 text-center">{item.discountPercent}%</td>
+                <td className="px-3 py-2 text-right">₹{Number(item.basicAmount).toFixed(2)}</td>
+                <td className="px-3 py-2 text-right">₹{Number(item.discountAmount).toFixed(2)}</td>
+                <td className="px-3 py-2 text-right">₹{Number(item.taxAmount).toFixed(2)}</td>
+                <td className="px-3 py-2 text-right font-bold">₹{Number(item.netValue).toFixed(2)}</td>
+                <td className="px-3 py-2 text-center">
+                  <button onClick={() => onDelete(item)} className="text-red-500 hover:text-red-700 transition p-1">
+                    <FaTrash size={12} />
+                  </button>
+                </td>
+              </motion.tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={12} className="text-center py-10 text-gray-400">
+                <FaShoppingBag className="inline mr-2 text-gray-300 text-2xl" />
+                <br />No items added yet
+              </td>
+            </tr>
+          )}
+        </tbody>
+        {data.length > 0 && (
+          <tfoot className="bg-gray-100 font-semibold sticky bottom-0">
+            <tr>
+              <td colSpan={7} className="px-3 py-2 text-right">Total:</td>
+              <td className="px-3 py-2 text-right">₹{totals.totalBasic}</td>
+              <td className="px-3 py-2 text-right">₹{totals.totalDiscount}</td>
+              <td className="px-3 py-2 text-right">₹{totals.totalTax}</td>
+              <td className="px-3 py-2 text-right font-bold text-blue-700">₹{totals.totalNet}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  </div>
+);
+
+// ─── Fractional Unit Display ──────────────────────────────────────────────────
+
+const FractionalUnitDisplay = ({ price, per, quantity, supportsFractional }: any) => {
+  if (!supportsFractional) return null;
+  const totalAmount = (Number(quantity) || 0) * (Number(price) || 0);
+  return (
+    <div className="col-span-full">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+        <div className="text-xs text-blue-700">
+          <span className="font-semibold">Per Unit Price:</span>{" "}
+          ₹{Number(price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} per {per}
+        </div>
+        {Number(quantity) > 0 && (
+          <div className="text-xs text-blue-600 mt-1">
+            {quantity} {per} × ₹{Number(price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}{" "}
+            = <span className="font-bold">₹{totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+const today = new Date().toISOString().split("T")[0];
+
+const PurchaseEntryForm: React.FC = () => {
+  const navigate = useNavigate();
+
+  const initialValues = {
+    date: today,
+    terms: "",
+    partyName: "",
+    account: "",
+    bank_account: "",
+    case_account: "",
+    billNo: "",
+    purchasebillno: "",
+    dueDate: "",
+    narration: "",
+    freightCharge: "",
+    otherExpense: "",
+    roundAmount: "",
+    items: [
+      {
+        itemId: "",
+        variantId: null,
+        itemName: "",
+        hsnCode: "",
+        quantity: "",
+        altQuantity: "",
+        price: "",
+        unit: "",
+        discountPercent: "",
+        basicAmount: "0.00",
+        discountAmount: "0.00",
+        taxAmount: "0.00",
+        cgst: "0.00",
+        sgst: "0.00",
+        igst: "0.00",
+        netValue: "0.00",
+        taxSlab: "",
+        unit_supports_fractional: false,
+        opStock: 0,
+      },
+    ],
+  };
+
+  // ── API helpers (unchanged) ──
+  const fetchItemTax = async (item: any, partyId: number) => {
+    const payload = {
+      item_id: Number(item.itemId),
+      party_id: partyId,
+      qty: Number(item.quantity || 1),
+      price: Number(item.price || 0),
+      discount_percent: Number(item.discountPercent || 0),
+    };
+    try {
+      const res = await api.post("purchase-item-tax/", payload);
+      return res.data;
+    } catch (err) {
+      console.error("Tax calculation error:", err);
+      throw err;
+    }
+  };
+
+  const fetchItemDetails = async (itemId: number) => {
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      const res = await api.get(`items/${itemId}/`, { headers: { Authorization: `Bearer ${token}` } });
+      return res.data;
+    } catch (err) {
+      console.error("Error fetching item details:", err);
+      return null;
+    }
+  };
+
+  // ── State ──
+  const [addedItems, setAddedItems] = useState<Item[]>([]);
+  const [idCounter, setIdCounter] = useState<number>(1);
+  const [itemsModalData, setItemsModalData] = useState<any[]>([]);
+  const [openModal, setOpenModal] = useState(false);
+  const [branchType, setBranchType] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filteredItems, setFilteredItems] = useState<any[]>([]);
+
+  const calculateTotals = (items: any[]) => {
+    const sum = (key: string) => items.reduce((a, b) => a + Number(b[key] || 0), 0);
+    return {
+      totalQty: sum("quantity"),
+      totalBasic: sum("basicAmount").toFixed(2),
+      totalDiscount: sum("discountAmount").toFixed(2),
+      totalTax: sum("taxAmount").toFixed(2),
+      totalCgst: sum("cgst").toFixed(2),
+      totalSgst: sum("sgst").toFixed(2),
+      totalIgst: sum("igst").toFixed(2),
+      totalNet: sum("netValue").toFixed(2),
+    };
+  };
+
+  // ── Account Select (inner component — unchanged logic) ──
+  const AccountSelect: React.FC<Props> = ({ name, terms: termsProp }) => {
+    const [field, meta] = useField(name);
+    const [accounts, setAccounts] = useState<Account[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+      if (!termsProp || termsProp === "Credit") { setAccounts([]); return; }
+      setLoading(true);
+      api.get(`account-terms-type/?terms=${termsProp}`)
+        .then((res) => setAccounts(res.data))
+        .catch(() => console.error("Failed to fetch accounts"))
+        .finally(() => setLoading(false));
+    }, [termsProp]);
+
+    if (!termsProp || termsProp === "Credit") return null;
+
+    const icons: any = { Cash: FaMoneyBill, Bank: FaUniversity };
+    const Icon = icons[termsProp];
+    const label = termsProp === "Cash" ? "Cash Account" : termsProp === "Bank" ? "Bank Account" : "Account";
+
+    return (
+      <div className="space-y-1">
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          {Icon && <Icon className="text-gray-400 text-sm" />}
+          {label}
+        </label>
+        <select
+          {...field}
+          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 transition-all text-sm bg-white
+            ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
+        >
+          <option value="">Select {label}</option>
+          {loading ? <option disabled>Loading...</option> : accounts.map((acc) => (
+            <option key={acc.id} value={acc.id}>{acc.account_name}</option>
+          ))}
+        </select>
+        {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
+      </div>
+    );
+  };
+
+  // ── Party Select (inner component — unchanged logic) ──
+  const PartySelect = ({ name }: { name: any }) => {
+    const [field, meta, helpers] = useField(name);
+    const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
+    useEffect(() => {
+      api.get("account-type/?group=Supplier")
+        .then((res) => setSuppliers(res.data))
+        .catch(() => console.error("Failed to load suppliers"));
+    }, []);
+
+    return (
+      <div className="space-y-1">
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <FaShoppingBag className="text-gray-400 text-sm" /> Party Name
+        </label>
+        <select
+          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 transition-all text-sm bg-white
+            ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
+          value={field.value}
+          onChange={(e) => helpers.setValue(e.target.value)}
+        >
+          <option value="">Select Supplier</option>
+          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.account_name}</option>)}
+        </select>
+        {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
+      </div>
+    );
+  };
+
+  // ── Fetch branch type (unchanged) ──
+  useEffect(() => {
+    const fetchBranchType = async () => {
+      try {
+        const token = sessionStorage.getItem("accessToken");
+        if (!token) { console.error("No token found"); return; }
+        const userBranchRes = await api.get("user-branch/", { headers: { Authorization: `Bearer ${token}` } });
+        if (userBranchRes.data?.branch_type) setBranchType(userBranchRes.data.branch_type);
+        else console.error("Branch type not found in response");
+      } catch (err) {
+        console.error("Error fetching branch type:", err);
+        toast.error("Failed to load branch info");
+      }
+    };
+    fetchBranchType();
+  }, []);
+
+  // ── Fetch items for modal (unchanged) ──
+  useEffect(() => {
+    if (openModal) {
+      const fetchAllItems = async () => {
+        try {
+          const token = sessionStorage.getItem("accessToken");
+          const res = await api.get(`purchase-item-all/`, { headers: { Authorization: `Bearer ${token}` } });
+          const mapped = res.data.map((item: any) => ({
+            id: item.id,
+            itemId: item.itemId,
+            itemName: item.itemName,
+            hsnCode: item.hsnCode,
+            purchasePrice: item.purchasePrice || 0,
+            per_unit_price: item.per_unit_price || item.purchasePrice,
+            barcode: item.barcode || "",
+            size: item.size || "-",
+            color: item.color || "-",
+            srno: item.srno || "-",
+            warrantydate: item.warrantydate || "-",
+            unit: item.unit || "-",
+            unit_name: item.unit_name || item.unit,
+            unit_supports_fractional: item.unit_supports_fractional || false,
+            taxSlab: item.taxSlab || "0",
+            opStock: item.opStock || 0,
+          }));
+          setItemsModalData(mapped);
+          setFilteredItems(mapped);
+          if (res.data.length === 0) toast.info("No items available for purchase. Please create items first.");
+        } catch (err) {
+          console.error("Error fetching items:", err);
+          toast.error("Failed to load items");
+        }
+      };
+      fetchAllItems();
+    }
+  }, [openModal]);
+
+  const openModalWithData = () => {
+    if (!branchType) { toast.error("Please wait, loading branch info..."); return; }
+    setOpenModal(true);
+  };
+
+  // ── Submit (unchanged) ──
+  const handleSubmit = async (values: any) => {
+    if (addedItems.length === 0) { toast.error("At least one item required"); return; }
+    const token = sessionStorage.getItem("accessToken");
+    try {
+      const totals = calculateTotals(addedItems);
+      const freightCharge = Number(values.freightCharge || 0);
+      const otherExpense = Number(values.otherExpense || 0);
+      const roundAmount = Number(values.roundAmount || 0);
+      const grandTotal = Number(totals.totalNet) + freightCharge + otherExpense + roundAmount;
+
+      const accountId = Number(values.account);
+      if (accountId) {
+        const accRes = await api.get(`account-check/${accountId}/`, { headers: { Authorization: `Bearer ${token}` } });
+        const selectedAccount = accRes.data;
+        if (selectedAccount?.show_alert) { toast.error(selectedAccount.alert_message); return; }
+      }
+
+      const payload: any = {
+        billNo: values.billNo,
+        date: values.date,
+        dueDate: values.dueDate || null,
+        party_name: Number(values.partyName),
+        terms: values.terms,
+        narration: values.narration || "",
+        case_account: values.case_account,
+        bank_account: values.bank_account,
+        purchasebill_no: values.purchasebillno,
+        total_basic: Number(totals.totalBasic),
+        total_tax: Number(totals.totalTax),
+        total_net: Number(totals.totalNet),
+        grand_total: Number(grandTotal),
+        frightcharge: Number(values.freightCharge),
+        otherexpnse: Number(values.otherExpense),
+        roundamount: Number(values.roundAmount),
+        items: addedItems.map((it: any) => ({
+          itemName: it.itemId,
+          variant: it.variantId,
+          hsnCode: it.hsnCode,
+          quantity: Number(it.quantity),
+          altQuantity: Number(it.altQuantity || 0),
+          price: Number(it.price),
+          per: it.unit,
+          discountPercent: Number(it.discountPercent),
+          basicAmount: Number(it.basicAmount),
+          discountAmount: Number(it.discountAmount),
+          taxAmount: Number(it.taxAmount),
+          netValue: Number(it.netValue),
+          cgst: it.cgst,
+          sgst: it.sgst,
+          igst: it.igst,
+        })),
+      };
+
+      if (values.terms === "Bank") { payload.bank_account = Number(values.account); payload.case_account = null; }
+      else if (values.terms === "Cash") { payload.case_account = Number(values.account); payload.bank_account = null; }
+      else { payload.bank_account = null; payload.case_account = null; }
+
+      await api.post("purchase-create/", payload, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Purchase saved successfully");
+      navigate("/Addpurchaseitem");
+    } catch (error: any) {
+      if (error.response) {
+        const data = error.response.data;
+        if (Array.isArray(data)) toast.error(data[0]);
+        else if (data.non_field_errors) toast.error(data.non_field_errors[0]);
+        else toast.error("Something went wrong");
+      }
+    }
+  };
+
+  const variantFields = VARIANT_BY_BRANCH[branchType || ""] || [];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-6 pb-24">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        {/* ── Header ── */}
+        <div className="flex justify-between items-center mb-6">
+          <button
+            onClick={() => navigate("/Addpurchaseitem")}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition shadow-sm text-sm"
+          >
+            <FaArrowLeft /> Back
+          </button>
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-2 rounded-lg shadow-md">
+            <h1 className="text-white font-bold text-lg flex items-center gap-2">
+              <FaShoppingBag /> PURCHASE ENTRY
+            </h1>
+          </div>
+          <div className="w-24" />
+        </div>
+
+        <Formik
+          initialValues={initialValues}
+          validationSchema={validationSchema}
+          validateOnChange={true}
+          validateOnBlur={true}
+          onSubmit={(values, { setSubmitting }) => {
+            handleSubmit(values);
+            setSubmitting(false);
+          }}
+        >
+          {({ values, setFieldValue }) => {
+
+            // ── Basic amount calculation (unchanged) ──
+            useEffect(() => {
+              const cur = values.items[0];
+              const quantity = Number(cur.quantity) || 0;
+              const price = Number(cur.price) || 0;
+              const discountPercent = Number(cur.discountPercent) || 0;
+              const basicAmount = quantity * price;
+              const discountAmount = (basicAmount * discountPercent) / 100;
+              const netValue = basicAmount - discountAmount;
+              setFieldValue("items[0].basicAmount", basicAmount.toFixed(2));
+              setFieldValue("items[0].discountAmount", discountAmount.toFixed(2));
+              setFieldValue("items[0].netValue", netValue.toFixed(2));
+            }, [values.items[0].quantity, values.items[0].price, values.items[0].discountPercent]);
+
+            // ── Tax slab fetch (unchanged) ──
+            useEffect(() => {
+              const fetchTaxSlabForItem = async () => {
+                const itemId = values.items[0].itemId;
+                if (itemId) {
+                  try {
+                    const itemDetails = await fetchItemDetails(Number(itemId));
+                    if (itemDetails?.taxSlab) setFieldValue("items[0].taxSlab", itemDetails.taxSlab);
+                  } catch (err) {
+                    console.error("Error fetching tax slab:", err);
+                  }
+                } else {
+                  setFieldValue("items[0].taxSlab", "");
+                }
+              };
+              fetchTaxSlabForItem();
+            }, [values.items[0].itemId, setFieldValue]);
+
+            // ── Add item handler (unchanged) ──
+            const handleAddItem = async () => {
+              const cur = values.items[0];
+              if (!values.partyName) { toast.error("Select Party first"); return; }
+              if (!cur.itemId)        { toast.error("Select Item"); return; }
+              if (!cur.quantity || Number(cur.quantity) <= 0) { toast.error("Enter valid quantity"); return; }
+              if (!cur.price || Number(cur.price) <= 0)       { toast.error("Enter valid price"); return; }
+              if (!cur.unit)          { toast.error("Select unit"); return; }
+
+              let taxData;
+              try {
+                taxData = await fetchItemTax(cur, Number(values.partyName));
+              } catch (err) {
+                toast.error("Tax calculation failed");
+                return;
+              }
+
+              setAddedItems((prev: any) => [
+                ...prev,
+                {
+                  id: idCounter,
+                  itemId: Number(cur.itemId),
+                  variantId: cur.variantId ?? null,
+                  itemName: cur.itemName,
+                  hsnCode: cur.hsnCode,
+                  quantity: Number(cur.quantity),
+                  altQuantity: Number(cur.altQuantity || 0),
+                  price: Number(cur.price),
+                  unit: cur.unit,
+                  discountPercent: Number(cur.discountPercent || 0),
+                  basicAmount: Number(taxData.basic_amount),
+                  discountAmount: Number(taxData.discount_amount),
+                  taxAmount: Number(taxData.total_tax),
+                  cgst: Number(taxData.cgst),
+                  sgst: Number(taxData.sgst),
+                  igst: Number(taxData.igst),
+                  netValue: Number(taxData.net_amount),
+                  taxSlab: taxData.tax_percent.toString(),
+                },
+              ]);
+              setIdCounter((p) => p + 1);
+              setFieldValue("items[0]", {
+                itemId: "", variantId: null, itemName: "", hsnCode: "",
+                quantity: "", altQuantity: "", price: "", unit: "",
+                discountPercent: "",
+                basicAmount: "0.00", discountAmount: "0.00",
+                taxAmount: "0.00", cgst: "0.00", sgst: "0.00", igst: "0.00",
+                netValue: "0.00", taxSlab: "",
+                unit_supports_fractional: false, opStock: 0,
+              });
+            };
+
+            // ── Voucher number fetch (unchanged) ──
+            useEffect(() => {
+              api.get(`voucher/generate/?type=PI`)
+                .then((res) => setFieldValue("billNo", res.data.voucher_no))
+                .catch(() => toast.error("Failed to fetch latest voucher number"));
+            }, [setFieldValue]);
+
+            const totals = calculateTotals(addedItems);
+            const freightCharge = Number(values.freightCharge || 0);
+            const otherExpense = Number(values.otherExpense || 0);
+            const roundAmount = Number(values.roundAmount || 0);
+            const grandTotal = Number(totals.totalNet) + freightCharge + otherExpense + roundAmount;
+
+            return (
+              <Form>
+                <div className="space-y-4">
+
+                  {/* ── Bill Details ── */}
+                  <div className="bg-white rounded-xl shadow-lg p-6">
+                    <h2 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-4">Bill Details</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <FormInput label="Date" name="date" type="date" icon={FaCalendarAlt} />
+                      <FormSelect label="Terms" name="terms" options={terms} icon={FaMoneyBill} />
+                      <AccountSelect name="account" terms={values.terms} />
+                      <PartySelect name="partyName" />
+                      <FormInput label="Purchase Bill No." name="purchasebillno" placeholder="Purchase Bill Number" icon={FaFileInvoice} />
+                      <DisplayField label="Bill No." value={values.billNo || "Auto Generated"} icon={FaFileInvoice} />
+                      {values.terms?.toLowerCase() === "credit" && (
+                        <FormInput label="Due Date" name="dueDate" type="date" icon={FaCalendarAlt} />
+                      )}
+                      <div className="lg:col-span-2">
+                        <FormTextArea label="Narration" name="narration" placeholder="Optional notes..." rows={3} icon={FaEdit} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Item Entry ── */}
+                  <div className="bg-white rounded-xl shadow-lg p-6">
+                    <h3 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-4 flex items-center gap-2">
+                      <FaBox className="text-blue-600" /> Item Entry
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-10 gap-3 items-end">
+                      {/* Select Item button */}
+                      <div className="flex flex-col justify-end">
+                        <button
+                          type="button"
+                          onClick={openModalWithData}
+                          className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 transition flex items-center justify-center gap-1 text-sm h-[38px]"
+                        >
+                          <FaSearch size={12} /> Select
+                        </button>
+                      </div>
+
+                      <FormInput label="HSN Code" name="items[0].hsnCode" placeholder="HSN" />
+                      <FormInput label="Qty" name="items[0].quantity" type="number" placeholder="0" />
+                      <FormInput label="Price" name="items[0].price" type="number" placeholder="0" />
+                      <DisplayField label="Unit" value={values.items[0].unit || "-"} />
+                      <DisplayField label="Basic Amt" value={values.items[0].basicAmount} />
+                      <DisplayField
+                        label="Tax%"
+                        value={values.items[0].taxSlab ? `${values.items[0].taxSlab}` : "0%"}
+                      />
+                      <FormInput label="Disc%" name="items[0].discountPercent" type="number" placeholder="0" icon={FaPercent} />
+                      <DisplayField label="Disc Amt" value={values.items[0].discountAmount} />
+
+                      {/* Net + Add button */}
+                      <div className="grid grid-cols-2 gap-2 items-end">
+                        <DisplayField label="Net" value={values.items[0].netValue} />
+                        <div className="flex flex-col justify-end">
+                          <button
+                            type="button"
+                            onClick={handleAddItem}
+                            className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-1 text-sm h-[38px]"
+                          >
+                            <FaCheckCircle size={12} /> Add
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Fractional unit helper (unchanged) */}
+                    {values.items[0].unit_supports_fractional && Number(values.items[0].price) > 0 && (
+                      <div className="mt-3">
+                        <FractionalUnitDisplay
+                          price={values.items[0].price}
+                          per={values.items[0].unit}
+                          quantity={values.items[0].quantity}
+                          supportsFractional={true}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Items Table ── */}
+                  <ItemsTable
+                    data={addedItems}
+                    onDelete={(item: any) => setAddedItems((prev) => prev.filter((i) => i.id !== item.id))}
+                    totals={totals}
+                  />
+
+                  {/* ── Charges + Summary ── */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div className="lg:col-span-2 bg-white rounded-xl shadow-lg p-6">
+                      <h3 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-4 flex items-center gap-2">
+                        <FaTruck className="text-blue-600" /> Additional Charges
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <FormInput label="Freight Charge" name="freightCharge" type="number" placeholder="0" icon={FaTruck} />
+                        <FormInput label="Other Expense" name="otherExpense" type="number" placeholder="0" />
+                        <FormInput label="Round Amount" name="roundAmount" type="number" placeholder="0" />
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-lg p-6 border border-blue-200">
+                      <h3 className="text-sm font-semibold text-gray-800 mb-4">Payment Summary</h3>
+                      <div className="space-y-1 text-sm">
+                        {[
+                          { label: "Total Basic", value: `₹ ${Number(totals.totalBasic || 0).toFixed(2)}` },
+                          { label: "Total Discount", value: `₹ ${Number(totals.totalDiscount || 0).toFixed(2)}` },
+                          { label: "Total Taxable Value", value: `₹ ${(Number(totals.totalBasic) - Number(totals.totalDiscount)).toFixed(2)}` },
+                        ].map((row) => (
+                          <div key={row.label} className="flex justify-between py-1.5 border-b border-blue-100">
+                            <span className="text-gray-600">{row.label}</span>
+                            <span className="font-medium">{row.value}</span>
+                          </div>
+                        ))}
+
+                        {Number(totals.totalCgst) > 0 || Number(totals.totalSgst) > 0 ? (
+                          <>
+                            <div className="flex justify-between py-1.5 border-b border-blue-100">
+                              <span className="text-gray-600">CGST</span>
+                              <span className="font-medium">₹ {totals.totalCgst}</span>
+                            </div>
+                            <div className="flex justify-between py-1.5 border-b border-blue-100">
+                              <span className="text-gray-600">SGST</span>
+                              <span className="font-medium">₹ {totals.totalSgst}</span>
+                            </div>
+                          </>
+                        ) : Number(totals.totalIgst) > 0 ? (
+                          <div className="flex justify-between py-1.5 border-b border-blue-100">
+                            <span className="text-gray-600">IGST</span>
+                            <span className="font-medium">₹ {totals.totalIgst}</span>
+                          </div>
+                        ) : null}
+
+                        {[
+                          { label: "Total Net (incl. Tax)", value: `₹ ${Number(totals.totalNet || 0).toFixed(2)}`, bold: true },
+                          { label: "Freight Charge", value: `₹ ${values.freightCharge || 0}` },
+                          { label: "Other Expense", value: `₹ ${values.otherExpense || 0}` },
+                          { label: "Round Off", value: `₹ ${values.roundAmount || 0}` },
+                        ].map((row) => (
+                          <div key={row.label} className={`flex justify-between py-1.5 border-b border-blue-100 ${row.bold ? "font-bold" : ""}`}>
+                            <span className="text-gray-600">{row.label}</span>
+                            <span className="font-medium">{row.value}</span>
+                          </div>
+                        ))}
+
+                        <div className="flex justify-between pt-2 text-base font-bold">
+                          <span>Grand Total</span>
+                          <span className="text-blue-700">₹ {grandTotal.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Action Buttons (sticky bottom) ── */}
+                  <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t p-3 flex gap-3 justify-center z-10">
+                    <button
+                      type="button"
+                      onClick={() => { setAddedItems([]); setIdCounter(1); }}
+                      className="px-5 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition flex items-center gap-2 text-sm"
+                    >
+                      <FaTrash /> Delete
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-7 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2 text-sm"
+                    >
+                      <FaSave /> Save
+                    </button>
+                    <button
+                      type="button"
+                      className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm"
+                    >
+                      <FaPrint /> Print
+                    </button>
+                    <button
+                      type="button"
+                      className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm"
+                    >
+                      <FaPaperclip /> Attach
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/Addpurchaseitem")}
+                      className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm"
+                    >
+                      List
+                    </button>
+                    <button
+                      type="button"
+                      className="px-5 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition flex items-center gap-2 text-sm"
+                    >
+                      <FaTimes /> Close
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Item Selection Modal ── */}
+                <AnimatePresence>
+                  {openModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                      <motion.div
+                        initial={{ scale: 0.9, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.9, opacity: 0 }}
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden"
+                      >
+                        <div className="flex justify-between items-center px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white flex-shrink-0">
+                          <h3 className="text-xl font-semibold flex items-center gap-2">
+                            <FaBox /> Item Variants
+                          </h3>
+                          <button onClick={() => setOpenModal(false)} className="hover:bg-white/20 rounded-lg p-1 transition">
+                            <MdClose size={24} />
+                          </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto min-h-0 p-6">
+                          <div className="flex justify-between items-center mb-4 gap-4">
+                            <input
+                              type="text"
+                              placeholder="Search item, HSN, barcode, variant..."
+                              value={searchTerm}
+                              onChange={async (e) => {
+                                const term = e.target.value;
+                                setSearchTerm(term);
+                                if (!term) { setFilteredItems(itemsModalData); return; }
+                                try {
+                                  const token = sessionStorage.getItem("accessToken");
+                                  const res = await api.get(
+                                    `purchse-item-search/?query=${term}`,
+                                    { headers: { Authorization: `Bearer ${token}` } }
+                                  );
+                                  const mapped: any[] = res.data.map((item: any) => ({
+                                    id: item.id,
+                                    itemId: item.itemId,
+                                    itemName: item.itemName,
+                                    hsnCode: item.hsnCode,
+                                    purchasePrice: item.purchasePrice || 0,
+                                    per_unit_price: item.per_unit_price || item.purchasePrice,
+                                    barcode: item.barcode || "",
+                                    size: item.size || "-",
+                                    color: item.color || "-",
+                                    srno: item.srno || "-",
+                                    warrantydate: item.warrantydate || "-",
+                                    unit: item.unit || "-",
+                                    unit_name: item.unit_name || item.unit,
+                                    unit_supports_fractional: item.unit_supports_fractional || false,
+                                    taxSlab: item.taxSlab || "0",
+                                    opStock: item.opStock || 0,
+                                  }));
+                                  setFilteredItems(mapped);
+                                } catch (err) {
+                                  console.error("Search API error:", err);
+                                }
+                              }}
+                              className="flex-1 max-w-sm px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                            />
+                            <div className="px-4 py-2 bg-gray-100 rounded-lg text-sm text-gray-600">
+                              <span className="font-semibold">{(searchTerm ? filteredItems : itemsModalData).length}</span> items found
+                            </div>
+                          </div>
+
+                          <div className="border rounded-lg overflow-x-auto">
+                            <table className="w-full text-sm min-w-[700px]">
+                              <thead className="bg-gradient-to-r from-blue-600 to-blue-700 text-white sticky top-0">
+                                <tr>
+                                  <th className="px-3 py-2 text-center w-20">Action</th>
+                                  <th className="px-3 py-2 text-left">Item Name</th>
+                                  <th className="px-3 py-2 text-left">HSN Code</th>
+                                  {variantFields.map((field) => (
+                                    <th key={field} className="px-3 py-2 text-left capitalize">{field}</th>
+                                  ))}
+                                  <th className="px-3 py-2 text-right">Price</th>
+                                  <th className="px-3 py-2 text-center">Unit</th>
+                                  <th className="px-3 py-2 text-center">Tax%</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(searchTerm ? filteredItems : itemsModalData).map((row) => (
+                                  <tr key={`${row.itemId}-${row.id}`} className="border-b hover:bg-gray-50 transition">
+                                    <td className="px-3 py-2 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          // ── Item select logic (unchanged) ──
+                                          const finalPrice = row.purchasePrice;
+                                          const displayUnit = row.unit;
+                                          const supportsFractional = row.unit_supports_fractional || false;
+
+                                          setFieldValue("items[0].itemId", row.itemId);
+                                          setFieldValue("items[0].variantId", row.id);
+                                          setFieldValue("items[0].itemName", row.itemName);
+                                          setFieldValue("items[0].hsnCode", row.hsnCode);
+                                          setFieldValue("items[0].price", finalPrice);
+                                          setFieldValue("items[0].unit", displayUnit);
+                                          setFieldValue("items[0].unit_supports_fractional", supportsFractional);
+                                          setFieldValue("items[0].taxSlab", row.taxSlab || "0");
+                                          setFieldValue("items[0].opStock", row.opStock);
+                                          variantFields.forEach((field) => {
+                                            setFieldValue(`items[0].${field}`, row[field] || "");
+                                          });
+                                          setOpenModal(false);
+                                        }}
+                                        className="px-3 py-1 rounded-lg text-xs bg-green-500 text-white hover:bg-green-600 transition flex items-center gap-1 mx-auto"
+                                      >
+                                        <FaCheckCircle size={10} /> Select
+                                      </button>
+                                    </td>
+                                    <td className="px-3 py-2 font-medium">{row.itemName}</td>
+                                    <td className="px-3 py-2 font-mono text-xs">{row.hsnCode}</td>
+                                    {variantFields.map((field, i) => (
+                                      <td key={`${row.itemId}-${field}-${i}`} className="px-3 py-2 capitalize">{row[field] ?? "-"}</td>
+                                    ))}
+                                    <td className="px-3 py-2 text-right">₹{row.purchasePrice}</td>
+                                    <td className="px-3 py-2 text-center">{row.unit}</td>
+                                    <td className="px-3 py-2 text-center">{row.taxSlab}</td>
+                                  </tr>
+                                ))}
+                                {(searchTerm ? filteredItems : itemsModalData).length === 0 && (
+                                  <tr>
+                                    <td colSpan={6 + variantFields.length} className="text-center py-10 text-gray-500">
+                                      No items available
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-center py-4 border-t bg-white flex-shrink-0">
+                          <button
+                            onClick={() => setOpenModal(false)}
+                            className="px-8 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      </motion.div>
+                    </div>
+                  )}
+                </AnimatePresence>
+              </Form>
+            );
+          }}
+        </Formik>
+      </div>
+    </div>
+  );
+};
+
+export default PurchaseEntryForm;

@@ -1,0 +1,1004 @@
+import React, { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  FaArrowLeft, FaBox, FaCheckCircle, FaExchangeAlt,
+  FaEye, FaSearch, FaSpinner, FaTimes, FaClipboardList,
+  FaChevronLeft, FaChevronRight, FaCheckDouble,
+  FaBoxes, FaWarehouse, FaPhone, FaEnvelope, FaMapMarkerAlt, FaUser,
+  FaStickyNote, FaExclamationTriangle, FaInfoCircle,
+} from "react-icons/fa";
+import { MdPendingActions, MdClose } from "react-icons/md";
+import { HiOutlineDocumentText } from "react-icons/hi";
+import Swal from "sweetalert2";
+import api from "../../api/api";
+import { toast } from "react-toastify";
+
+// ── Types ─────────────────────────────────────────────────
+
+interface BranchDetails {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  city: string;
+  state: string;
+  pincode: string;
+  owner_name: string;
+  branch_type: string;
+  status: string;
+}
+
+interface ReturnItem {
+  id: number;
+  item_name: string;
+  variant_info: string;
+  barcode: string;
+  size: string;
+  color: string;
+  hsnCode: string;
+  taxSlab: string;
+  quantity: number;
+  rate: number;
+  is_packaging_ready: boolean;
+  is_returned_to_company: boolean;
+  status: string;
+  company_stock: number;
+  branch_stock: number;
+  branch_variant_id: number;
+  company_variant_id: number;
+}
+
+interface ReturnDetail {
+  id: number;
+  return_no: string;
+  branch_name: string;
+  to_branch_name: string;
+  return_date: string;
+  note: string;
+  status: string;
+  source_transfer_no: string;
+  source_order_id: string;
+  items: ReturnItem[];
+  created_at: string;
+  updated_at: string;
+  branch_details: BranchDetails;
+  to_branch_details: BranchDetails;
+}
+
+interface ReturnListItem {
+  id: number;
+  return_no: string;
+  branch_name: string;
+  to_branch_name: string;
+  return_date: string;
+  status: string;
+  item_count: number;
+  total_quantity: number;
+  note: string;
+  created_at: string;
+}
+
+interface PaginationState {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  page: number;
+  totalPages: number;
+}
+
+const PAGE_SIZE = 15;
+
+// ── BLUE THEME STATUS STYLES ──
+const STATUS_STYLE: Record<string, string> = {
+  pending: "bg-blue-50 text-blue-700",
+  packaging_ready: "bg-indigo-50 text-indigo-700",
+  approved: "bg-emerald-50 text-emerald-700",
+  received: "bg-green-50 text-green-700",
+  rejected: "bg-red-50 text-red-600",
+  cancelled: "bg-gray-100 text-gray-600",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: "Pending",
+  packaging_ready: "Packaging Ready",
+  approved: "Approved",
+  received: "Received",
+  rejected: "Rejected",
+  cancelled: "Cancelled",
+};
+
+// ── SweetAlert Helpers ──
+
+const showConfirmAlert = async (
+  title: string,
+  message: string,
+  icon: "warning" | "info" | "question" | "success" | "error" = "warning",
+  confirmText: string = "Yes, Continue!",
+  cancelText: string = "Cancel"
+): Promise<boolean> => {
+  const result = await Swal.fire({
+    title: title,
+    html: `
+      <div class="text-left">
+        <p class="text-gray-600">${message}</p>
+        <p class="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 font-medium text-sm">
+          This action cannot be undone.
+        </p>
+      </div>
+    `,
+    icon: icon,
+    showCancelButton: true,
+    confirmButtonColor: "#2563eb",
+    cancelButtonColor: "#ef4444",
+    confirmButtonText: confirmText,
+    cancelButtonText: cancelText,
+    reverseButtons: true,
+    customClass: {
+      popup: "rounded-2xl",
+      title: "text-xl font-bold text-gray-800",
+      htmlContainer: "text-gray-600 text-sm",
+      confirmButton: "px-6 py-2.5 rounded-xl font-semibold shadow-sm",
+      cancelButton: "px-6 py-2.5 rounded-xl font-semibold shadow-sm",
+    },
+  });
+  return result.isConfirmed;
+};
+
+const showSuccessAlert = async (title: string, message: string) => {
+  await Swal.fire({
+    title: title,
+    text: message,
+    icon: "success",
+    confirmButtonColor: "#2563eb",
+    confirmButtonText: "OK",
+    customClass: {
+      popup: "rounded-2xl",
+      title: "text-xl font-bold text-gray-800",
+      confirmButton: "px-6 py-2.5 rounded-xl font-semibold shadow-sm",
+    },
+  });
+};
+
+const showErrorAlert = async (title: string, message: string) => {
+  await Swal.fire({
+    title: title,
+    text: message,
+    icon: "error",
+    confirmButtonColor: "#2563eb",
+    confirmButtonText: "OK",
+    customClass: {
+      popup: "rounded-2xl",
+      title: "text-xl font-bold text-gray-800",
+      confirmButton: "px-6 py-2.5 rounded-xl font-semibold shadow-sm",
+    },
+  });
+};
+
+// ── Pagination Bar ──────────────────────────────────────────
+
+function PaginationBar({
+  pagination,
+  onPage,
+  label = "records",
+}: {
+  pagination: PaginationState;
+  onPage: (page: number) => void;
+  label?: string;
+}) {
+  const { count, page, totalPages, previous, next } = pagination;
+  if (count <= PAGE_SIZE) return null;
+
+  const from = (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(page * PAGE_SIZE, count);
+
+  const pages: (number | "...")[] = [];
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    if (page > 3) pages.push("...");
+    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
+    if (page < totalPages - 2) pages.push("...");
+    pages.push(totalPages);
+  }
+
+  return (
+    <div className="px-5 py-3.5 border-t bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <p className="text-xs text-gray-500">
+        Showing <span className="font-semibold text-gray-700">{from}–{to}</span> of{" "}
+        <span className="font-semibold text-gray-700">{count}</span> {label}
+      </p>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPage(page - 1)}
+          disabled={!previous}
+          className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg
+            text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600
+            disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+        >
+          <FaChevronLeft size={9} /> Prev
+        </button>
+        {pages.map((p, i) =>
+          p === "..." ? (
+            <span key={`dots-${i}`} className="px-2 text-xs text-gray-400">…</span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => onPage(p as number)}
+              className={`w-8 h-8 text-xs rounded-lg font-semibold transition-all
+                ${p === page
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "border border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600"
+                }`}
+            >
+              {p}
+            </button>
+          )
+        )}
+        <button
+          onClick={() => onPage(page + 1)}
+          disabled={!next}
+          className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg
+            text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600
+            disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+        >
+          Next <FaChevronRight size={9} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Component ──────────────────────────────────────────
+
+export default function StockReturnManagement() {
+  const [returns, setReturns] = useState<ReturnListItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedReturn, setSelectedReturn] = useState<ReturnDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [search, setSearch] = useState("");
+  const [pagination, setPagination] = useState<PaginationState>({
+    count: 0, next: null, previous: null, page: 1, totalPages: 1,
+  });
+
+  // Load returns
+  const loadReturns = useCallback(async (page = 1) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page) });
+      if (statusFilter) params.append("status", statusFilter);
+      if (search) params.append("search", search);
+      const res = await api.get(`admin/stock-returns/?${params}`);
+      const results = res.data.results ?? res.data;
+      setReturns(results.data || []);
+      const count = res.data.count || 0;
+      setPagination({
+        count,
+        next: res.data.next || null,
+        previous: res.data.previous || null,
+        page,
+        totalPages: Math.ceil(count / PAGE_SIZE),
+      });
+    } catch {
+      toast.error("Could not load returns");
+    }
+    setLoading(false);
+  }, [statusFilter, search]);
+
+  useEffect(() => {
+    loadReturns(1);
+  }, [statusFilter]);
+
+  // Load return detail
+  const loadReturnDetail = async (id: number) => {
+    setDetailLoading(true);
+    try {
+      const res = await api.get(`stock-returns/${id}/`);
+      if (res.data.success) {
+        setSelectedReturn(res.data.data);
+      }
+    } catch {
+      toast.error("Could not load return detail");
+    }
+    setDetailLoading(false);
+  };
+
+  // ── Process Return (Approve) ──
+  const handleApprove = async (id: number) => {
+    const confirmed = await showConfirmAlert(
+      "Approve return request?",
+      "This will allow the branch to package items for this return.",
+      "warning",
+      "Yes, approve",
+      "Cancel"
+    );
+    if (!confirmed) return;
+
+    setProcessing(true);
+    try {
+      const res = await api.post(`admin/stock-returns/${id}/process/`, {
+        action: "approve",
+        note: "",
+      });
+      if (res.data.success) {
+        toast.success(res.data.message);
+        await showSuccessAlert("Approved", res.data.message);
+        setSelectedReturn(null);
+        loadReturns(pagination.page);
+      } else {
+        toast.error(res.data.message || "Action failed");
+        await showErrorAlert("Failed", res.data.message || "Something went wrong");
+      }
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Error processing return");
+      await showErrorAlert("Error", e.response?.data?.message || "Something went wrong");
+    }
+    setProcessing(false);
+  };
+
+  // ── Process Return (Reject) ──
+  const handleReject = async (id: number, note: string) => {
+    if (!note.trim()) {
+      await showErrorAlert("Note required", "Please provide a reason for rejection.");
+      return;
+    }
+
+    const confirmed = await showConfirmAlert(
+      "Reject return request?",
+      `Reason: "${note}"<br/><br/>This will reject the return request.`,
+      "warning",
+      "Yes, reject",
+      "Cancel"
+    );
+    if (!confirmed) return;
+
+    setProcessing(true);
+    try {
+      const res = await api.post(`admin/stock-returns/${id}/process/`, {
+        action: "reject",
+        note: note,
+      });
+      if (res.data.success) {
+        toast.success(res.data.message);
+        await showSuccessAlert("Rejected", res.data.message);
+        setSelectedReturn(null);
+        loadReturns(pagination.page);
+      } else {
+        toast.error(res.data.message || "Action failed");
+        await showErrorAlert("Failed", res.data.message || "Something went wrong");
+      }
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Error processing return");
+      await showErrorAlert("Error", e.response?.data?.message || "Something went wrong");
+    }
+    setProcessing(false);
+  };
+
+  // ── Receive Return (Stock Increase) ──
+  const handleReceive = async (id: number) => {
+    const confirmed = await showConfirmAlert(
+      "Confirm receive return",
+      "This will increase stock in the company branch for all packaged items.",
+      "warning",
+      "Yes, receive stock",
+      "Cancel"
+    );
+    if (!confirmed) return;
+
+    setProcessing(true);
+    try {
+      const res = await api.post(`admin/stock-returns/${id}/receive/`);
+      if (res.data.success) {
+        toast.success(res.data.message);
+        await showSuccessAlert("Stock received", res.data.message);
+        setSelectedReturn(null);
+        loadReturns(pagination.page);
+      } else {
+        toast.error(res.data.message || "Failed to receive return");
+        await showErrorAlert("Failed", res.data.message || "Something went wrong");
+      }
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Error receiving return");
+      await showErrorAlert("Error", e.response?.data?.message || "Something went wrong");
+    }
+    setProcessing(false);
+  };
+
+  // ── Render ──────────────────────────────────────────────────
+
+  if (selectedReturn) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+          <AdminReturnDetailView
+            returnData={selectedReturn}
+            onBack={() => { setSelectedReturn(null); loadReturns(pagination.page); }}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onReceive={handleReceive}
+            processing={processing}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-gradient-to-r from-blue-700 to-blue-500 shadow-lg">
+              <FaExchangeAlt className="text-white text-lg" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">Stock Return Management</h1>
+              <p className="text-xs text-gray-400">Manage returns from all branches</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 text-center">
+              <div className="text-lg font-bold text-blue-700">{pagination.count}</div>
+              <div className="text-xs text-blue-600">Total Returns</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-4 flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold text-gray-600">Filter:</span>
+          {["", "pending", "packaging_ready", "approved", "received", "rejected", "cancelled"].map(s => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
+                ${statusFilter === s ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+            >
+              {s === "" ? "All" : STATUS_LABEL[s] || s}
+            </button>
+          ))}
+          <div className="relative ml-auto max-w-xs">
+            <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+            <input
+              type="text"
+              placeholder="Search returns..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                const timer = setTimeout(() => loadReturns(1), 400);
+                return () => clearTimeout(timer);
+              }}
+              className="w-full pl-9 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        {/* Returns List */}
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-3.5 border-b bg-blue-50/50 flex items-center gap-2">
+            <FaClipboardList className="text-blue-600" />
+            <span className="font-semibold text-gray-700 text-sm">Return Requests</span>
+            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+              {returns.length}
+            </span>
+          </div>
+
+          {loading ? (
+            <div className="py-16 text-center">
+              <FaSpinner className="animate-spin text-2xl text-blue-500 mx-auto mb-2" />
+              <p className="text-gray-400 text-sm">Loading returns...</p>
+            </div>
+          ) : returns.length === 0 ? (
+            <div className="py-16 text-center text-gray-400">
+              <FaExchangeAlt className="text-4xl text-gray-200 mx-auto mb-2" />
+              <p className="text-sm">No returns found</p>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[800px]">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Return No</th>
+                      <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Branch</th>
+                      <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Date</th>
+                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Items</th>
+                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Total Qty</th>
+                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Packaged</th>
+                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Status</th>
+                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {returns.map((r, idx) => {
+                      return (
+                        <tr key={r.id} className={`border-b hover:bg-blue-50/30 transition-colors 
+                          ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}>
+                          <td className="px-5 py-3 border-r border-gray-200">
+                            <span className="font-bold text-blue-600">{r.return_no}</span>
+                          </td>
+                          <td className="px-5 py-3 font-medium text-gray-700 border-r border-gray-200">
+                            {r.branch_name}
+                          </td>
+                          <td className="px-5 py-3 text-gray-500 text-xs border-r border-gray-200">{r.return_date}</td>
+                          <td className="px-5 py-3 text-center border-r border-gray-200">
+                            <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs font-semibold">
+                              {r.item_count}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 text-center border-r border-gray-200">
+                            <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs font-semibold">
+                              {r.total_quantity}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 text-center border-r border-gray-200">
+                            <div className="text-indigo-600 flex items-center justify-center">
+                              {r.status === "packaging_ready" || r.status === "received" ? (
+                                <FaCheckCircle size={16} />
+                              ) : (
+                                <span className="text-gray-300 text-sm">—</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3 text-center border-r border-gray-200">
+                            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${STATUS_STYLE[r.status] || "bg-gray-100 text-gray-600"}`}>
+                              {STATUS_LABEL[r.status] || r.status}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 text-center">
+                            <button
+                              onClick={() => loadReturnDetail(r.id)}
+                              className="text-xs text-blue-600 font-semibold bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors"
+                            >
+                              <FaEye className="inline mr-1" size={11} /> View
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <PaginationBar
+                pagination={pagination}
+                onPage={loadReturns}
+                label="returns"
+              />
+            </>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════
+// ADMIN RETURN DETAIL VIEW - BLUE THEME WITH BRANCH DETAILS
+// ════════════════════════════════════════════════════════════
+
+interface AdminReturnDetailViewProps {
+  returnData: ReturnDetail;
+  onBack: () => void;
+  onApprove: (id: number) => void;
+  onReject: (id: number, note: string) => void;
+  onReceive: (id: number) => void;
+  processing: boolean;
+}
+
+// ── Readonly detail input field (used for branch phone / email / address) ──
+const DetailInput: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}> = ({ icon, label, value }) => (
+  <div className="text-xs">
+    <label className="flex items-center gap-1.5 font-medium text-gray-500 mb-1">
+      {icon}
+      {label}
+    </label>
+    <input
+      type="text"
+      value={value || "—"}
+      readOnly
+      className="w-full px-2.5 py-1.5 border border-blue-200 rounded-lg text-xs bg-white text-gray-700 truncate"
+    />
+  </div>
+);
+
+function AdminReturnDetailView({
+  returnData,
+  onBack,
+  onApprove,
+  onReject,
+  onReceive,
+  processing,
+}: AdminReturnDetailViewProps) {
+  const [rejectNote, setRejectNote] = useState("");
+  const [showRejectModal, setShowRejectModal] = useState(false);
+
+  // CORRECT LOGIC:
+  // - Approve: Only for 'pending' status
+  // - Receive: Only for 'approved' status (after branch has packaged)
+  const canApprove = returnData.status === "pending";
+  const canReceive = returnData.status === "approved" || returnData.status === "packaging_ready";
+  const isCompleted = returnData.status === "received" || returnData.status === "rejected";
+
+  const totalPackaged = returnData.items.filter(i => i.is_packaging_ready).length;
+  const totalItems = returnData.items.length;
+  const allPackaged = totalPackaged === totalItems && totalItems > 0;
+
+  // ── Branch Details Card with input boxes for phone/email/address ──
+  // ── From Branch details card with blue-toned readonly input boxes ──
+  const BranchInfoCard = ({ title, details }: { title: string; details: BranchDetails | null }) => {
+    if (!details) return null;
+
+    return (
+      <div className="rounded-xl p-4 border bg-blue-50 border-blue-200">
+        <div className="flex items-center gap-2 mb-3">
+          <FaWarehouse className="text-blue-600 text-sm" />
+          <span className="text-sm font-semibold text-blue-800">{title}</span>
+        </div>
+
+        <div className="mb-3">
+          <div className="font-semibold text-gray-800 text-sm">{details.name}</div>
+          {(details.city || details.state) && (
+            <div className="text-xs text-gray-400 mt-0.5">
+              {details.city}{details.city && details.state ? ', ' : ''}{details.state} {details.pincode}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <DetailInput icon={<FaPhone size={10} className="text-blue-400" />} label="Phone" value={details.phone} />
+          <DetailInput icon={<FaEnvelope size={10} className="text-blue-400" />} label="Email" value={details.email} />
+          <div className="sm:col-span-2">
+            <DetailInput icon={<FaMapMarkerAlt size={10} className="text-blue-400" />} label="Address" value={details.address} />
+          </div>
+          <DetailInput icon={<FaUser size={10} className="text-blue-400" />} label="Owner" value={details.owner_name} />
+        </div>
+      </div>
+    );
+  };
+
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+
+      {/* Header */}
+      <div className="px-6 py-4 border-b bg-blue-50/50">
+        <div className="flex items-center gap-3 mb-4">
+          <button onClick={onBack}
+            className="flex items-center gap-1.5 text-blue-600 text-sm font-medium hover:text-blue-800">
+            <FaArrowLeft size={11} /> Back to Returns
+          </button>
+          <span className="text-gray-300">|</span>
+          <span className="font-bold text-gray-800 text-lg">{returnData.return_no}</span>
+          <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${STATUS_STYLE[returnData.status] || "bg-gray-100"}`}>
+            {STATUS_LABEL[returnData.status] || returnData.status}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
+            <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">Return Date</div>
+            <div className="font-semibold text-gray-800 text-sm">{returnData.return_date}</div>
+          </div>
+          <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
+            <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">Source Transfer</div>
+            <div className="font-semibold text-blue-600 text-sm">{returnData.source_transfer_no || "—"}</div>
+          </div>
+          <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
+            <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">Total Items</div>
+            <div className="font-semibold text-gray-800 text-sm">{totalItems}</div>
+          </div>
+          <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
+            <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">Total Quantity</div>
+            <div className="font-semibold text-gray-800 text-sm">
+              {returnData.items.reduce((sum, i) => sum + i.quantity, 0)}
+            </div>
+          </div>
+        </div>
+
+{/* From Branch details — readonly input boxes, blue theme, single card only */}
+        <div className="mt-4">
+          <BranchInfoCard
+            title="From Branch"
+            details={returnData.branch_details}
+          />
+        </div>
+
+        {returnData.note && (
+          <div className="mt-3 p-2.5 bg-blue-50 rounded-lg border border-blue-100 flex items-start gap-2">
+            <FaStickyNote className="text-blue-500 mt-0.5" size={12} />
+            <span className="text-xs text-blue-700">{returnData.note}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Stats */}
+      <div className="px-6 py-3 bg-gray-50 border-b flex flex-wrap gap-2 items-center justify-between">
+        <div className="flex flex-wrap gap-2">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
+            <FaBox size={10} /> Total Items: {totalItems}
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
+            <FaBoxes size={10} /> Packaged: {totalPackaged}
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+            <MdPendingActions size={10} /> Pending: {totalItems - totalPackaged}
+          </span>
+        </div>
+        <div className="text-xs text-gray-400">
+          Created: {new Date(returnData.created_at).toLocaleString()}
+        </div>
+      </div>
+
+      {/* Status Message */}
+      {returnData.status === "pending" && (
+        <div className="px-6 py-3 bg-blue-50 border-b border-blue-200 text-blue-700 text-sm flex items-center gap-2">
+          <FaWarehouse className="text-blue-500" size={14} />
+          <span>Awaiting approval. Branch cannot package until approved.</span>
+        </div>
+      )}
+
+      {returnData.status === "approved" && (
+        <div className="px-6 py-3 bg-emerald-50 border-b border-emerald-200 text-emerald-700 text-sm flex items-center gap-2">
+          <FaCheckCircle className="text-emerald-500" size={14} />
+          <span>Approved. Waiting for branch to mark items as packaged.</span>
+        </div>
+      )}
+
+      {returnData.status === "packaging_ready" && (
+        <div className="px-6 py-3 bg-indigo-50 border-b border-indigo-200 text-indigo-700 text-sm flex items-center gap-2">
+          <FaBoxes className="text-indigo-500" size={14} />
+          <span>All items packaged by branch. Ready for final receipt.</span>
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      {!isCompleted && (
+        <div className="px-6 py-4 border-b bg-gray-50 flex flex-wrap items-center gap-3 justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700">Actions:</span>
+
+            {canApprove && (
+              <>
+                <button
+                  onClick={() => onApprove(returnData.id)}
+                  disabled={processing}
+                  className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  <FaCheckDouble size={12} /> Approve
+                </button>
+                <button
+                  onClick={() => setShowRejectModal(true)}
+                  disabled={processing}
+                  className="px-4 py-2 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  <FaTimes size={12} /> Reject
+                </button>
+              </>
+            )}
+
+            {canReceive && (
+              <button
+                onClick={() => onReceive(returnData.id)}
+                disabled={processing || !allPackaged}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5 transition-colors
+                  ${!allPackaged
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
+                  }`}
+                title={!allPackaged ? "Branch has not packaged all items yet" : "Receive stock in company branch"}
+              >
+                <FaCheckCircle size={12} /> Receive Stock
+                {!allPackaged && <span className="text-xs ml-1">({totalPackaged}/{totalItems})</span>}
+              </button>
+            )}
+          </div>
+
+          {canApprove && (
+            <span className="text-xs text-gray-500 flex items-center gap-1.5">
+              {totalPackaged === totalItems && totalItems > 0 ? (
+                <>
+                  <FaCheckCircle className="text-emerald-500" size={11} /> All items packaged
+                </>
+              ) : (
+                <>
+                  <FaExclamationTriangle className="text-amber-500" size={11} /> {totalItems - totalPackaged} items not packaged yet
+                </>
+              )}
+            </span>
+          )}
+          {canReceive && !allPackaged && (
+            <span className="text-xs text-amber-600 font-medium flex items-center gap-1.5">
+              <FaExclamationTriangle size={11} /> Waiting for branch to package all items ({totalPackaged}/{totalItems})
+            </span>
+          )}
+          {canReceive && allPackaged && (
+            <span className="text-xs text-emerald-600 font-medium flex items-center gap-1.5">
+              <FaCheckCircle size={11} /> All items packaged. Ready to receive.
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Items Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[1000px]">
+          <thead>
+            <tr className="bg-gradient-to-r from-blue-800 to-blue-600 text-white text-xs">
+              <th className="px-3 py-3 text-left w-10 border-r border-blue-500">#</th>
+              <th className="px-3 py-3 text-left border-r border-blue-500">Item Name</th>
+              <th className="px-3 py-3 text-center border-r border-blue-500">Variant</th>
+              <th className="px-3 py-3 text-center border-r border-blue-500">Barcode</th>
+              <th className="px-3 py-3 text-center border-r border-blue-500">HSN</th>
+              <th className="px-3 py-3 text-center border-r border-blue-500">GST</th>
+              <th className="px-3 py-3 text-center border-r border-blue-500">Qty</th>
+              <th className="px-3 py-3 text-right border-r border-blue-500">Rate ₹</th>
+              <th className="px-3 py-3 text-center border-r border-blue-500">Branch Stock</th>
+              <th className="px-3 py-3 text-center border-r border-blue-500">Company Stock</th>
+              <th className="px-3 py-3 text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {returnData.items.map((item, idx) => {
+              const isPackaged = item.is_packaging_ready;
+              const isReturned = item.is_returned_to_company;
+              return (
+                <motion.tr key={item.id}
+                  initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.02 }}
+                  className={`border-b ${
+                    isReturned ? "bg-green-50/40" :
+                    isPackaged ? "bg-indigo-50/40" :
+                    idx % 2 === 0 ? "bg-white hover:bg-blue-50/20" : "bg-gray-50/30 hover:bg-blue-50/20"
+                  }`}>
+                  <td className="px-3 py-3 text-gray-400 text-xs border-r border-gray-200">{idx + 1}</td>
+                  <td className="px-3 py-3 font-semibold text-gray-800 border-r border-gray-200">{item.item_name}</td>
+                  <td className="px-3 py-3 text-center border-r border-gray-200">
+                    <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-lg">{item.variant_info || "Default"}</span>
+                  </td>
+                  <td className="px-3 py-3 text-center font-mono text-xs text-gray-400 border-r border-gray-200">{item.barcode || "—"}</td>
+                  <td className="px-3 py-3 text-center font-mono text-xs text-gray-500 border-r border-gray-200">{item.hsnCode || "—"}</td>
+                  <td className="px-3 py-3 text-center border-r border-gray-200">
+                    <span className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{item.taxSlab || "0%"}</span>
+                  </td>
+                  <td className="px-3 py-3 text-center border-r border-gray-200">
+                    <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs font-semibold">{item.quantity}</span>
+                  </td>
+                  <td className="px-3 py-3 text-right font-mono text-xs font-semibold text-blue-600 border-r border-gray-200">
+                    ₹{item.rate?.toFixed(2) || "0.00"}
+                  </td>
+                  <td className="px-3 py-3 text-center border-r border-gray-200">
+                    <span className={`text-xs font-semibold ${(item.branch_stock || 0) <= 0 ? "text-red-500" : "text-gray-700"}`}>
+                      {item.branch_stock || 0}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 text-center border-r border-gray-200">
+                    <span className="text-xs font-semibold text-gray-700">{item.company_stock || 0}</span>
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    {isReturned ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-green-600 font-semibold bg-green-100 px-2 py-1 rounded-lg">
+                        <FaCheckCircle size={9} /> Returned
+                      </span>
+                    ) : isPackaged ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-indigo-600 font-semibold bg-indigo-100 px-2 py-1 rounded-lg">
+                        <FaBoxes size={9} /> Packaged
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-blue-600 font-semibold bg-blue-100 px-2 py-1 rounded-lg">
+                        <MdPendingActions size={10} /> Pending
+                      </span>
+                    )}
+                  </td>
+                </motion.tr>
+              );
+            })}
+          </tbody>
+          <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+            <tr>
+              <td colSpan={6} className="px-3 py-2 text-right font-semibold text-gray-600">
+                Total:
+              </td>
+              <td className="px-3 py-2 text-center font-bold text-blue-600">
+                {returnData.items.reduce((sum, i) => sum + i.quantity, 0)}
+              </td>
+              <td className="px-3 py-2 text-right font-bold text-blue-600">
+                ₹{returnData.items.reduce((sum, i) => sum + (i.quantity * i.rate), 0).toFixed(2)}
+              </td>
+              <td colSpan={3} className="px-3 py-2 text-xs text-gray-400 text-center">
+                {totalPackaged} of {totalItems} items packaged
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {/* Footer Status Messages */}
+      {returnData.status === "received" && (
+        <div className="mx-5 mb-5 mt-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 flex items-center gap-2 text-sm">
+          <FaCheckCircle size={16} /> Return fully received. Stock increased in company branch.
+        </div>
+      )}
+      {returnData.status === "rejected" && (
+        <div className="mx-5 mb-5 mt-3 p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-600 flex items-center gap-2 text-sm">
+          <FaTimes size={16} /> Return request rejected.
+        </div>
+      )}
+      {returnData.status === "approved" && (
+        <div className="mx-5 mb-5 mt-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 flex items-center gap-2 text-sm">
+          <FaCheckCircle size={16} /> Return approved. Waiting for branch packaging.
+        </div>
+      )}
+      {returnData.status === "packaging_ready" && (
+        <div className="mx-5 mb-5 mt-3 p-3.5 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-700 flex items-center gap-2 text-sm">
+          <FaBoxes size={16} /> All items packaged. Click "Receive Stock" to complete.
+        </div>
+      )}
+      {returnData.status === "pending" && (
+        <div className="mx-5 mb-5 mt-3 p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 flex items-center gap-2 text-sm">
+          <MdPendingActions size={16} /> Pending approval. Review items and approve or reject.
+        </div>
+      )}
+
+      {/* Reject Modal */}
+      <AnimatePresence>
+        {showRejectModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-800">Reject Return</h3>
+                <button onClick={() => setShowRejectModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <MdClose size={24} />
+                </button>
+              </div>
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-center gap-2">
+                <FaTimes size={14} />
+                This will reject the return request.
+              </div>
+              <p className="text-sm text-gray-600 mb-3">Please provide a reason for rejection:</p>
+              <textarea
+                value={rejectNote}
+                onChange={(e) => setRejectNote(e.target.value)}
+                placeholder="Reason for rejection..."
+                className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-red-500 min-h-[100px] resize-none"
+              />
+              <div className="flex gap-3 justify-end mt-4">
+                <button
+                  onClick={() => setShowRejectModal(false)}
+                  className="px-4 py-2 border-2 border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    onReject(returnData.id, rejectNote);
+                    setShowRejectModal(false);
+                    setRejectNote("");
+                  }}
+                  disabled={processing}
+                  className="px-6 py-2 rounded-xl text-sm font-bold text-white bg-red-500 hover:bg-red-600 disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  {processing ? <FaSpinner className="animate-spin" size={14} /> : <FaTimes size={14} />}
+                  {processing ? "Processing..." : "Reject"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}

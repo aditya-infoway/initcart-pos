@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+* {
+  /* margin: 0px;
+  padding: 0px; */
+  box-sizing: border-box;
+}
+
+.customInput {
+  background-color: #f5f7f9;
+  padding: 15px 20px;
+  border-radius: 12px;
+  font-weight: 500;
+  width: 100%;
+  outline: none;
+  border: 1px solid transparent;
+  border-left: 5px solid #fb2c36;
+  box-shadow: inset 0 2px 4px 0 rgb(0 0 0 / 0.05); /* shadow-inner */
+  transition-property: box-shadow; /* transition-shadow */
+  transition-duration: 300ms; /* duration-300 */
+}
+
+.customInput:not(:placeholder-shown),
+.customInput.filled {
+  border-left-color: #0165ff; 
+}
+
+/* Keep file/date red until a value is selected */
+.customInput[type="file"]:not(.filled),
+.customInput[type="date"]:not(.filled) {
+  
+  border-left-color: #fb2c36; /* red if not chosen */
+  
+}
+.customInput[type="select"]:not(.filled) {
+  border-left-color: #fb2c36; /* red if not chosen */
+}
+
+
+.customInputError {
+  background-color: #f5f7f9;
+  padding: 15px 20px;
+  border-radius: 12px;
+  font-weight: 500;
+  width: 100%;
+  outline: none;
+   border: none;
+  /* border-top: 1px solid #fb2c36;
+  border-bottom: 1px solid #fb2c36;
+  border-right: 1px solid #fb2c36; */
+  border-left: 5px solid #fb2c36;
+
+  box-shadow: inset 0 2px 4px 0 rgb(0 0 0 / 0.05); /* shadow-inner */
+  transition-property: box-shadow; /* transition-shadow */
+  transition-duration: 300ms; /* duration-300 */
+}
+
+.customInput::placeholder {
+  color: #000;
+  font-weight: 500;
+}
+
+.customInputError::placeholder {
+  color: #000;
+  font-weight: 500;
+}
+
+.customBtn {
+  background-color: #0165ff;
+  color: #ffffff;
+  text-align: center;
+  padding: 13px 0px;
+  font-weight: 500;
+  border-radius: 12px;
+  transition: all 0.25s ease-in-out;
+  width: 100%;
+  cursor: pointer;
+}
+
+.customSelect {
+  background-color: #f5f7f9;
+  padding: 15px 20px;
+  border-radius: 12px;
+  font-weight: 500;
+  width: 100%;
+  outline: none;
+  border-left: 5px solid #fb2c36; /* default red */
+  box-shadow: inset 0 2px 4px 0 rgb(0 0 0 / 0.05);
+  transition: border-left-color 0.3s, box-shadow 0.3s;
+}
+
+.customBtn:hover {
+  /* background-color: #00000025; */
+  background-color: #0053cf;
+}
+
+/* Blue when a value is selected */
+.customSelect.filled {
+  border-left-color: #0165ff;
+}
+
+/* Error state */
+.customSelectError {
+  border-left-color: #fb2c36;
+}
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .col-span-3 {
+    grid-column: span 1;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+@keyframes modal-slide {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-modal-slide {
+  animation: modal-slide 0.35s ease-out;
+}
