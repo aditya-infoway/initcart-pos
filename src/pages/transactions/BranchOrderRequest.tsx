@@ -1023,7 +1023,7 @@ export default function BranchOrderRequest() {
                           <th className="px-3 py-2 text-center">HSN</th>
                           <th className="px-3 py-2 text-center">GST%</th>
                           <th className="px-3 py-2 text-right">Price ₹</th>
-                          <th className="px-3 py-2 text-center">Stock</th>
+                          
                         </tr>
                       </thead>
                       <tbody>
@@ -1084,13 +1084,7 @@ export default function BranchOrderRequest() {
                                     <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded text-xs">{variant.taxSlab || item.taxSlab || "0%"}</span>
                                   </td>
                                   <td className="px-3 py-2 text-right">₹{variant.branch_price}</td>
-                                  <td className="px-3 py-2 text-center">
-                                    <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
-                                      noStock ? "bg-red-100 text-red-600" :
-                                      variant.current_stock <= 5 ? "bg-amber-100 text-amber-700" :
-                                      "bg-emerald-100 text-emerald-700"
-                                    }`}>{variant.current_stock}</span>
-                                  </td>
+
                                 </tr>
                               );
                             })
