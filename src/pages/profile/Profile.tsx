@@ -100,7 +100,7 @@ const handleSaveBranchCode = async () => {
 };
 
   // API base URL
-  const API_BASE_URL = "https://api.initcart.in";
+  const API_BASE_URL = "http://localhost:8000";
 
   // Fetch branch profile data
   useEffect(() => {

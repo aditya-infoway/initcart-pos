@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FaArrowLeft, FaBox, FaCheckCircle, FaExchangeAlt,
@@ -87,6 +87,24 @@ interface PaginationState {
   totalPages: number;
 }
 
+interface StatusColumnConfig {
+  key: string;
+  label: string;
+  badgeClass: string;
+}
+
+interface ReturnBranchSummaryRow {
+  branch_name: string;
+  total: number;
+  pending: number;
+  packaging_ready: number;
+  approved: number;
+  received: number;
+  rejected: number;
+  cancelled: number;
+  [key: string]: any;
+}
+
 const PAGE_SIZE = 15;
 
 // ── BLUE THEME STATUS STYLES ──
@@ -107,6 +125,16 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rejected",
   cancelled: "Cancelled",
 };
+
+// ── Branch summary status columns (used on the branch landing page) ──
+const RETURN_STATUS_COLUMNS: StatusColumnConfig[] = [
+  { key: "pending", label: "Pending", badgeClass: "bg-blue-50 text-blue-700 hover:bg-blue-100" },
+  { key: "packaging_ready", label: "Packaging Ready", badgeClass: "bg-indigo-50 text-indigo-700 hover:bg-indigo-100" },
+  { key: "approved", label: "Approved", badgeClass: "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
+  { key: "received", label: "Received", badgeClass: "bg-green-50 text-green-700 hover:bg-green-100" },
+  { key: "rejected", label: "Rejected", badgeClass: "bg-red-50 text-red-600 hover:bg-red-100" },
+  { key: "cancelled", label: "Cancelled", badgeClass: "bg-gray-100 text-gray-600 hover:bg-gray-200" },
+];
 
 // ── SweetAlert Helpers ──
 
@@ -174,6 +202,28 @@ const showErrorAlert = async (title: string, message: string) => {
     },
   });
 };
+
+// ── ✅ NEW: fetch ALL pages of stock-returns (used to build the branch-wise
+// summary + client-side filtered list, without needing any backend change) ──
+async function fetchAllReturns(): Promise<ReturnListItem[]> {
+  let page = 1;
+  let all: ReturnListItem[] = [];
+  try {
+    while (true) {
+      const res = await api.get(`admin/stock-returns/?page=${page}`);
+      const results = res.data.results ?? res.data;
+      const arr: ReturnListItem[] = results.data || results || [];
+      all = all.concat(arr);
+      const hasNext = res.data.next;
+      if (!hasNext || arr.length === 0) break;
+      page++;
+      if (page > 200) break; // safety cap
+    }
+  } catch {
+    throw new Error("Could not load returns");
+  }
+  return all;
+}
 
 // ── Pagination Bar ──────────────────────────────────────────
 
@@ -250,47 +300,171 @@ function PaginationBar({
   );
 }
 
+// ════════════════════════════════════════════════════════════
+// ✅ NEW: BRANCH-WISE STATUS SUMMARY TABLE (generic, reusable)
+// Shows: Branch | Total | <status columns...>
+// Clicking a count opens that branch's filtered list (status = "" for Total)
+// ════════════════════════════════════════════════════════════
+function BranchStatusSummaryTable({
+  title, icon, rows, statusColumns, onSelect, loading, totalLabel = "All",
+}: {
+  title: string;
+  icon: React.ReactNode;
+  rows: { branch_name: string; total: number; [key: string]: any }[];
+  statusColumns: StatusColumnConfig[];
+  onSelect: (branch_name: string, status: string) => void;
+  loading: boolean;
+  totalLabel?: string;
+}) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+      <div className="px-5 py-3.5 border-b bg-blue-50/50 flex items-center gap-2">
+        {icon}
+        <span className="font-semibold text-gray-700 text-sm">{title}</span>
+        <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{rows.length}</span>
+      </div>
+
+      {loading ? (
+        <div className="py-16 text-center">
+          <FaSpinner className="animate-spin text-2xl text-blue-500 mx-auto mb-2" />
+          <p className="text-gray-400 text-sm">Loading branches...</p>
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="py-16 text-center text-gray-400">
+          <FaWarehouse className="text-4xl text-gray-200 mx-auto mb-2" />
+          <p className="text-sm">No branch data found</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Branch</th>
+                <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">{totalLabel}</th>
+                {statusColumns.map(sc => (
+                  <th key={sc.key} className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200 last:border-r-0">
+                    {sc.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, idx) => (
+                <tr key={row.branch_name} className={`border-b hover:bg-blue-50/30 transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}>
+                  <td className="px-5 py-3 font-semibold text-gray-800 border-r border-gray-200 flex items-center gap-2">
+                    <FaWarehouse className="text-gray-300" size={13} /> {row.branch_name}
+                  </td>
+                  <td className="px-5 py-3 text-center border-r border-gray-200">
+                    <button onClick={() => onSelect(row.branch_name, "")}
+                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors min-w-[40px]">
+                      {row.total}
+                    </button>
+                  </td>
+                  {statusColumns.map(sc => (
+                    <td key={sc.key} className="px-5 py-3 text-center border-r border-gray-200 last:border-r-0">
+                      <button
+                        onClick={() => onSelect(row.branch_name, sc.key)}
+                        disabled={!row[sc.key]}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed min-w-[40px] ${sc.badgeClass}`}
+                      >
+                        {row[sc.key] || 0}
+                      </button>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ──────────────────────────────────────────
 
 export default function StockReturnManagement() {
-  const [returns, setReturns] = useState<ReturnListItem[]>([]);
-  const [loading, setLoading] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<ReturnDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("");
-  const [search, setSearch] = useState("");
-  const [pagination, setPagination] = useState<PaginationState>({
-    count: 0, next: null, previous: null, page: 1, totalPages: 1,
-  });
 
-  // Load returns
-  const loadReturns = useCallback(async (page = 1) => {
-    setLoading(true);
+  // ✅ NEW: all returns fetched once (all pages), used for branch summary + client filtering
+  const [allReturns, setAllReturns] = useState<ReturnListItem[]>([]);
+  const [loadingAll, setLoadingAll] = useState(false);
+
+  // ✅ NEW: "branches" = summary landing page, "list" = filtered return list for that branch
+  const [view, setView] = useState<"branches" | "list">("branches");
+  const [branchFilter, setBranchFilter] = useState<{ branch_name: string; status: string } | null>(null);
+  const [search, setSearch] = useState("");
+  const [listPage, setListPage] = useState(1);
+
+  // Load all returns (all pages)
+  const loadAllReturns = useCallback(async () => {
+    setLoadingAll(true);
     try {
-      const params = new URLSearchParams({ page: String(page) });
-      if (statusFilter) params.append("status", statusFilter);
-      if (search) params.append("search", search);
-      const res = await api.get(`admin/stock-returns/?${params}`);
-      const results = res.data.results ?? res.data;
-      setReturns(results.data || []);
-      const count = res.data.count || 0;
-      setPagination({
-        count,
-        next: res.data.next || null,
-        previous: res.data.previous || null,
-        page,
-        totalPages: Math.ceil(count / PAGE_SIZE),
-      });
+      const data = await fetchAllReturns();
+      setAllReturns(data);
     } catch {
       toast.error("Could not load returns");
     }
-    setLoading(false);
-  }, [statusFilter, search]);
+    setLoadingAll(false);
+  }, []);
 
   useEffect(() => {
-    loadReturns(1);
-  }, [statusFilter]);
+    loadAllReturns();
+  }, [loadAllReturns]);
+
+  // ✅ NEW: branch-wise summary derived from allReturns
+  const branchSummary: ReturnBranchSummaryRow[] = useMemo(() => {
+    const map = new Map<string, ReturnBranchSummaryRow>();
+    allReturns.forEach(r => {
+      if (!map.has(r.branch_name)) {
+        map.set(r.branch_name, {
+          branch_name: r.branch_name,
+          total: 0,
+          pending: 0,
+          packaging_ready: 0,
+          approved: 0,
+          received: 0,
+          rejected: 0,
+          cancelled: 0,
+        });
+      }
+      const row = map.get(r.branch_name)!;
+      row.total++;
+      if (r.status in row) row[r.status] += 1;
+    });
+    return Array.from(map.values()).sort((a, b) => a.branch_name.localeCompare(b.branch_name));
+  }, [allReturns]);
+
+  // ✅ NEW: returns filtered to the selected branch (+ optional status) + search
+  const filteredReturns = useMemo(() => {
+    if (!branchFilter) return [];
+    const q = search.trim().toLowerCase();
+    return allReturns.filter(r =>
+      r.branch_name === branchFilter.branch_name &&
+      (branchFilter.status === "" || r.status === branchFilter.status) &&
+      (q === "" || r.return_no.toLowerCase().includes(q) || r.branch_name.toLowerCase().includes(q))
+    );
+  }, [allReturns, branchFilter, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredReturns.length / PAGE_SIZE));
+  const pagedReturns = filteredReturns.slice((listPage - 1) * PAGE_SIZE, listPage * PAGE_SIZE);
+
+  const pagination: PaginationState = {
+    count: filteredReturns.length,
+    next: listPage < totalPages ? "next" : null,
+    previous: listPage > 1 ? "prev" : null,
+    page: listPage,
+    totalPages,
+  };
+
+  function openBranchStatus(branch_name: string, status: string) {
+    setBranchFilter({ branch_name, status });
+    setSearch("");
+    setListPage(1);
+    setView("list");
+  }
 
   // Load return detail
   const loadReturnDetail = async (id: number) => {
@@ -327,7 +501,7 @@ export default function StockReturnManagement() {
         toast.success(res.data.message);
         await showSuccessAlert("Approved", res.data.message);
         setSelectedReturn(null);
-        loadReturns(pagination.page);
+        loadAllReturns();
       } else {
         toast.error(res.data.message || "Action failed");
         await showErrorAlert("Failed", res.data.message || "Something went wrong");
@@ -365,7 +539,7 @@ export default function StockReturnManagement() {
         toast.success(res.data.message);
         await showSuccessAlert("Rejected", res.data.message);
         setSelectedReturn(null);
-        loadReturns(pagination.page);
+        loadAllReturns();
       } else {
         toast.error(res.data.message || "Action failed");
         await showErrorAlert("Failed", res.data.message || "Something went wrong");
@@ -395,7 +569,7 @@ export default function StockReturnManagement() {
         toast.success(res.data.message);
         await showSuccessAlert("Stock received", res.data.message);
         setSelectedReturn(null);
-        loadReturns(pagination.page);
+        loadAllReturns();
       } else {
         toast.error(res.data.message || "Failed to receive return");
         await showErrorAlert("Failed", res.data.message || "Something went wrong");
@@ -415,7 +589,7 @@ export default function StockReturnManagement() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
           <AdminReturnDetailView
             returnData={selectedReturn}
-            onBack={() => { setSelectedReturn(null); loadReturns(pagination.page); }}
+            onBack={() => { setSelectedReturn(null); loadAllReturns(); }}
             onApprove={handleApprove}
             onReject={handleReject}
             onReceive={handleReceive}
@@ -443,135 +617,169 @@ export default function StockReturnManagement() {
           </div>
           <div className="flex items-center gap-2">
             <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 text-center">
-              <div className="text-lg font-bold text-blue-700">{pagination.count}</div>
+              <div className="text-lg font-bold text-blue-700">{allReturns.length}</div>
               <div className="text-xs text-blue-600">Total Returns</div>
             </div>
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-4 flex flex-wrap items-center gap-3">
-          <span className="text-sm font-semibold text-gray-600">Filter:</span>
-          {["", "pending", "packaging_ready", "approved", "received", "rejected", "cancelled"].map(s => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
-                ${statusFilter === s ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-            >
-              {s === "" ? "All" : STATUS_LABEL[s] || s}
-            </button>
-          ))}
-          <div className="relative ml-auto max-w-xs">
-            <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
-            <input
-              type="text"
-              placeholder="Search returns..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                const timer = setTimeout(() => loadReturns(1), 400);
-                return () => clearTimeout(timer);
-              }}
-              className="w-full pl-9 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+        {/* ✅ NEW: BRANCH SUMMARY (landing) VIEW */}
+        {view === "branches" && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <FaWarehouse className="text-blue-500" />
+                Select a branch &amp; status to view its return list
+              </div>
+              <button onClick={loadAllReturns}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
+                ↻ Refresh
+              </button>
+            </div>
+            <BranchStatusSummaryTable
+              title="Branch Returns Summary"
+              icon={<FaClipboardList className="text-blue-600" />}
+              rows={branchSummary}
+              statusColumns={RETURN_STATUS_COLUMNS}
+              onSelect={openBranchStatus}
+              loading={loadingAll}
             />
           </div>
-        </div>
+        )}
 
-        {/* Returns List */}
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-3.5 border-b bg-blue-50/50 flex items-center gap-2">
-            <FaClipboardList className="text-blue-600" />
-            <span className="font-semibold text-gray-700 text-sm">Return Requests</span>
-            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
-              {returns.length}
-            </span>
-          </div>
-
-          {loading ? (
-            <div className="py-16 text-center">
-              <FaSpinner className="animate-spin text-2xl text-blue-500 mx-auto mb-2" />
-              <p className="text-gray-400 text-sm">Loading returns...</p>
-            </div>
-          ) : returns.length === 0 ? (
-            <div className="py-16 text-center text-gray-400">
-              <FaExchangeAlt className="text-4xl text-gray-200 mx-auto mb-2" />
-              <p className="text-sm">No returns found</p>
-            </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[800px]">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Return No</th>
-                      <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Branch</th>
-                      <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Date</th>
-                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Items</th>
-                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Total Qty</th>
-                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Packaged</th>
-                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Status</th>
-                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {returns.map((r, idx) => {
-                      return (
-                        <tr key={r.id} className={`border-b hover:bg-blue-50/30 transition-colors 
-                          ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}>
-                          <td className="px-5 py-3 border-r border-gray-200">
-                            <span className="font-bold text-blue-600">{r.return_no}</span>
-                          </td>
-                          <td className="px-5 py-3 font-medium text-gray-700 border-r border-gray-200">
-                            {r.branch_name}
-                          </td>
-                          <td className="px-5 py-3 text-gray-500 text-xs border-r border-gray-200">{r.return_date}</td>
-                          <td className="px-5 py-3 text-center border-r border-gray-200">
-                            <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs font-semibold">
-                              {r.item_count}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3 text-center border-r border-gray-200">
-                            <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs font-semibold">
-                              {r.total_quantity}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3 text-center border-r border-gray-200">
-                            <div className="text-indigo-600 flex items-center justify-center">
-                              {r.status === "packaging_ready" || r.status === "received" ? (
-                                <FaCheckCircle size={16} />
-                              ) : (
-                                <span className="text-gray-300 text-sm">—</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-5 py-3 text-center border-r border-gray-200">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${STATUS_STYLE[r.status] || "bg-gray-100 text-gray-600"}`}>
-                              {STATUS_LABEL[r.status] || r.status}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3 text-center">
-                            <button
-                              onClick={() => loadReturnDetail(r.id)}
-                              className="text-xs text-blue-600 font-semibold bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors"
-                            >
-                              <FaEye className="inline mr-1" size={11} /> View
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+        {/* LIST VIEW — filtered by selected branch (+status) — same UI as before */}
+        {view === "list" && (
+          <>
+            {/* Filters */}
+            <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-4 flex flex-wrap items-center gap-3">
+              <button onClick={() => { setView("branches"); setBranchFilter(null); }}
+                className="flex items-center gap-1.5 text-blue-600 text-sm font-medium hover:text-blue-800">
+                <FaArrowLeft size={11} /> Back to Branches
+              </button>
+              <span className="text-gray-300">|</span>
+              <span className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                <FaWarehouse className="text-gray-400" size={12} /> {branchFilter?.branch_name}
+              </span>
+              <span className="text-gray-300">|</span>
+              <span className="text-sm font-semibold text-gray-600">Filter:</span>
+              {["", "pending", "packaging_ready", "approved", "received", "rejected", "cancelled"].map(s => (
+                <button
+                  key={s}
+                  onClick={() => { setBranchFilter(f => f ? { ...f, status: s } : f); setListPage(1); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
+                    ${branchFilter?.status === s ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                >
+                  {s === "" ? "All" : STATUS_LABEL[s] || s}
+                </button>
+              ))}
+              <div className="relative ml-auto max-w-xs">
+                <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+                <input
+                  type="text"
+                  placeholder="Search returns..."
+                  value={search}
+                  onChange={(e) => { setSearch(e.target.value); setListPage(1); }}
+                  className="w-full pl-9 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                />
               </div>
-              <PaginationBar
-                pagination={pagination}
-                onPage={loadReturns}
-                label="returns"
-              />
-            </>
-          )}
-        </div>
+            </div>
+
+            {/* Returns List */}
+            <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+              <div className="px-5 py-3.5 border-b bg-blue-50/50 flex items-center gap-2">
+                <FaClipboardList className="text-blue-600" />
+                <span className="font-semibold text-gray-700 text-sm">Return Requests</span>
+                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                  {filteredReturns.length}
+                </span>
+              </div>
+
+              {loadingAll ? (
+                <div className="py-16 text-center">
+                  <FaSpinner className="animate-spin text-2xl text-blue-500 mx-auto mb-2" />
+                  <p className="text-gray-400 text-sm">Loading returns...</p>
+                </div>
+              ) : pagedReturns.length === 0 ? (
+                <div className="py-16 text-center text-gray-400">
+                  <FaExchangeAlt className="text-4xl text-gray-200 mx-auto mb-2" />
+                  <p className="text-sm">No returns found</p>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[800px]">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Return No</th>
+                          <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Branch</th>
+                          <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Date</th>
+                          <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Items</th>
+                          <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Total Qty</th>
+                          <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Packaged</th>
+                          <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Status</th>
+                          <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pagedReturns.map((r, idx) => {
+                          return (
+                            <tr key={r.id} className={`border-b hover:bg-blue-50/30 transition-colors 
+                              ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}>
+                              <td className="px-5 py-3 border-r border-gray-200">
+                                <span className="font-bold text-blue-600">{r.return_no}</span>
+                              </td>
+                              <td className="px-5 py-3 font-medium text-gray-700 border-r border-gray-200">
+                                {r.branch_name}
+                              </td>
+                              <td className="px-5 py-3 text-gray-500 text-xs border-r border-gray-200">{r.return_date}</td>
+                              <td className="px-5 py-3 text-center border-r border-gray-200">
+                                <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs font-semibold">
+                                  {r.item_count}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3 text-center border-r border-gray-200">
+                                <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs font-semibold">
+                                  {r.total_quantity}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3 text-center border-r border-gray-200">
+                                <div className="text-indigo-600 flex items-center justify-center">
+                                  {r.status === "packaging_ready" || r.status === "received" ? (
+                                    <FaCheckCircle size={16} />
+                                  ) : (
+                                    <span className="text-gray-300 text-sm">—</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-5 py-3 text-center border-r border-gray-200">
+                                <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${STATUS_STYLE[r.status] || "bg-gray-100 text-gray-600"}`}>
+                                  {STATUS_LABEL[r.status] || r.status}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3 text-center">
+                                <button
+                                  onClick={() => loadReturnDetail(r.id)}
+                                  className="text-xs text-blue-600 font-semibold bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors"
+                                >
+                                  <FaEye className="inline mr-1" size={11} /> View
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <PaginationBar
+                    pagination={pagination}
+                    onPage={setListPage}
+                    label="returns"
+                  />
+                </>
+              )}
+            </div>
+          </>
+        )}
 
       </div>
     </div>
@@ -580,6 +788,7 @@ export default function StockReturnManagement() {
 
 // ════════════════════════════════════════════════════════════
 // ADMIN RETURN DETAIL VIEW - BLUE THEME WITH BRANCH DETAILS
+// (UNCHANGED)
 // ════════════════════════════════════════════════════════════
 
 interface AdminReturnDetailViewProps {

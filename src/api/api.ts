@@ -3,7 +3,7 @@ import axios from "axios";
 import { useAuthStore } from "../store/authStore";
 
 const api = axios.create({
-  baseURL: "https://api.initcart.in/api/pos/",
+  baseURL: "http://localhost:8000/api/pos/",
 });
 
 api.interceptors.request.use(

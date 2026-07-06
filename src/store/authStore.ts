@@ -130,7 +130,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       set({ loading: true, error: null });
 
-      const response = await fetch("https://api.initcart.in/api/pos/auth/login/", {
+      const response = await fetch("http://localhost:8000/api/pos/auth/login/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ identifier, password }),

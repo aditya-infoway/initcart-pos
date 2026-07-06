@@ -340,39 +340,18 @@ export default function StockReturn() {
   }, [tab, statusFilter]);
 
   // ── Compute the actual next Return No by mirroring backend's generation logic ──
-  // Backend pattern: {prefix}/{FY_start}-{FY_end}/{NNNN}, incrementing from the last return_no
-  const fetchReturnNo = async () => {
-    try {
-      const res = await api.get(`stock-returns/?page=1`);
-      const results = res.data.results ?? res.data;
-      const list: ReturnListItem[] = results.data || [];
-
-      const now = new Date();
-      const month = now.getMonth() + 1; // 1-12
-      const year = now.getFullYear();
-      const fyStart = month >= 4 ? year : year - 1;
-      const fyEnd = fyStart + 1;
-      const currentFy = `${String(fyStart).slice(2)}-${String(fyEnd).slice(2)}`;
-
-      if (list.length > 0 && list[0].return_no) {
-        const parts = list[0].return_no.split("/");
-        if (parts.length === 3) {
-          const [prefix, fy, numStr] = parts;
-          const num = parseInt(numStr, 10) || 0;
-          if (fy === currentFy) {
-            setReturnNo(`${prefix}/${fy}/${String(num + 1).padStart(4, "0")}`);
-          } else {
-            setReturnNo(`${prefix}/${currentFy}/0001`);
-          }
-          return;
-        }
-      }
-      // No previous returns yet — first number of the financial year
-      setReturnNo(`SR/${currentFy}/0001`);
-    } catch {
+const fetchReturnNo = async () => {
+  try {
+    const res = await api.get(`stock-returns/next-number-preview/`);
+    if (res.data.success) {
+      setReturnNo(res.data.next_return_no);
+    } else {
       setReturnNo("Will be generated on save");
     }
-  };
+  } catch {
+    setReturnNo("Will be generated on save");
+  }
+};
 
   // ── Fetch To Branch when opening create tab ──
   const fetchToBranch = async () => {
