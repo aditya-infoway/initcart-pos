@@ -4,9 +4,11 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import JsBarcode from "jsbarcode";
-import { FaBarcode, FaPrint, FaSync, FaCheck, FaTimes, FaSearch, FaChevronLeft, FaChevronRight } from "react-icons/fa";
+import { FaBarcode, FaPrint, FaSync, FaCheck, FaTimes, FaSearch, FaChevronLeft, FaChevronRight, FaEdit } from "react-icons/fa";
 import { MdOutlineQrCode2, MdClose, MdCheckCircle, MdPrint } from "react-icons/md";
 import api from "../../api/api";
+import { FaLock } from "react-icons/fa6";
+import { useAuthStore } from "../../store/authStore"; 
 
 // ─── TSC TE244 label presets ────────────────────────────────────
 const LABEL_PRESETS = [
@@ -32,6 +34,7 @@ interface GeneratedVariant {
   variant_id: number; item_id: number; item_name: string;
   size: string; color: string; mrp: number; sales_price: number;
   current_stock: number; barcode: string; unit: string; hsn_code: string;
+  entry_type: string;
 }
 interface PrintItem {
   variant_id: number; item_name: string; barcode: string;
@@ -336,6 +339,8 @@ const printInNewWindow = (items: PrintItem[], preset: typeof LABEL_PRESETS[numbe
 // ════════════════════════════════════════════════════════════════
 const PendingBarcodes: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();  // ← GET USER FROM AUTH STORE
+  const userRole = user?.role || ''; 
   const [activeTab, setActiveTab] = useState<"pending" | "generated">("pending");
 
   const [variants, setVariants] = useState<PendingVariant[]>([]);
@@ -365,10 +370,15 @@ const PendingBarcodes: React.FC = () => {
 
   const [pendingSearch, setPendingSearch] = useState("");
   const [generatedSearch, setGeneratedSearch] = useState("");
+  // Add these states near other state declarations
+  const [updatingBarcode, setUpdatingBarcode] = useState<Set<number>>(new Set());
+  const [editBarcodeValues, setEditBarcodeValues] = useState<Map<number, string>>(new Map());
+  const [barcodeUpdateSuccess, setBarcodeUpdateSuccess] = useState<Map<number, boolean>>(new Map());
   
   // Debounced search values
   const [debouncedPendingSearch, setDebouncedPendingSearch] = useState("");
   const [debouncedGeneratedSearch, setDebouncedGeneratedSearch] = useState("");
+
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${sessionStorage.getItem("token")}` }), []);
 
@@ -464,6 +474,8 @@ const PendingBarcodes: React.FC = () => {
       fetchGenerated(generatedPagination.current_page, generatedPagination.page_size, debouncedGeneratedSearch);
     }
   }, [activeTab, debouncedPendingSearch, debouncedGeneratedSearch]);
+
+
 
   // Handle page changes
   const handlePendingPageChange = (page: number) => {
@@ -601,6 +613,76 @@ const PendingBarcodes: React.FC = () => {
     setActiveTab(tab);
     setSelectedIds(new Set());
   };
+
+// ─── CAN EDIT CHECK ─────────────────────────────────────────
+const canEditBarcode = (entryType: string | undefined): boolean => {
+    // ✅ SUPERADMIN: Kabhi edit nahi kar sakta (sab par lock)
+    if (userRole === 'superadmin') return false;
+    
+    // ✅ NORMAL BRANCH: Sirf manual items edit kar sakta hai
+    const type = entryType || 'manual';
+    return type === 'manual';
+};
+
+  // Add this function after other handlers
+
+const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
+    if (!newBarcode || newBarcode.length < 3) {
+        toast.warning("Please enter a valid barcode (min 3 characters)");
+        return;
+    }
+
+    setUpdatingBarcode(prev => new Set(prev).add(variantId));
+
+    try {
+        const response = await api.put(
+            `barcodes/update/${variantId}/`,
+            { barcode: newBarcode },
+            { headers }
+        );
+
+        if (response.data.success) {
+            // Update the variant in the generated list
+            setGeneratedVariants(prev => 
+                prev.map(v => 
+                    v.variant_id === variantId 
+                        ? { ...v, barcode: response.data.new_barcode }
+                        : v
+                )
+            );
+
+            // Mark as success for UI feedback
+            setBarcodeUpdateSuccess(prev => new Map(prev).set(variantId, true));
+            
+            toast.success(`✓ Barcode updated to: ${response.data.new_barcode}`);
+
+            // Auto-clear success after 3 seconds
+            setTimeout(() => {
+                setBarcodeUpdateSuccess(prev => {
+                    const next = new Map(prev);
+                    next.delete(variantId);
+                    return next;
+                });
+            }, 3000);
+
+            // Clear edit value
+            setEditBarcodeValues(prev => {
+                const next = new Map(prev);
+                next.delete(variantId);
+                return next;
+            });
+        }
+    } catch (error: any) {
+        const message = error.response?.data?.message || "Failed to update barcode";
+        toast.error(`❌ ${message}`);
+    } finally {
+        setUpdatingBarcode(prev => {
+            const next = new Set(prev);
+            next.delete(variantId);
+            return next;
+        });
+    }
+};
 
   return (
     <>
@@ -821,6 +903,7 @@ const PendingBarcodes: React.FC = () => {
                         <th className="p-3 text-left">#</th>
                         <th className="p-3 text-left">Item Name</th>
                         <th className="p-3 text-left">Variant</th>
+                        <th className="p-3 text-left">Type</th>
                         <th className="p-3 text-left">MRP</th>
                         <th className="p-3 text-left">S.Price</th>
                         <th className="p-3 text-left">Stock</th>
@@ -828,6 +911,7 @@ const PendingBarcodes: React.FC = () => {
                         <th className="p-3 text-left">Copies</th>
                         <th className="p-3 text-left">Preview</th>
                         <th className="p-3 text-center">Print</th>
+                        <th className="p-3 text-center">Update</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -850,7 +934,17 @@ const PendingBarcodes: React.FC = () => {
                                 {v.color && <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{v.color}</span>}
                                 {!v.size && !v.color && <span className="text-gray-300 text-xs">—</span>}
                               </div>
+                              
                             </td>
+                            <td className="p-3">
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+        v.entry_type === 'company' 
+            ? 'bg-purple-100 text-purple-700' 
+            : 'bg-blue-100 text-blue-700'
+    }`}>
+        {v.entry_type}
+    </span>
+</td>
                             <td className="p-3 font-medium text-gray-700">₹{v.mrp}</td>
                             <td className="p-3 text-gray-600">₹{v.sales_price}</td>
                             <td className="p-3">
@@ -875,6 +969,107 @@ const PendingBarcodes: React.FC = () => {
                                 <MdPrint size={12} /> {qty > 1 ? `×${qty}` : "Print"}
                               </button>
                             </td>
+                            {/* In the generated table, replace the barcode column */}
+<td className="p-3">
+    <div className="flex items-center gap-1">
+        {/* Display current barcode */}
+        <span className="font-mono text-gray-700 text-xs whitespace-nowrap">
+            {v.barcode}
+        </span>
+        
+{/* ─── EDIT BUTTON - SIRF NORMAL BRANCH + MANUAL ITEMS ── */}
+
+{(userRole !== 'superadmin' && (v.entry_type || 'manual') === 'manual') && (
+    <button
+        onClick={() => {
+            setEditBarcodeValues(prev => 
+                new Map(prev).set(v.variant_id, v.barcode)
+            );
+        }}
+        className="ml-1 text-blue-500 hover:text-blue-700 text-xs"
+        title="Edit barcode (Manual items only)"
+    >
+        <FaEdit size={12} />
+    </button>
+)}
+
+{/* ─── LOCK ICON ───────────────────────────────────────────── */}
+{(userRole === 'superadmin' || (v.entry_type || 'manual') === 'company') && (
+    <span className="text-gray-400 text-xs ml-1" title={
+        userRole === 'superadmin' 
+            ? "Barcode editing is disabled for superadmin" 
+            : "Company items cannot be edited by normal users"
+    }>
+        <FaLock size={10} />
+    </span>
+)}
+    </div>
+    
+    {/* Edit input - shown when edit mode is active */}
+    {editBarcodeValues.has(v.variant_id) && (
+        <div className="mt-1 flex items-center gap-1">
+            <input
+                type="text"
+                value={editBarcodeValues.get(v.variant_id) || ''}
+                onChange={(e) => {
+                    const val = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                    setEditBarcodeValues(prev => 
+                        new Map(prev).set(v.variant_id, val)
+                    );
+                }}
+                className="border border-blue-300 rounded px-2 py-1 text-xs w-28 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                placeholder="New barcode"
+                autoFocus
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                        handleUpdateBarcode(
+                            v.variant_id, 
+                            editBarcodeValues.get(v.variant_id) || ''
+                        );
+                    }
+                    if (e.key === 'Escape') {
+                        setEditBarcodeValues(prev => {
+                            const next = new Map(prev);
+                            next.delete(v.variant_id);
+                            return next;
+                        });
+                    }
+                }}
+            />
+            <button
+                onClick={() => handleUpdateBarcode(
+                    v.variant_id, 
+                    editBarcodeValues.get(v.variant_id) || ''
+                )}
+                disabled={updatingBarcode.has(v.variant_id)}
+                className="bg-green-500 text-white px-2 py-1 rounded text-xs hover:bg-green-600 disabled:opacity-50 flex items-center gap-1"
+            >
+                {updatingBarcode.has(v.variant_id) ? (
+                    <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                    <FaCheck size={10} />
+                )}
+            </button>
+            <button
+                onClick={() => {
+                    setEditBarcodeValues(prev => {
+                        const next = new Map(prev);
+                        next.delete(v.variant_id);
+                        return next;
+                    });
+                }}
+                className="text-gray-400 hover:text-red-500 text-sm"
+            >
+                <FaTimes size={12} />
+            </button>
+            
+            {/* Success indicator */}
+            {barcodeUpdateSuccess.has(v.variant_id) && (
+                <span className="text-green-500 text-xs font-medium">✓</span>
+            )}
+        </div>
+    )}
+</td>
                           </tr>
                         );
                       })}

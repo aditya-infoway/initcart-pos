@@ -63,7 +63,7 @@
 //         // 0 = normal navigation (enter URL), 1 = reload, 2 = back/forward
 //         if (navigationType === "reload" && navigationType == 0) return;
 
-//         fetch("https://api.initcart.in/api/pos/auth/logout/", {
+//         fetch("http://localhost:8000/api/pos/auth/logout/", {
 //             method: "POST",
 //             headers: { "Content-Type": "application/json" },
 //             body: JSON.stringify({ token: accessToken, refresh: refreshToken }),
@@ -194,7 +194,7 @@ export const useAutoLogout = () => {
             const token = sessionStorage.getItem("accessToken");
             if (!token) return;
 
-            fetch("https://api.initcart.in/api/pos/heartbeat/", {
+            fetch("http://localhost:8000/api/pos/heartbeat/", {
                 method: "POST",
                 headers: {
                     Authorization: `Bearer ${token}`

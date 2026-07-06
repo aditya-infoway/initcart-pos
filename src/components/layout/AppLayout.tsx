@@ -379,7 +379,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
           if (branchData.branch_logo_url) {
             const logoUrl = branchData.branch_logo_url.startsWith("http")
               ? branchData.branch_logo_url
-              : `https://api.initcart.in${branchData.branch_logo_url}`;
+              : `http://localhost:8000${branchData.branch_logo_url}`;
             setBranchLogo(logoUrl);
           }
           setBranchName(branchData.branch_name || "Branch");

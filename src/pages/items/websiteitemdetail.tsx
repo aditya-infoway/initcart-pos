@@ -103,7 +103,7 @@ const getFullUrl = (mediaPath: string | null | undefined): string | null => {
     }
     
     // Django backend URL - make sure this matches your backend
-    const API_BASE_URL = "https://api.initcart.in";
+    const API_BASE_URL = "http://localhost:8000";
     
     // If path starts with /media/, append directly
     if (mediaPath.startsWith('/media/')) {
@@ -277,8 +277,8 @@ const handleImageUpload = async (type: 'main' | 'thumbnail', file: File) => {
     if (existingGalleryUrls.length > 0) {
         const galleryPaths = existingGalleryUrls.map(url => {
             let path = url;
-            if (url.includes('https://api.initcart.in')) {
-                path = url.replace('https://api.initcart.in', '');
+            if (url.includes('http://localhost:8000')) {
+                path = url.replace('http://localhost:8000', '');
             }
             return path;
         });
@@ -393,8 +393,8 @@ const handleVariantImageUpload = async (variantIndex: number, file: File) => {
     if (existingGalleryUrls.length > 0) {
         const galleryPaths = existingGalleryUrls.map(url => {
             let path = url;
-            if (url.includes('https://api.initcart.in')) {
-                path = url.replace('https://api.initcart.in', '');
+            if (url.includes('http://localhost:8000')) {
+                path = url.replace('http://localhost:8000', '');
             }
             return path;
         });
@@ -483,8 +483,8 @@ const handleSave = async () => {
             const galleryPaths = existingGalleryUrls.map(url => {
                 // Extract just the path from full URL
                 let path = url;
-                if (url.includes('https://api.initcart.in')) {
-                    path = url.replace('https://api.initcart.in', '');
+                if (url.includes('http://localhost:8000')) {
+                    path = url.replace('http://localhost:8000', '');
                 }
                 return path;
             });

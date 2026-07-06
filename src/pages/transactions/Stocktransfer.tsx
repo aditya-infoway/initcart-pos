@@ -1,8 +1,14 @@
 // src/pages/superadmin/StockTransfer.tsx
 // UPDATED — Order Tracking radio button tab add kiya gaya hai
+// UPDATED (v2) — Branch-wise Status Summary landing page add kiya gaya hai
+//   (Manual Transfer + Order Tracking dono mein). Branch name ke saamne
+//   status columns (Pending / Processing / Sent / Completed / Cancelled / etc.)
+//   dikhte hain — click karne par sirf us branch ki us status ki list khulti hai.
+//   Existing functionality (item select, create transfer, process order, verify)
+//   bilkul waisi hi rakhi gayi hai, koi change nahi kiya gaya.
 // Existing manual transfer functionality preserved
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuthStore } from "../../store/authStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -117,17 +123,19 @@ interface OrderItemDetail {
   global_item_code: string;
   requested_quantity: number;
   approved_quantity: number;
+  sent_quantity: number;
+  remaining_quantity: number;
   is_removed_by_admin: boolean;
   admin_note: string;
   is_transferred: boolean;
   rate: number;
   source_item_id: number;
   source_variant_id: number;
-  purchase_price: number;   // ✅ Purchase Price
-  sales_price: number | null; // ✅ Sales Price
-  mrp: number | null;        // ✅ MRP
-  branch_price: number;      // ✅ Branch Price
-  current_stock: number;     // ✅ Current Stock
+  purchase_price: number;
+  sales_price: number | null;
+  mrp: number | null;
+  branch_price: number;
+  current_stock: number;
 }
 
 interface BranchOrderDetail {
@@ -156,6 +164,31 @@ const ORDER_STATUS_LABEL: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
+// ── New: Branch-wise summary row types ────────────────────────────────────────
+interface ManualBranchSummaryRow {
+  branch_name: string;
+  total: number;
+  pending: number;
+  completed: number;
+  cancelled: number;
+  [key: string]: any;
+}
+interface OrderBranchSummaryRow {
+  branch_name: string;
+  total: number;
+  pending: number;
+  processing?: number; 
+  partially_sent: number;
+  sent: number;
+  cancelled: number;
+  [key: string]: any;
+}
+interface StatusColumnConfig {
+  key: string;
+  label: string;
+  badgeClass: string;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const getMyBranchId = (): number | null => {
   try {
@@ -167,6 +200,130 @@ function flattenItems(items: ItemWithVariants[]) {
   const out: { item: ItemWithVariants; variant: VariantOption }[] = [];
   items.forEach(item => item.variants.forEach(v => out.push({ item, variant: v })));
   return out;
+}
+
+// ✅ NEW: fetch ALL pages of stock-transfers so we can build a branch-wise
+// summary without needing any backend change. Loops until `next` is null.
+async function fetchAllTransferPages(): Promise<TransferListItem[]> {
+  let page = 1;
+  let all: TransferListItem[] = [];
+  try {
+    while (true) {
+      const res = await api.get(`stock-transfers/?page=${page}`);
+      if (!res.data?.success) break;
+      const arr: TransferListItem[] = res.data.results || res.data.data || [];
+      all = all.concat(arr);
+      if (!res.data.next || arr.length === 0) break;
+      page++;
+      if (page > 200) break; // safety cap
+    }
+  } catch {
+    // swallow — caller shows toast
+    throw new Error("Could not load transfers");
+  }
+  return all;
+}
+
+// ✅ NEW: fetch ALL pages of branch orders so we can build a branch-wise
+// summary without needing any backend change.
+async function fetchAllBranchOrders(): Promise<BranchOrderListItem[]> {
+  let page = 1;
+  let all: BranchOrderListItem[] = [];
+  try {
+    while (true) {
+      const res = await api.get(`branch-orders/admin/list/?page=${page}`);
+      if (!res.data?.results?.success) break;
+      const arr: BranchOrderListItem[] = res.data.results.orders || [];
+      all = all.concat(arr);
+      if (!res.data.next || arr.length === 0) break;
+      page++;
+      if (page > 200) break; // safety cap
+    }
+  } catch {
+    throw new Error("Could not load orders");
+  }
+  return all;
+}
+
+// ════════════════════════════════════════════════════════════
+// ✅ NEW: BRANCH-WISE STATUS SUMMARY TABLE (reusable, generic)
+// Shows: Branch Name | Total | <status columns...>
+// Clicking a count opens that branch's filtered list (status = "" for Total/All)
+// ════════════════════════════════════════════════════════════
+function BranchStatusSummaryTable({
+  title, icon, rows, statusColumns, onSelect, loading, totalLabel = "All",
+}: {
+  title: string;
+  icon: React.ReactNode;
+  rows: { branch_name: string; total: number; [key: string]: any }[];
+  statusColumns: StatusColumnConfig[];
+  onSelect: (branch_name: string, status: string) => void;
+  loading: boolean;
+  totalLabel?: string;
+}) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+      <div className="px-5 py-3.5 border-b bg-gray-50 flex items-center gap-2">
+        {icon}
+        <span className="font-semibold text-gray-700">{title}</span>
+        <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded-full">{rows.length}</span>
+      </div>
+
+      {loading ? (
+        <div className="py-12 text-center text-gray-400">
+          <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+          Loading branches...
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="py-16 text-center text-gray-400">
+          <FaWarehouse className="text-4xl text-gray-200 mx-auto mb-2" />
+          No branch data found
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[700px]">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Branch</th>
+                <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">{totalLabel}</th>
+                {statusColumns.map(sc => (
+                  <th key={sc.key} className="px-5 py-3 text-center text-xs font-semibold text-gray-500 border-r border-gray-200 last:border-r-0">
+                    {sc.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, idx) => (
+                <tr key={row.branch_name} className={`border-b hover:bg-indigo-50/30 transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}>
+                  <td className="px-5 py-3 font-semibold text-gray-800 border-r border-gray-200 flex items-center gap-2">
+                    <FaWarehouse className="text-gray-300" size={13} /> {row.branch_name}
+                  </td>
+                  <td className="px-5 py-3 text-center border-r border-gray-200">
+                    <button onClick={() => onSelect(row.branch_name, "")}
+                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors min-w-[40px]">
+                      {row.total}
+                    </button>
+                  </td>
+                  {statusColumns.map(sc => (
+                    <td key={sc.key} className="px-5 py-3 text-center border-r border-gray-200 last:border-r-0">
+                      <button
+                        onClick={() => onSelect(row.branch_name, sc.key)}
+                        disabled={!row[sc.key]}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed min-w-[40px] ${sc.badgeClass}`}
+                      >
+                        {row[sc.key] || 0}
+                      </button>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ════════════════════════════════════════════════════════════
@@ -341,54 +498,63 @@ const SelectItemsModal: React.FC<SelectItemsModalProps> = ({
 };
 
 // ════════════════════════════════════════════════════════════
-// ORDER TRACKING SECTION (new component)
+// ORDER TRACKING SECTION (updated: branch summary landing page added)
 // ════════════════════════════════════════════════════════════
+const ORDER_STATUS_COLUMNS: StatusColumnConfig[] = [
+  { key: "pending", label: "Pending", badgeClass: "bg-amber-100 text-amber-700 hover:bg-amber-200" },
+  // { key: "processing", label: "Processing", badgeClass: "bg-blue-100 text-blue-700 hover:bg-blue-200" },
+  { key: "partially_sent", label: "Partially Sent", badgeClass: "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" },
+  { key: "sent", label: "Sent", badgeClass: "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" },
+  { key: "cancelled", label: "Cancelled", badgeClass: "bg-red-100 text-red-600 hover:bg-red-200" },
+];
+
 function OrderTracking() {
-  const [orders, setOrders] = useState<BranchOrderListItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  // ✅ NEW: all orders (fetched once), branch summary derived from this
+  const [allOrders, setAllOrders] = useState<BranchOrderListItem[]>([]);
+  const [loadingAll, setLoadingAll] = useState(false);
+  // ✅ NEW: "branches" = summary landing page, "list" = filtered order list
+  const [view, setView] = useState<"branches" | "list">("branches");
+  const [branchFilter, setBranchFilter] = useState<{ branch_name: string; status: string } | null>(null);
+  const [listPage, setListPage] = useState(1);
+  const PAGE_SIZE = 15;
+
   const [selectedOrder, setSelectedOrder] = useState<BranchOrderDetail | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("");
-  const [pagination, setPagination] = useState({ count: 0, next: null as string | null, previous: null as string | null, page: 1 });
   const [adjustedItems, setAdjustedItems] = useState<Record<number, { approved_quantity: number; is_removed: boolean; admin_note: string }>>({});
   const [transferDate, setTransferDate] = useState(new Date().toISOString().slice(0, 10));
   const [transferNote, setTransferNote] = useState("");
 
-  useEffect(() => { loadOrders(); }, [statusFilter]);
+  useEffect(() => { loadAllOrders(); }, []);
 
-  async function loadOrders(page = 1) {
-    setLoading(true);
+  async function loadAllOrders() {
+    setLoadingAll(true);
     try {
-      const params = new URLSearchParams({ page: String(page) });
-      if (statusFilter) params.append('status', statusFilter);
-      const res = await api.get(`branch-orders/admin/list/?${params}`);
-      if (res.data.results?.success) {
-        setOrders(res.data.results.orders || []);
-        setPagination({ count: res.data.count || 0, next: res.data.next || null, previous: res.data.previous || null, page });
-      }
+      const data = await fetchAllBranchOrders();
+      setAllOrders(data);
     } catch { toast.error("Could not load orders"); }
-    setLoading(false);
+    setLoadingAll(false);
   }
 
-  async function loadOrderDetail(id: number) {
-    try {
-      const res = await api.get(`branch-orders/${id}/`);
-      if (res.data.success) {
-        const order: BranchOrderDetail = res.data.order;
-        setSelectedOrder(order);
-        const init: typeof adjustedItems = {};
-        order.items.forEach(item => {
-          init[item.id] = {
-            approved_quantity: item.approved_quantity ?? item.requested_quantity,
-            is_removed: item.is_removed_by_admin,
-            admin_note: item.admin_note || "",
-          };
-        });
-        setAdjustedItems(init);
-        setTransferNote(order.note || "");
-      }
-    } catch { toast.error("Could not load order detail"); }
-  }
+async function loadOrderDetail(id: number) {
+  try {
+    const res = await api.get(`branch-orders/${id}/`);
+    if (res.data.success) {
+      const order: BranchOrderDetail = res.data.order;
+      setSelectedOrder(order);
+      const init: typeof adjustedItems = {};
+      order.items.forEach(item => {
+        const remaining = item.remaining_quantity ?? (item.requested_quantity - (item.sent_quantity || 0));
+        init[item.id] = {
+          approved_quantity: remaining,
+          is_removed: item.is_removed_by_admin,
+          admin_note: item.admin_note || "",
+        };
+      });
+      setAdjustedItems(init);
+      setTransferNote(order.note || "");
+    }
+  } catch { toast.error("Could not load order detail"); }
+}
 
   async function processOrder() {
     if (!selectedOrder) return;
@@ -410,7 +576,7 @@ function OrderTracking() {
       if (res.data.success) {
         toast.success(`Order processed! Transfer: ${res.data.linked_transfer}`);
         setSelectedOrder(null);
-        loadOrders();
+        loadAllOrders();
       } else {
         toast.error(res.data.message || "Processing failed");
       }
@@ -424,7 +590,7 @@ function OrderTracking() {
     if (!confirm("Cancel this order?")) return;
     try {
       const res = await api.post(`branch-orders/${id}/cancel/`);
-      if (res.data.success) { toast.success("Order cancelled"); loadOrders(); setSelectedOrder(null); }
+      if (res.data.success) { toast.success("Order cancelled"); loadAllOrders(); setSelectedOrder(null); }
     } catch { toast.error("Could not cancel order"); }
   }
 
@@ -435,17 +601,97 @@ function OrderTracking() {
     }));
   };
 
-  // ── Order List View ──
-  if (!selectedOrder) {
+  // ✅ NEW: branch-wise summary derived from allOrders
+const branchSummary: OrderBranchSummaryRow[] = useMemo(() => {
+  const map = new Map<string, OrderBranchSummaryRow>();
+  allOrders.forEach(o => {
+    if (!map.has(o.branch_name)) {
+      map.set(o.branch_name, {
+        branch_name: o.branch_name,
+        total: 0,
+        pending: 0,
+        // processing: 0, // COMMENT KARO (optional hai, isliye zaroori nahi)
+        partially_sent: 0,
+        sent: 0,
+        cancelled: 0,
+      });
+    }
+    const row = map.get(o.branch_name)!;
+    row.total++;
+    
+    if (o.status === "pending") row.pending++;
+    else if (o.status === "partially_sent") row.partially_sent++;
+    else if (o.status === "sent") row.sent++;
+    else if (o.status === "cancelled") row.cancelled++;
+    // processing ko ignore karo (column nahi hai)
+  });
+  return Array.from(map.values()).sort((a, b) => a.branch_name.localeCompare(b.branch_name));
+}, [allOrders]);
+
+  // ✅ NEW: orders filtered to the selected branch (+ optional status)
+  const filteredOrders = useMemo(() => {
+    if (!branchFilter) return [];
+    return allOrders.filter(o =>
+      o.branch_name === branchFilter.branch_name &&
+      (branchFilter.status === "" || o.status === branchFilter.status)
+    );
+  }, [allOrders, branchFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+  const pagedOrders = filteredOrders.slice((listPage - 1) * PAGE_SIZE, listPage * PAGE_SIZE);
+
+  function openBranchStatus(branch_name: string, status: string) {
+    setBranchFilter({ branch_name, status });
+    setListPage(1);
+    setView("list");
+  }
+
+  // ── ✅ NEW: Branch Summary (landing) View ──
+  if (!selectedOrder && view === "branches") {
     return (
       <div className="space-y-4">
-        <div className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3">
-          <span className="text-sm font-semibold text-gray-600">Filter:</span>
-          {["", "pending", "processing", "partially_sent", "sent", "cancelled"].map(s => (
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <FaWarehouse className="text-indigo-500" />
+            Select a branch &amp; status to view its orders
+          </div>
+          <button onClick={loadAllOrders}
+            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors">
+            ↻ Refresh
+          </button>
+        </div>
+        <BranchStatusSummaryTable
+          title="Branch Orders Summary"
+          icon={<FaClipboardList className="text-indigo-500" />}
+          rows={branchSummary}
+          statusColumns={ORDER_STATUS_COLUMNS}
+          onSelect={openBranchStatus}
+          loading={loadingAll}
+        />
+      </div>
+    );
+  }
+
+  // ── Order List View (now filtered by selected branch) ──
+  if (!selectedOrder && view === "list") {
+    return (
+      <div className="space-y-4">
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3 flex-wrap">
+          <button onClick={() => { setView("branches"); setBranchFilter(null); }}
+            className="flex items-center gap-1.5 text-indigo-600 text-sm font-medium">
+            <FaArrowLeft size={11} /> Back to Branches
+          </button>
+          <span className="text-gray-300">|</span>
+          <span className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+            <FaWarehouse className="text-gray-400" size={12} /> {branchFilter?.branch_name}
+          </span>
+          <span className="text-gray-300">|</span>
+          <span className="text-sm font-semibold text-gray-600">Status:</span>
+          {["", "pending",  "partially_sent", "sent", "cancelled"].map(s => (
             <button key={s}
-              onClick={() => setStatusFilter(s)}
+              onClick={() => { setBranchFilter(f => f ? { ...f, status: s } : f); setListPage(1); }}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
-                ${statusFilter === s ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                ${branchFilter?.status === s ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
             >
               {s === "" ? "All" : ORDER_STATUS_LABEL[s] || s}
             </button>
@@ -456,15 +702,15 @@ function OrderTracking() {
           <div className="px-5 py-3.5 border-b bg-gray-50 flex items-center gap-2">
             <FaClipboardList className="text-indigo-500" />
             <span className="font-semibold text-gray-700">Branch Orders</span>
-            <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded-full">{orders.length}</span>
+            <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded-full">{filteredOrders.length}</span>
           </div>
 
-          {loading ? (
+          {loadingAll ? (
             <div className="py-12 text-center text-gray-400">
               <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
               Loading...
             </div>
-          ) : orders.length === 0 ? (
+          ) : filteredOrders.length === 0 ? (
             <div className="py-16 text-center text-gray-400">
               <FaClipboardList className="text-4xl text-gray-200 mx-auto mb-2" />
               No orders found
@@ -484,7 +730,7 @@ function OrderTracking() {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map((o, idx) => (
+                  {pagedOrders.map((o, idx) => (
                     <tr key={o.id} className={`border-b hover:bg-indigo-50/30 transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}>
                       <td className="px-5 py-3 border-r border-gray-200">
                         <span className="font-bold text-indigo-600">{o.order_id}</span>
@@ -523,14 +769,14 @@ function OrderTracking() {
             </div>
           )}
 
-          {pagination.count > 15 && (
+          {filteredOrders.length > PAGE_SIZE && (
             <div className="px-5 py-4 border-t bg-gray-50 flex items-center justify-between">
-              <p className="text-xs text-gray-500">Total: <b>{pagination.count}</b></p>
+              <p className="text-xs text-gray-500">Total: <b>{filteredOrders.length}</b></p>
               <div className="flex items-center gap-2">
-                <button onClick={() => loadOrders(pagination.page - 1)} disabled={!pagination.previous}
+                <button onClick={() => setListPage(p => Math.max(1, p - 1))} disabled={listPage <= 1}
                   className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">← Prev</button>
-                <span className="text-xs px-2">Page <b>{pagination.page}</b></span>
-                <button onClick={() => loadOrders(pagination.page + 1)} disabled={!pagination.next}
+                <span className="text-xs px-2">Page <b>{listPage}</b> / {totalPages}</span>
+                <button onClick={() => setListPage(p => Math.min(totalPages, p + 1))} disabled={listPage >= totalPages}
                   className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">Next →</button>
               </div>
             </div>
@@ -540,9 +786,9 @@ function OrderTracking() {
     );
   }
 
-  // ── Order Detail / Process View - ALL PRICES ──
-  const canProcess = selectedOrder.status === "pending" || selectedOrder.status === "processing";
-  const activeItems = selectedOrder.items.filter(i => !adjustedItems[i.id]?.is_removed);
+  // ── Order Detail / Process View - ALL PRICES (unchanged) ──
+  const canProcess = ["pending", "processing", "partially_sent"].includes(selectedOrder!.status);
+  const activeItems = selectedOrder!.items.filter(i => !adjustedItems[i.id]?.is_removed);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -556,17 +802,17 @@ function OrderTracking() {
             <FaArrowLeft size={11} /> Back to Orders
           </button>
           <span className="text-gray-300">|</span>
-          <span className="font-bold text-gray-800">{selectedOrder.order_id}</span>
-          <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${ORDER_STATUS_STYLE[selectedOrder.status] || ""}`}>
-            {ORDER_STATUS_LABEL[selectedOrder.status] || selectedOrder.status}
+          <span className="font-bold text-gray-800">{selectedOrder!.order_id}</span>
+          <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${ORDER_STATUS_STYLE[selectedOrder!.status] || ""}`}>
+            {ORDER_STATUS_LABEL[selectedOrder!.status] || selectedOrder!.status}
           </span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: "Branch", value: selectedOrder.branch_name },
-            { label: "Order Date", value: selectedOrder.order_date },
-            { label: "Linked Transfer", value: selectedOrder.linked_transfer_no || "—" },
-            { label: "Note", value: selectedOrder.note || "—" },
+            { label: "Branch", value: selectedOrder!.branch_name },
+            { label: "Order Date", value: selectedOrder!.order_date },
+            { label: "Linked Transfer", value: selectedOrder!.linked_transfer_no || "—" },
+            { label: "Note", value: selectedOrder!.note || "—" },
           ].map(({ label, value }) => (
             <div key={label} className="bg-gray-50 rounded-xl p-3">
               <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</div>
@@ -604,12 +850,12 @@ function OrderTracking() {
           <div className="flex items-center gap-2">
             <FaBox className="text-blue-500 text-sm" />
             <span className="font-semibold text-gray-700">Order Items</span>
-            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{selectedOrder.items.length}</span>
+            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{selectedOrder!.items.length}</span>
           </div>
           {canProcess && (
             <span className="text-xs text-gray-500">
               Active: <b className="text-emerald-600">{activeItems.length}</b> |
-              Removed: <b className="text-red-500">{selectedOrder.items.length - activeItems.length}</b>
+              Removed: <b className="text-red-500">{selectedOrder!.items.length - activeItems.length}</b>
             </span>
           )}
         </div>
@@ -625,6 +871,8 @@ function OrderTracking() {
                 <th className="px-3 py-3 text-center text-xs border-r border-blue-500 min-w-[60px]">HSN</th>
                 <th className="px-3 py-3 text-center text-xs border-r border-blue-500 min-w-[50px]">GST</th>
                 <th className="px-3 py-3 text-center text-xs border-r border-blue-500 min-w-[70px]">Requested</th>
+                <th className="px-3 py-3 text-center text-xs border-r border-blue-500 min-w-[60px]">Sent</th>
+                <th className="px-3 py-3 text-center text-xs border-r border-blue-500 min-w-[70px]">Remaining</th>
                 {/* ✅ ALL PRICES COLUMNS */}
                 {/* <th className="px-3 py-3 text-right text-xs border-r border-blue-500 min-w-[80px]">Purchase ₹</th> */}
                 <th className="px-3 py-3 text-right text-xs border-r border-blue-500 min-w-[80px]">Branch ₹</th>
@@ -645,100 +893,110 @@ function OrderTracking() {
               </tr>
             </thead>
             <tbody>
-              {selectedOrder.items.map((item, idx) => {
-                const adj = adjustedItems[item.id] || { 
-                  approved_quantity: item.approved_quantity ?? item.requested_quantity, 
-                  is_removed: item.is_removed_by_admin, 
-                  admin_note: "" 
-                };
-                const isRemoved = adj.is_removed;
-                const availableStock = item.current_stock || 0;
-                
-                return (
-                  <tr key={item.id} className={`border-b transition-colors
-                    ${isRemoved ? "bg-red-50 opacity-60" :
-                      idx % 2 === 0 ? "bg-white hover:bg-blue-50/20" : "bg-gray-50/40 hover:bg-blue-50/20"}`}>
-                    <td className="px-3 py-3 text-gray-400 text-xs border-r border-gray-200">{idx + 1}</td>
-                    <td className="px-3 py-3 font-semibold text-gray-800 border-r border-gray-200">{item.item_name}</td>
-                    <td className="px-3 py-3 text-center border-r border-gray-200">
-                      <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg">{item.variant_info || "Default"}</span>
-                    </td>
-                    <td className="px-3 py-3 text-center font-mono text-xs text-gray-400 border-r border-gray-200">{item.barcode || "—"}</td>
-                    <td className="px-3 py-3 text-center font-mono text-xs text-gray-500 border-r border-gray-200">{item.hsnCode || "—"}</td>
-                    <td className="px-3 py-3 text-center text-xs border-r border-gray-200">
-                      <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">{item.taxSlab || "0%"}</span>
-                    </td>
-                    <td className="px-3 py-3 text-center font-semibold border-r border-gray-200">
-                      <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs">{item.requested_quantity}</span>
-                    </td>
-                    {/*  ALL PRICES */}
-                    {/* <td className="px-3 py-3 text-right font-mono text-xs text-gray-600 border-r border-gray-200">
-                      ₹{(item.purchase_price || 0).toFixed(2)}
-                    </td> */}
-                    <td className="px-3 py-3 text-right font-mono text-xs font-semibold text-emerald-600 border-r border-gray-200">
-                      ₹{(item.branch_price || 0).toFixed(2)}
-                    </td>
-                    <td className="px-3 py-3 text-right font-mono text-xs text-blue-600 border-r border-gray-200">
-                      ₹{(item.sales_price || 0).toFixed(2)}
-                    </td>
-                    <td className="px-3 py-3 text-right font-mono text-xs text-purple-600 border-r border-gray-200">
-                      ₹{(item.mrp || 0).toFixed(2)}
-                    </td>
-                    {canProcess ? (
-                      <>
-                        <td className="px-3 py-3 text-center border-r border-gray-200">
-                          {!isRemoved ? (
-                            <input type="number" min={0} max={item.requested_quantity}
-                              value={adj.approved_quantity}
-                              onChange={e => updateAdjust(item.id, 'approved_quantity', Math.max(0, Math.min(item.requested_quantity, parseInt(e.target.value) || 0)))}
-                              className="w-20 border-2 border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center font-semibold focus:ring-2 focus:ring-blue-500" />
-                          ) : <span className="text-red-400 text-xs">—</span>}
-                        </td>
-                        <td className="px-3 py-3 text-center border-r border-gray-200">
-                          {!isRemoved ? (
-                            <input type="text" placeholder="Note..."
-                              value={adj.admin_note}
-                              onChange={e => updateAdjust(item.id, 'admin_note', e.target.value)}
-                              className="w-28 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500" />
-                          ) : <span className="text-red-400 text-xs italic">{adj.admin_note || "Removed"}</span>}
-                        </td>
-                        <td className="px-3 py-3 text-center">
-                          {!isRemoved ? (
-                            <button onClick={() => updateAdjust(item.id, 'is_removed', true)}
-                              className="text-red-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-colors" title="Remove item">
-                              <FaTrash size={13} />
-                            </button>
-                          ) : (
-                            <button onClick={() => updateAdjust(item.id, 'is_removed', false)}
-                              className="text-emerald-500 hover:text-emerald-700 text-xs font-semibold bg-emerald-50 px-2 py-1 rounded-lg">
-                              Restore
-                            </button>
-                          )}
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="px-3 py-3 text-center border-r border-gray-200">
-                          {item.is_removed_by_admin ? (
-                            <span className="text-red-500 text-xs font-semibold">Removed</span>
-                          ) : (
-                            <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg text-xs">{item.approved_quantity}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-3 text-center">
-                          {item.is_transferred ? (
-                            <span className="text-xs text-emerald-600 font-semibold">✓ Sent</span>
-                          ) : item.is_removed_by_admin ? (
-                            <span className="text-xs text-red-500 font-semibold">Removed</span>
-                          ) : (
-                            <span className="text-xs text-amber-600 font-semibold">Pending</span>
-                          )}
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                );
-              })}
+{selectedOrder!.items.map((item, idx) => {
+  const remainingQty = item.remaining_quantity ?? (item.requested_quantity - (item.sent_quantity || 0));
+  const adj = adjustedItems[item.id] || {
+    approved_quantity: remainingQty,
+    is_removed: item.is_removed_by_admin,
+    admin_note: "",
+  };
+  const isRemoved = adj.is_removed;
+  const isFullySent = remainingQty <= 0 && !isRemoved;
+
+  return (
+    <tr key={item.id} className={`border-b transition-colors
+      ${isRemoved ? "bg-red-50 opacity-60" :
+        isFullySent ? "bg-emerald-50/60" :
+        idx % 2 === 0 ? "bg-white hover:bg-blue-50/20" : "bg-gray-50/40 hover:bg-blue-50/20"}`}>
+      <td className="px-3 py-3 text-gray-400 text-xs border-r border-gray-200">{idx + 1}</td>
+      <td className="px-3 py-3 font-semibold text-gray-800 border-r border-gray-200">{item.item_name}</td>
+      <td className="px-3 py-3 text-center border-r border-gray-200">
+        <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg">{item.variant_info || "Default"}</span>
+      </td>
+      <td className="px-3 py-3 text-center font-mono text-xs text-gray-400 border-r border-gray-200">{item.barcode || "—"}</td>
+      <td className="px-3 py-3 text-center font-mono text-xs text-gray-500 border-r border-gray-200">{item.hsnCode || "—"}</td>
+      <td className="px-3 py-3 text-center text-xs border-r border-gray-200">
+        <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">{item.taxSlab || "0%"}</span>
+      </td>
+      <td className="px-3 py-3 text-center font-semibold border-r border-gray-200">
+        <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs">{item.requested_quantity}</span>
+      </td>
+      <td className="px-3 py-3 text-center border-r border-gray-200">
+        <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs font-semibold">{item.sent_quantity || 0}</span>
+      </td>
+      <td className="px-3 py-3 text-center border-r border-gray-200">
+        {isFullySent ? (
+          <span className="text-emerald-600 text-xs font-bold">✓ Done</span>
+        ) : (
+          <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-xs font-bold">{remainingQty}</span>
+        )}
+      </td>
+      <td className="px-3 py-3 text-right font-mono text-xs font-semibold text-emerald-600 border-r border-gray-200">
+        ₹{(item.branch_price || 0).toFixed(2)}
+      </td>
+      <td className="px-3 py-3 text-right font-mono text-xs text-blue-600 border-r border-gray-200">
+        ₹{(item.sales_price || 0).toFixed(2)}
+      </td>
+      <td className="px-3 py-3 text-right font-mono text-xs text-purple-600 border-r border-gray-200">
+        ₹{(item.mrp || 0).toFixed(2)}
+      </td>
+      {canProcess ? (
+        <>
+          <td className="px-3 py-3 text-center border-r border-gray-200">
+            {!isRemoved && !isFullySent ? (
+              <input type="number" min={0} max={remainingQty}
+                value={adj.approved_quantity}
+                onChange={e => updateAdjust(item.id, 'approved_quantity', Math.max(0, Math.min(remainingQty, parseInt(e.target.value) || 0)))}
+                className="w-20 border-2 border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center font-semibold focus:ring-2 focus:ring-blue-500" />
+            ) : isFullySent ? (
+              <span className="text-emerald-600 text-xs font-semibold">Fully Sent</span>
+            ) : <span className="text-red-400 text-xs">—</span>}
+          </td>
+          <td className="px-3 py-3 text-center border-r border-gray-200">
+            {!isRemoved && !isFullySent ? (
+              <input type="text" placeholder="Note..."
+                value={adj.admin_note}
+                onChange={e => updateAdjust(item.id, 'admin_note', e.target.value)}
+                className="w-28 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500" />
+            ) : <span className="text-red-400 text-xs italic">{adj.admin_note || (isFullySent ? "" : "Removed")}</span>}
+          </td>
+          <td className="px-3 py-3 text-center">
+            {!isFullySent && (!isRemoved ? (
+              <button onClick={() => updateAdjust(item.id, 'is_removed', true)}
+                className="text-red-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-colors" title="Remove item">
+                <FaTrash size={13} />
+              </button>
+            ) : (
+              <button onClick={() => updateAdjust(item.id, 'is_removed', false)}
+                className="text-emerald-500 hover:text-emerald-700 text-xs font-semibold bg-emerald-50 px-2 py-1 rounded-lg">
+                Restore
+              </button>
+            ))}
+          </td>
+        </>
+      ) : (
+        <>
+          <td className="px-3 py-3 text-center border-r border-gray-200">
+            {item.is_removed_by_admin ? (
+              <span className="text-red-500 text-xs font-semibold">Removed</span>
+            ) : (
+              <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg text-xs">{item.sent_quantity}</span>
+            )}
+          </td>
+          <td className="px-3 py-3 text-center">
+            {item.is_transferred ? (
+              <span className="text-xs text-emerald-600 font-semibold">✓ Sent</span>
+            ) : item.is_removed_by_admin ? (
+              <span className="text-xs text-red-500 font-semibold">Removed</span>
+            ) : (
+              <span className="text-xs text-amber-600 font-semibold">Pending ({remainingQty} left)</span>
+            )}
+          </td>
+        </>
+      )}
+    </tr>
+  );
+})}
             </tbody>
           </table>
         </div>
@@ -746,13 +1004,13 @@ function OrderTracking() {
         {/* Process Buttons */}
         {canProcess && (
           <div className="px-5 py-4 border-t bg-gray-50 flex items-center gap-3 justify-end">
-            <span className="mr-auto text-sm text-gray-500">
-              {activeItems.length} item(s) will be transferred
-              {selectedOrder.items.length - activeItems.length > 0 && (
-                <span className="ml-2 text-red-500">{selectedOrder.items.length - activeItems.length} removed</span>
-              )}
-            </span>
-            <button onClick={() => cancelOrder(selectedOrder.id)}
+<span className="mr-auto text-sm text-gray-500">
+  {Object.entries(adjustedItems).filter(([, a]) => !a.is_removed && a.approved_quantity > 0).length} item(s) will be sent this round
+  {selectedOrder!.items.length - activeItems.length > 0 && (
+    <span className="ml-2 text-red-500">{selectedOrder!.items.length - activeItems.length} removed</span>
+  )}
+</span>
+            <button onClick={() => cancelOrder(selectedOrder!.id)}
               className="px-5 py-2.5 border-2 border-red-200 text-red-500 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors">
               <FaTimes className="inline mr-1.5" size={11} /> Cancel Order
             </button>
@@ -768,8 +1026,14 @@ function OrderTracking() {
   );
 }
 // ════════════════════════════════════════════════════════════
-// MAIN COMPONENT (updated with mode radio buttons)
+// MAIN COMPONENT (updated with mode radio buttons + branch summary landing)
 // ════════════════════════════════════════════════════════════
+const MANUAL_STATUS_COLUMNS: StatusColumnConfig[] = [
+  { key: "pending", label: "Pending", badgeClass: "bg-amber-100 text-amber-700 hover:bg-amber-200" },
+  { key: "completed", label: "Completed", badgeClass: "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" },
+  { key: "cancelled", label: "Cancelled", badgeClass: "bg-red-100 text-red-600 hover:bg-red-200" },
+];
+
 export default function StockTransfer() {
   const { user } = useAuthStore();
   // ── NEW: mode radio ──
@@ -777,7 +1041,6 @@ export default function StockTransfer() {
 
   // ── Existing state (unchanged) ──
   const [tab, setTab] = useState<"list" | "create">("list");
-  const [transfers, setTransfers] = useState<TransferListItem[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [myItems, setMyItems] = useState<ItemWithVariants[]>([]);
   const [loading, setLoading] = useState(false);
@@ -785,12 +1048,25 @@ export default function StockTransfer() {
   const [msg, setMsg] = useState<{ text: string; type: MsgType } | null>(null);
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const [destBranchDetails, setDestBranchDetails] = useState<BranchOption | null>(null);
-  const [pagination, setPagination] = useState({ count: 0, next: null as string | null, previous: null as string | null, page: 1 });
   const [form, setForm] = useState<TransferForm>({
     to_branch_id: "", transfer_date: new Date().toISOString().slice(0, 10), note: "", items: [],
   });
 
-  useEffect(() => { if (mode === "manual") loadAll(); }, [mode]);
+  // ✅ NEW: manual-mode branch summary state (replaces flat paginated `transfers` list)
+  const [manualView, setManualView] = useState<"branches" | "list">("branches");
+  const [manualAllTransfers, setManualAllTransfers] = useState<TransferListItem[]>([]);
+  const [manualLoadingAll, setManualLoadingAll] = useState(false);
+  const [manualBranchFilter, setManualBranchFilter] = useState<{ branch_name: string; status: string } | null>(null);
+  const [manualListPage, setManualListPage] = useState(1);
+  const MANUAL_PAGE_SIZE = 15;
+
+  useEffect(() => {
+    if (mode === "manual") {
+      loadAll();
+      setManualView("branches");
+      setManualBranchFilter(null);
+    }
+  }, [mode]);
 
   useEffect(() => {
     if (form.to_branch_id) {
@@ -802,18 +1078,18 @@ export default function StockTransfer() {
 
   async function loadAll() {
     setLoading(true);
-    await Promise.all([loadTransfers(), loadBranches(), loadMyItems()]);
+    await Promise.all([loadAllManualTransfers(), loadBranches(), loadMyItems()]);
     setLoading(false);
   }
 
-  async function loadTransfers(page = 1) {
+  // ✅ NEW: fetch ALL transfer pages once, used for branch-wise summary + filtered list
+  async function loadAllManualTransfers() {
+    setManualLoadingAll(true);
     try {
-      const res = await api.get(`stock-transfers/?page=${page}`);
-      if (res.data.success) {
-        setTransfers(res.data.results || []);
-        setPagination({ count: res.data.count || 0, next: res.data.next || null, previous: res.data.previous || null, page });
-      }
+      const data = await fetchAllTransferPages();
+      setManualAllTransfers(data);
     } catch { showMsg("Error loading transfers", "error"); }
+    setManualLoadingAll(false);
   }
 
   async function loadBranches() {
@@ -838,6 +1114,38 @@ export default function StockTransfer() {
 
   const selectedVariantIds = new Set(form.items.map(i => i.from_variant_id));
   const destBranchName = branches.find(b => String(b.id) === form.to_branch_id)?.branch_name || "";
+
+  // ✅ NEW: branch-wise summary derived from manualAllTransfers
+  const manualBranchSummary: ManualBranchSummaryRow[] = useMemo(() => {
+    const map = new Map<string, ManualBranchSummaryRow>();
+    manualAllTransfers.forEach(t => {
+      if (!map.has(t.to_branch_name)) {
+        map.set(t.to_branch_name, { branch_name: t.to_branch_name, total: 0, pending: 0, completed: 0, cancelled: 0 });
+      }
+      const row = map.get(t.to_branch_name)!;
+      row.total++;
+      if (t.status in row) row[t.status] += 1;
+    });
+    return Array.from(map.values()).sort((a, b) => a.branch_name.localeCompare(b.branch_name));
+  }, [manualAllTransfers]);
+
+  // ✅ NEW: transfers filtered to the selected branch (+ optional status)
+  const manualFilteredTransfers = useMemo(() => {
+    if (!manualBranchFilter) return [];
+    return manualAllTransfers.filter(t =>
+      t.to_branch_name === manualBranchFilter.branch_name &&
+      (manualBranchFilter.status === "" || t.status === manualBranchFilter.status)
+    );
+  }, [manualAllTransfers, manualBranchFilter]);
+
+  const manualTotalPages = Math.max(1, Math.ceil(manualFilteredTransfers.length / MANUAL_PAGE_SIZE));
+  const manualPagedTransfers = manualFilteredTransfers.slice((manualListPage - 1) * MANUAL_PAGE_SIZE, manualListPage * MANUAL_PAGE_SIZE);
+
+  function openManualBranchStatus(branch_name: string, status: string) {
+    setManualBranchFilter({ branch_name, status });
+    setManualListPage(1);
+    setManualView("list");
+  }
 
   function handleConfirm(rows: { item: ItemWithVariants; variant: VariantOption; quantity: number }[]) {
     const newItems: FormItem[] = rows.map(({ item, variant, quantity }) => ({
@@ -892,7 +1200,7 @@ export default function StockTransfer() {
           rate: parseFloat(r.rate || "0"),
         })),
       });
-      if (res.data.success) { showMsg("Transfer created!", "success"); setTab("list"); resetForm(); loadTransfers(); }
+      if (res.data.success) { showMsg("Transfer created!", "success"); setTab("list"); resetForm(); loadAllManualTransfers(); }
       else showMsg(res.data.message || "Error", "error");
     } catch (e: any) {
       showMsg(e.response?.data?.message || "Error creating transfer", "error");
@@ -904,7 +1212,7 @@ export default function StockTransfer() {
     if (!confirm("Complete transfer?")) return;
     try {
       const res = await api.post(`stock-transfers/${id}/complete/`);
-      if (res.data.success) { showMsg(res.data.message, "success"); loadTransfers(); if (detail?.id === id) setDetail(null); }
+      if (res.data.success) { showMsg(res.data.message, "success"); loadAllManualTransfers(); if (detail?.id === id) setDetail(null); }
     } catch (e: any) { showMsg(e.response?.data?.message || "Error", "error"); }
   }
 
@@ -912,7 +1220,7 @@ export default function StockTransfer() {
     if (!confirm("Cancel this transfer?")) return;
     try {
       const res = await api.post(`stock-transfers/${id}/cancel/`);
-      if (res.data.success) { showMsg("Transfer cancelled."); loadTransfers(); setDetail(null); }
+      if (res.data.success) { showMsg("Transfer cancelled."); loadAllManualTransfers(); setDetail(null); }
     } catch { showMsg("Error cancelling", "error"); }
   }
 
@@ -996,74 +1304,122 @@ export default function StockTransfer() {
         {/* ── MANUAL MODE ── */}
         {mode === "manual" && (
           <>
-            {/* LIST VIEW */}
-            {tab === "list" && !detail && (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="px-5 py-4 border-b bg-gray-50 flex items-center gap-2">
-                  <FaShippingFast className="text-blue-600" />
-                  <span className="font-semibold text-gray-700">All Transfers</span>
-                  <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{transfers.length}</span>
+            {/* ✅ NEW: BRANCH SUMMARY (landing) VIEW */}
+            {tab === "list" && !detail && manualView === "branches" && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <FaWarehouse className="text-blue-500" />
+                    Select a branch &amp; status to view its transfers
+                  </div>
+                  <button onClick={loadAllManualTransfers}
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
+                    ↻ Refresh
+                  </button>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[700px] border-collapse">
-                    <thead>
-                      <tr className="bg-gray-50/80 border-b border-gray-200">
-                        <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Transfer No</th>
-                        <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">To Branch</th>
-                        <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Date</th>
-                        <th className="px-5 py-3.5 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Items</th>
-                        <th className="px-5 py-3.5 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Status</th>
-                        <th className="px-5 py-3.5 text-center text-xs font-semibold text-gray-500">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {loading ? (
-                        <tr><td colSpan={6} className="py-12 text-center text-gray-400">
-                          <div className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                        </td></tr>
-                      ) : transfers.length === 0 ? (
-                        <tr><td colSpan={6} className="py-16 text-center">
-                          <FaExchangeAlt className="text-4xl text-gray-200 mx-auto mb-3" />
-                          <div className="text-gray-400">No transfers yet</div>
-                        </td></tr>
-                      ) : transfers.map((t, idx) => (
-                        <tr key={t.id} className={`border-b border-gray-200 hover:bg-blue-50/30 transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/30"}`}>
-                          <td className="px-5 py-3.5 border-r border-gray-200"><span className="font-bold text-blue-600">{t.transfer_no}</span></td>
-                          <td className="px-5 py-3.5 border-r border-gray-200">{t.to_branch_name}</td>
-                          <td className="px-5 py-3.5 text-gray-500 text-xs border-r border-gray-200">{t.transfer_date}</td>
-                          <td className="px-5 py-3.5 text-center border-r border-gray-200">
-                            <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs font-semibold">{t.item_count}</span>
-                          </td>
-                          <td className="px-5 py-3.5 text-center border-r border-gray-200"><StatusBadge status={t.status} /></td>
-                          <td className="px-5 py-3.5 text-center">
-                            <div className="flex items-center justify-center gap-3">
-                              <button onClick={() => loadDetail(t.id)} className="text-blue-500 hover:text-blue-700"><FaEye size={18} /></button>
-                              {t.status === "pending" && (
-                                <>
-                                  <button onClick={() => completeTransfer(t.id)} className="text-emerald-600 hover:text-emerald-800"><FaCheckCircle size={18} /></button>
-                                  <button onClick={() => cancelTransfer(t.id)} className="text-red-400 hover:text-red-600"><FaRegCircleXmark size={18} /></button>
-                                </>
-                              )}
-                            </div>
-                          </td>
+                <BranchStatusSummaryTable
+                  title="Branch Transfers Summary"
+                  icon={<FaShippingFast className="text-blue-600" />}
+                  rows={manualBranchSummary}
+                  statusColumns={MANUAL_STATUS_COLUMNS}
+                  onSelect={openManualBranchStatus}
+                  loading={manualLoadingAll}
+                />
+              </div>
+            )}
+
+            {/* LIST VIEW — filtered by selected branch */}
+            {tab === "list" && !detail && manualView === "list" && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3 flex-wrap">
+                  <button onClick={() => { setManualView("branches"); setManualBranchFilter(null); }}
+                    className="flex items-center gap-1.5 text-blue-600 text-sm font-medium">
+                    <FaArrowLeft size={11} /> Back to Branches
+                  </button>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                    <FaWarehouse className="text-gray-400" size={12} /> {manualBranchFilter?.branch_name}
+                  </span>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-sm font-semibold text-gray-600">Status:</span>
+                  {["", "pending", "completed", "cancelled"].map(s => (
+                    <button key={s}
+                      onClick={() => { setManualBranchFilter(f => f ? { ...f, status: s } : f); setManualListPage(1); }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
+                        ${manualBranchFilter?.status === s ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                    >
+                      {s === "" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="px-5 py-4 border-b bg-gray-50 flex items-center gap-2">
+                    <FaShippingFast className="text-blue-600" />
+                    <span className="font-semibold text-gray-700">Transfers</span>
+                    <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{manualFilteredTransfers.length}</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[700px] border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50/80 border-b border-gray-200">
+                          <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Transfer No</th>
+                          <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">To Branch</th>
+                          <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 border-r border-gray-200">Date</th>
+                          <th className="px-5 py-3.5 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Items</th>
+                          <th className="px-5 py-3.5 text-center text-xs font-semibold text-gray-500 border-r border-gray-200">Status</th>
+                          <th className="px-5 py-3.5 text-center text-xs font-semibold text-gray-500">Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {pagination.count > 15 && (
-                    <div className="px-5 py-4 border-t bg-gray-50 flex items-center justify-between">
-                      <p className="text-xs text-gray-500">
-                        Showing <b>{Math.min((pagination.page - 1) * 15 + 1, pagination.count)}</b>–<b>{Math.min(pagination.page * 15, pagination.count)}</b> of <b>{pagination.count}</b>
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => loadTransfers(pagination.page - 1)} disabled={!pagination.previous}
-                          className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">← Prev</button>
-                        <span className="text-xs bg-white border border-gray-200 px-3 py-1.5 rounded-lg">Page <b>{pagination.page}</b></span>
-                        <button onClick={() => loadTransfers(pagination.page + 1)} disabled={!pagination.next}
-                          className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">Next →</button>
+                      </thead>
+                      <tbody>
+                        {manualLoadingAll ? (
+                          <tr><td colSpan={6} className="py-12 text-center text-gray-400">
+                            <div className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                          </td></tr>
+                        ) : manualPagedTransfers.length === 0 ? (
+                          <tr><td colSpan={6} className="py-16 text-center">
+                            <FaExchangeAlt className="text-4xl text-gray-200 mx-auto mb-3" />
+                            <div className="text-gray-400">No transfers found</div>
+                          </td></tr>
+                        ) : manualPagedTransfers.map((t, idx) => (
+                          <tr key={t.id} className={`border-b border-gray-200 hover:bg-blue-50/30 transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/30"}`}>
+                            <td className="px-5 py-3.5 border-r border-gray-200"><span className="font-bold text-blue-600">{t.transfer_no}</span></td>
+                            <td className="px-5 py-3.5 border-r border-gray-200">{t.to_branch_name}</td>
+                            <td className="px-5 py-3.5 text-gray-500 text-xs border-r border-gray-200">{t.transfer_date}</td>
+                            <td className="px-5 py-3.5 text-center border-r border-gray-200">
+                              <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-lg text-xs font-semibold">{t.item_count}</span>
+                            </td>
+                            <td className="px-5 py-3.5 text-center border-r border-gray-200"><StatusBadge status={t.status} /></td>
+                            <td className="px-5 py-3.5 text-center">
+                              <div className="flex items-center justify-center gap-3">
+                                <button onClick={() => loadDetail(t.id)} className="text-blue-500 hover:text-blue-700"><FaEye size={18} /></button>
+                                {t.status === "pending" && (
+                                  <>
+                                    <button onClick={() => completeTransfer(t.id)} className="text-emerald-600 hover:text-emerald-800"><FaCheckCircle size={18} /></button>
+                                    <button onClick={() => cancelTransfer(t.id)} className="text-red-400 hover:text-red-600"><FaRegCircleXmark size={18} /></button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {manualFilteredTransfers.length > MANUAL_PAGE_SIZE && (
+                      <div className="px-5 py-4 border-t bg-gray-50 flex items-center justify-between">
+                        <p className="text-xs text-gray-500">
+                          Showing <b>{Math.min((manualListPage - 1) * MANUAL_PAGE_SIZE + 1, manualFilteredTransfers.length)}</b>–<b>{Math.min(manualListPage * MANUAL_PAGE_SIZE, manualFilteredTransfers.length)}</b> of <b>{manualFilteredTransfers.length}</b>
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setManualListPage(p => Math.max(1, p - 1))} disabled={manualListPage <= 1}
+                            className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">← Prev</button>
+                          <span className="text-xs bg-white border border-gray-200 px-3 py-1.5 rounded-lg">Page <b>{manualListPage}</b> / {manualTotalPages}</span>
+                          <button onClick={() => setManualListPage(p => Math.min(manualTotalPages, p + 1))} disabled={manualListPage >= manualTotalPages}
+                            className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">Next →</button>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             )}
