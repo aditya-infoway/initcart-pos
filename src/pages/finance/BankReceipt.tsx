@@ -3,7 +3,7 @@ import { Formik, Form, useField } from "formik";
 import * as Yup from "yup";
 import api from "../../api/api";
 import { toast } from "react-toastify";
-import { FaSearch, FaTimes, FaFileExcel} from "react-icons/fa";
+import { FaSearch, FaTimes, FaFileExcel } from "react-icons/fa";
 import * as XLSX from "xlsx";
 
 /* ---------------- VALIDATION ---------------- */
@@ -43,7 +43,11 @@ const validationSchema = Yup.object({
   bankAccount: Yup.number().required("Bank Account is required"),
   voucherNo: Yup.string().required("Voucher No is required"),
   date: Yup.string().required("Date is required"),
-  opAccount: Yup.number().required("Party is required"),
+  opAccount: Yup.number().nullable().when("receiptType", {
+    is: (val: string) => val !== "stockTransfer" && val !== "stockReturn",
+    then: (schema) => schema.required("Party is required"),
+    otherwise: (schema) => schema.nullable(),
+  }),
   amount: Yup.number()
     .required("Amount is required")
     .positive("Amount must be positive"),
@@ -61,6 +65,23 @@ const validationSchema = Yup.object({
     otherwise: (schema) => schema.notRequired(),
   }),
 });
+
+/* ---------------- ROLE HELPER ---------------- */
+const getUserRole = (): string | null => {
+  try {
+    const userStr = sessionStorage.getItem("user");
+    if (!userStr) return null;
+    const user = JSON.parse(userStr);
+    return user.role || null;
+  } catch {
+    return null;
+  }
+};
+
+const isBranchUser = (): boolean => {
+  const role = getUserRole();
+  return !!role && role !== "superadmin";
+};
 
 /* ---------------- INPUT COMPONENTS ---------------- */
 const Input = ({ label, ...props }: any) => {
@@ -89,7 +110,6 @@ const PartySelect = ({ name, disabled = false }: { name: string; disabled?: bool
     const fetchAccounts = async () => {
       try {
         const res = await api.get("account/");
-        // ✅ Check if response is array
         if (Array.isArray(res.data)) {
           setAccounts(res.data);
         } else if (res.data && Array.isArray(res.data.results)) {
@@ -186,7 +206,175 @@ const AccountSelect = ({ label, name }: { label: string; name: string }) => {
   );
 };
 
-// Bill Search Modal Component
+// StockTransferDropdown - right side, small height, shows 5 bills
+const StockTransferDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
+  const [bills, setBills] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string>("");
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    const loadBills = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get(`stock-transfer-credit-bills/`);
+        setBills(res.data.bills || []);
+      } catch (err) {
+        console.error("Failed to load stock transfer bills:", err);
+        toast.error("Failed to load stock transfer bills");
+        setBills([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadBills();
+  }, [refreshKey]);
+
+  const selectedBill = bills.find((b) => String(b.id) === selectedId);
+
+  return (
+    <div className="relative">
+      <label className="block text-sm font-medium mb-1">Select Stock Transfer Bill</label>
+      <div
+        className="w-full p-2 border rounded bg-white cursor-pointer flex justify-between items-center"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span className={selectedBill ? "text-gray-900" : "text-gray-500"}>
+          {selectedBill
+            ? `${selectedBill.transfer_no} — ${selectedBill.linked_account_name || " No account linked"} — ₹${Number(selectedBill.pending_amount).toFixed(2)}`
+            : loading ? "Loading..." : bills.length === 0 ? "No pending bills" : "-- Select Transfer --"}
+        </span>
+        <span className="text-gray-400">▼</span>
+      </div>
+
+      {isOpen && !loading && bills.length > 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 overflow-hidden" style={{ maxHeight: '200px' }}>
+          <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
+            {bills.map((bill) => (
+              <div
+                key={bill.id}
+                className={`p-2 border-b last:border-b-0 text-sm ${
+                  bill.linked_account_id ? "hover:bg-blue-50 cursor-pointer" : "opacity-60 cursor-not-allowed bg-gray-50"
+                }`}
+                onClick={() => {
+                  if (!bill.linked_account_id) {
+                    toast.error(`${bill.to_branch_name} ka Sundry account link nahi hai. Branch Master mein pehle link karo.`);
+                    return;
+                  }
+                  setSelectedId(String(bill.id));
+                  onSelectBill(bill);
+                  setIsOpen(false);
+                }}
+              >
+                <div className="flex justify-between">
+                  <span className="font-medium">{bill.transfer_no}</span>
+                  <span className={bill.linked_account_id ? "text-gray-600" : "text-red-500 font-medium"}>
+                    {bill.linked_account_name || " No account linked"}
+                  </span>
+                </div>
+                <div className="text-xs text-orange-600">
+                  Pending: ₹{Number(bill.pending_amount).toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isOpen && !loading && bills.length === 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 p-4 text-center text-gray-500 text-sm">
+          No pending stock transfer bills
+        </div>
+      )}
+    </div>
+  );
+};
+
+// StockReturnDropdown
+const StockReturnDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
+  const [bills, setBills] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string>("");
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    const loadBills = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get(`stock-return-credit-bills/`);
+        setBills(res.data.bills || []);
+      } catch (err) {
+        console.error("Failed to load stock return bills:", err);
+        toast.error("Failed to load stock return bills");
+        setBills([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadBills();
+  }, [refreshKey]);
+
+  const selectedBill = bills.find((b) => String(b.id) === selectedId);
+
+  return (
+    <div className="relative">
+      <label className="block text-sm font-medium mb-1">Select Stock Return Bill</label>
+      <div
+        className="w-full p-2 border rounded bg-white cursor-pointer flex justify-between items-center"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span className={selectedBill ? "text-gray-900" : "text-gray-500"}>
+          {selectedBill
+            ? `${selectedBill.return_no} — ${selectedBill.linked_account_name || "⚠ No account linked"} — ₹${Number(selectedBill.pending_amount).toFixed(2)}`
+            : loading ? "Loading..." : bills.length === 0 ? "No pending returns" : "-- Select Return --"}
+        </span>
+        <span className="text-gray-400">▼</span>
+      </div>
+
+      {isOpen && !loading && bills.length > 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 overflow-hidden" style={{ maxHeight: '200px' }}>
+          <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
+            {bills.map((bill) => (
+              <div
+                key={bill.id}
+                className={`p-2 border-b last:border-b-0 text-sm ${
+                  bill.linked_account_id ? "hover:bg-blue-50 cursor-pointer" : "opacity-60 cursor-not-allowed bg-gray-50"
+                }`}
+                onClick={() => {
+                  if (!bill.linked_account_id) {
+                    toast.error("Aapki branch ka Sundry Creditor(Main) account nahi bana hai. Pehle account banao.");
+                    return;
+                  }
+                  setSelectedId(String(bill.id));
+                  onSelectBill(bill);
+                  setIsOpen(false);
+                }}
+              >
+                <div className="flex justify-between">
+                  <span className="font-medium">{bill.return_no}</span>
+                  <span className={bill.linked_account_id ? "text-gray-600" : "text-red-500 font-medium"}>
+                    {bill.linked_account_name || "⚠ No account linked"}
+                  </span>
+                </div>
+                <div className="text-xs text-orange-600">
+                  Pending: ₹{Number(bill.pending_amount).toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isOpen && !loading && bills.length === 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 p-4 text-center text-gray-500 text-sm">
+          No pending stock return bills
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Bill Search Modal Component (Sales Entry / Purchase Return only)
 const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [bills, setBills] = useState<any[]>([]);
@@ -201,9 +389,14 @@ const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
   const loadBills = async (search: string) => {
     setLoading(true);
     try {
-      const url = billType === 'salesEntry'
-        ? `sales-credit-bills/?query=${search}`
-        : `purchase-return-credit-bills/?query=${search}`;
+      let url = "";
+      if (billType === "salesEntry") {
+        url = `sales-credit-bills/?query=${search}`;
+      } else if (billType === "purchaseReturn") {
+        url = `purchase-return-credit-bills/?query=${search}`;
+      } else {
+        url = `stock-transfer-credit-bills/?query=${search}`;
+      }
       const res = await api.get(url);
       setBills(res.data.bills || []);
     } catch (err) {
@@ -222,20 +415,26 @@ const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
 
   if (!isOpen) return null;
 
+  const isStockTransfer = billType === "stockTransfer";
+
+  const titleText = isStockTransfer
+    ? "Search Stock Transfer Bills"
+    : billType === "salesEntry"
+    ? "Search Sales Entry Credit Bills"
+    : "Search Purchase Return Credit Bills";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-2xl shadow-lg w-full max-w-4xl max-h-[85vh] overflow-hidden">
         <div className="flex justify-between items-center px-4 py-3 border-b bg-blue-600 text-white">
-          <h3 className="text-base font-semibold">
-            Search {billType === 'salesEntry' ? 'Sales Entry Credit' : 'Purchase Return Credit'} Bills
-          </h3>
+          <h3 className="text-base font-semibold">{titleText}</h3>
           <button onClick={onClose} className="text-white hover:text-gray-200 text-xl">✕</button>
         </div>
         <div className="p-4">
           <div className="relative">
             <input
               type="text"
-              placeholder="Search by Bill No or Party Name..."
+              placeholder={isStockTransfer ? "Search by Transfer No or Branch..." : "Search by Bill No or Party Name..."}
               value={searchTerm}
               onChange={handleSearch}
               className="w-full p-2 pl-8 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -250,15 +449,15 @@ const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
               </div>
             ) : bills.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
-                <p>No credit bills found</p>
+                <p>No {isStockTransfer ? "pending stock transfer" : "credit"} bills found</p>
                 {searchTerm && <p className="text-xs mt-1">Try a different search term</p>}
               </div>
             ) : (
               <table className="w-full text-sm">
                 <thead className="bg-gray-100 sticky top-0">
                   <tr>
-                    <th className="p-2 text-left">Bill No</th>
-                    <th className="p-2 text-left">Party</th>
+                    <th className="p-2 text-left">{isStockTransfer ? "Transfer No" : "Bill No"}</th>
+                    <th className="p-2 text-left">{isStockTransfer ? "To Branch" : "Party"}</th>
                     <th className="p-2 text-left">Date</th>
                     <th className="p-2 text-right">Total Amount</th>
                     <th className="p-2 text-right">Paid Amount</th>
@@ -269,8 +468,8 @@ const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
                 <tbody>
                   {bills.map((bill) => (
                     <tr key={bill.id} className="border-b hover:bg-gray-50 cursor-pointer">
-                      <td className="p-2 font-medium text-blue-600">{bill.billNo}</td>
-                      <td className="p-2">{bill.partyName__account_name}</td>
+                      <td className="p-2 font-medium text-blue-600">{isStockTransfer ? bill.transfer_no : bill.billNo}</td>
+                      <td className="p-2">{isStockTransfer ? bill.to_branch_name : bill.partyName__account_name}</td>
                       <td className="p-2">{bill.date}</td>
                       <td className="p-2 text-right">₹{Number(bill.grand_total).toFixed(2)}</td>
                       <td className="p-2 text-right text-green-600">₹{Number(bill.paid_amount || 0).toFixed(2)}</td>
@@ -305,25 +504,31 @@ const BankReceipt: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showBillModal, setShowBillModal] = useState(false);
   const [billType, setBillType] = useState<string>('');
-  
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [isBranch, setIsBranch] = useState(false);
+
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("");
-  
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-  // ✅ Add Export to Excel function
+  useEffect(() => {
+    setIsSuperAdmin(getUserRole() === "superadmin");
+    setIsBranch(isBranchUser());
+  }, []);
+
+  // Add Export to Excel function
   const exportToExcel = () => {
     if (filteredRows.length === 0) {
       toast.warning("No data to export");
       return;
     }
 
-    // Prepare data for export
     const exportData: any[] = filteredRows.map((row, index) => ({
       "SR No": index + 1,
       "Date": row.date || "-",
@@ -338,7 +543,6 @@ const BankReceipt: React.FC = () => {
       "Clear Date": row.cheque_clear_date || "-",
     }));
 
-    // Add grand total row
     const grandTotal = filteredRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
     exportData.push({
       "SR No": "",
@@ -354,36 +558,20 @@ const BankReceipt: React.FC = () => {
       "Clear Date": "",
     });
 
-    // Create worksheet
     const ws = XLSX.utils.json_to_sheet(exportData);
-    
-    // Set column widths
     ws["!cols"] = [
-      { wch: 6 },   // SR No
-      { wch: 12 },  // Date
-      { wch: 8 },   // Type
-      { wch: 15 },  // Voucher No
-      { wch: 25 },  // Bank Account
-      { wch: 25 },  // Party Name
-      { wch: 15 },  // Amount
-      { wch: 10 },  // Mode
-      { wch: 15 },  // Cheque No
-      { wch: 12 },  // Cheque Date
-      { wch: 12 },  // Clear Date
+      { wch: 6 }, { wch: 12 }, { wch: 8 }, { wch: 15 }, { wch: 25 },
+      { wch: 25 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 12 },
     ];
 
-    // Create workbook and download
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Bank Receipt Register");
-    
-    // Generate filename with current date
     const fileName = `Bank_Receipt_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, fileName);
-    
+
     toast.success(`Exported ${filteredRows.length} records successfully`);
   };
 
-  // Fetch receipts with pagination
   const fetchReceipts = async (page = 1) => {
     setLoading(true);
     try {
@@ -420,38 +608,30 @@ const BankReceipt: React.FC = () => {
     }
   };
 
-  // Fetch when page or pageSize changes
   useEffect(() => {
     fetchReceipts(currentPage);
   }, [currentPage, pageSize]);
 
-  // Filtered rows based on search and type filter
   const filteredRows = rows.filter(row => {
-    // Filter by search term
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      const matchesSearch = 
+      const matchesSearch =
         (row.voucher_no?.toLowerCase().includes(term)) ||
         (row.bank_account_name?.toLowerCase().includes(term)) ||
         (row.party_name?.toLowerCase().includes(term)) ||
         (row.mode?.toLowerCase().includes(term));
       if (!matchesSearch) return false;
     }
-    
-    // Filter by type
     if (filterType && row.type !== filterType) return false;
-    
     return true;
   });
 
-  // Update total items and pages when filter changes
   useEffect(() => {
     setTotalItems(filteredRows.length);
     setTotalPages(Math.ceil(filteredRows.length / pageSize));
     setCurrentPage(1);
   }, [filteredRows.length, pageSize]);
 
-  // Get current page items
   const getCurrentPageItems = () => {
     const start = (currentPage - 1) * pageSize;
     const end = start + pageSize;
@@ -460,13 +640,11 @@ const BankReceipt: React.FC = () => {
 
   const currentItems = getCurrentPageItems();
 
-  // Clear filters
   const clearFilters = () => {
     setSearchTerm("");
     setFilterType("");
   };
 
-  // Pagination handlers
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) {
       setCurrentPage(page);
@@ -481,7 +659,6 @@ const BankReceipt: React.FC = () => {
 
   const handleBankReceiptSubmit = async (values: any, { resetForm, setSubmitting }: any) => {
     try {
-      // For Sales Entry Credit Bill
       if (values.selectedBill && values.receiptType === 'salesEntry') {
         const salesPayload = {
           sales_bill_id: values.selectedBill.id,
@@ -493,7 +670,6 @@ const BankReceipt: React.FC = () => {
           cheque_date: values.mode === "CHEQUE" ? values.chequeDate : null,
           cheque_clear_date: values.mode === "CHEQUE" ? values.chequeClearDate : null,
         };
-
         const res = await api.post("/receive-sales-credit-bill-bank/", salesPayload);
         toast.success(res.data.message || "Sales credit bill payment received successfully");
         resetForm();
@@ -502,7 +678,6 @@ const BankReceipt: React.FC = () => {
         return;
       }
 
-      // For Purchase Return Credit Bill
       if (values.selectedBill && values.receiptType === 'purchaseReturn') {
         const purchaseReturnPayload = {
           purchase_return_bill_id: values.selectedBill.id,
@@ -514,9 +689,48 @@ const BankReceipt: React.FC = () => {
           cheque_date: values.mode === "CHEQUE" ? values.chequeDate : null,
           cheque_clear_date: values.mode === "CHEQUE" ? values.chequeClearDate : null,
         };
-
         const res = await api.post("/receive-purchase-return-credit-bill-bank/", purchaseReturnPayload);
         toast.success(res.data.message || "Purchase return credit bill payment received successfully");
+        resetForm();
+        setOpen(false);
+        fetchReceipts(currentPage);
+        return;
+      }
+
+      // For Stock Transfer bill — party auto-selected on backend (to_branch)
+      if (values.selectedBill && values.receiptType === 'stockTransfer') {
+        const stockTransferPayload = {
+          stock_transfer_bill_id: values.selectedBill.id,
+          bank_account: values.bankAccount,
+          amount: values.amount,
+          date: values.date,
+          mode: values.mode,
+          cheque_no: values.mode === "CHEQUE" ? values.chequeNo : null,
+          cheque_date: values.mode === "CHEQUE" ? values.chequeDate : null,
+          cheque_clear_date: values.mode === "CHEQUE" ? values.chequeClearDate : null,
+        };
+        const res = await api.post("/receive-stock-transfer-bill-bank/", stockTransferPayload);
+        toast.success(res.data.message || "Stock transfer payment received successfully");
+        resetForm();
+        setOpen(false);
+        fetchReceipts(currentPage);
+        return;
+      }
+
+      // For Stock Return bill — party auto-selected on backend (own Sundry Creditor(Main))
+      if (values.selectedBill && values.receiptType === 'stockReturn') {
+        const stockReturnPayload = {
+          stock_return_bill_id: values.selectedBill.id,
+          bank_account: values.bankAccount,
+          amount: values.amount,
+          date: values.date,
+          mode: values.mode,
+          cheque_no: values.mode === "CHEQUE" ? values.chequeNo : null,
+          cheque_date: values.mode === "CHEQUE" ? values.chequeDate : null,
+          cheque_clear_date: values.mode === "CHEQUE" ? values.chequeClearDate : null,
+        };
+        const res = await api.post("/receive-stock-return-bill-bank/", stockReturnPayload);
+        toast.success(res.data.message || "Stock return payment received successfully");
         resetForm();
         setOpen(false);
         fetchReceipts(currentPage);
@@ -575,7 +789,6 @@ const BankReceipt: React.FC = () => {
     setOpen(true);
   };
 
-  // Loading State
   if (loading && rows.length === 0) {
     return (
       <div className="p-6 bg-gray-50 min-h-screen flex justify-center items-center">
@@ -586,11 +799,9 @@ const BankReceipt: React.FC = () => {
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-      {/* ✅ Header with Export Button */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">Bank Receipt Register</h1>
         <div className="flex gap-2">
-          {/* ✅ Export Excel Button */}
           <button
             onClick={exportToExcel}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition"
@@ -598,7 +809,7 @@ const BankReceipt: React.FC = () => {
             <FaFileExcel size={16} />
             Export Excel
           </button>
-          
+
           <button
             onClick={handleOpenModal}
             className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
@@ -608,7 +819,6 @@ const BankReceipt: React.FC = () => {
         </div>
       </div>
 
-      {/* Search and Filter Bar */}
       <div className="mb-4 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 max-w-md">
           <div className="absolute inset-y-0 left-0 flex items-center pl-3">
@@ -641,6 +851,8 @@ const BankReceipt: React.FC = () => {
           <option value="BR">BR</option>
           <option value="SBR">SBR</option>
           <option value="PRBR">PRBR</option>
+          {isSuperAdmin && <option value="STBR">STBR</option>}
+          {isBranch && <option value="STRBR">STRBR</option>}
         </select>
 
         {(searchTerm || filterType) && (
@@ -653,7 +865,6 @@ const BankReceipt: React.FC = () => {
         )}
       </div>
 
-      {/* TABLE */}
       <div className="bg-white rounded-lg shadow overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-blue-600 text-white text-center">
@@ -685,9 +896,13 @@ const BankReceipt: React.FC = () => {
                           ? "bg-purple-100 text-purple-700"
                           : r.type === "PRBR"
                             ? "bg-orange-100 text-orange-700"
-                            : "bg-blue-100 text-blue-700"
+                            : r.type === "STBR"
+                              ? "bg-cyan-100 text-cyan-700"
+                              : r.type === "STRBR"
+                                ? "bg-pink-100 text-pink-700"
+                                : "bg-blue-100 text-blue-700"
                     }`}>
-                      {r.type === "BR" ? "BR" : r.type === "SBR" ? "SBR" : r.type === "PRBR" ? "PRBR" : r.type || "BR"}
+                      {r.type || "BR"}
                     </span>
                   </td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap font-mono text-sm">{r.voucher_no || "-"}</td>
@@ -711,7 +926,6 @@ const BankReceipt: React.FC = () => {
         </table>
       </div>
 
-      {/* Pagination Controls */}
       {filteredRows.length > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
@@ -719,7 +933,7 @@ const BankReceipt: React.FC = () => {
               Showing {(currentPage - 1) * pageSize + 1}–
               {Math.min(currentPage * pageSize, filteredRows.length)} of {filteredRows.length} items
             </span>
-            
+
             <select
               value={pageSize}
               onChange={handlePageSizeChange}
@@ -746,21 +960,20 @@ const BankReceipt: React.FC = () => {
               Prev
             </button>
 
-            {/* Smart Page Numbers */}
             {(() => {
               const maxVisible = 5;
               let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
               let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-              
+
               if (endPage - startPage + 1 < maxVisible) {
                 startPage = Math.max(1, endPage - maxVisible + 1);
               }
-              
+
               const pages = [];
               for (let i = startPage; i <= endPage; i++) {
                 pages.push(i);
               }
-              
+
               return pages.map((page) => (
                 <button
                   key={page}
@@ -791,7 +1004,6 @@ const BankReceipt: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL */}
       {open && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white w-[95%] sm:w-[90%] md:w-full md:max-w-4xl rounded-lg relative overflow-hidden">
@@ -853,7 +1065,7 @@ const BankReceipt: React.FC = () => {
                                 setFieldValue("opAccount", null);
                               }}
                             />
-                            <span>Manual Entry</span>
+                            <span>Manual</span>
                           </label>
                           <label className="flex items-center gap-2">
                             <input
@@ -867,7 +1079,7 @@ const BankReceipt: React.FC = () => {
                                 setFieldValue("opAccount", null);
                               }}
                             />
-                            <span>Sales Entry Credit Bill</span>
+                            <span>Sales Entry</span>
                           </label>
                           <label className="flex items-center gap-2">
                             <input
@@ -881,8 +1093,42 @@ const BankReceipt: React.FC = () => {
                                 setFieldValue("opAccount", null);
                               }}
                             />
-                            <span>Purchase Return Credit Bill</span>
+                            <span>Purchase Return</span>
                           </label>
+                          {/* Stock Transfer, superadmin only */}
+                          {isSuperAdmin && (
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                value="stockTransfer"
+                                checked={values.receiptType === "stockTransfer"}
+                                onChange={() => {
+                                  setFieldValue("receiptType", "stockTransfer");
+                                  setFieldValue("billNo", "");
+                                  setFieldValue("selectedBill", null);
+                                  setFieldValue("opAccount", null);
+                                }}
+                              />
+                              <span>Stock Transfer</span>
+                            </label>
+                          )}
+                          {/* Stock Return, branch users only */}
+                          {isBranch && (
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                value="stockReturn"
+                                checked={values.receiptType === "stockReturn"}
+                                onChange={() => {
+                                  setFieldValue("receiptType", "stockReturn");
+                                  setFieldValue("billNo", "");
+                                  setFieldValue("selectedBill", null);
+                                  setFieldValue("opAccount", null);
+                                }}
+                              />
+                              <span>Stock Return</span>
+                            </label>
+                          )}
                         </div>
                       </div>
 
@@ -920,6 +1166,56 @@ const BankReceipt: React.FC = () => {
                         </div>
                       )}
 
+                      {/* Stock Transfer section */}
+                      {values.receiptType === "stockTransfer" && (
+                        <div className="bg-gray-50 p-4 rounded-lg border">
+                          <div className="relative">
+                            <StockTransferDropdown
+                              refreshKey={open ? 1 : 0}
+                              onSelectBill={(bill: any) => {
+                                setFieldValue("billNo", bill.transfer_no);
+                                setFieldValue("selectedBill", bill);
+                                setFieldValue("amount", bill.pending_amount);
+                                toast.success(`Transfer ${bill.transfer_no} selected. Pending: ₹${bill.pending_amount}`);
+                              }}
+                            />
+                          </div>
+                          {values.selectedBill && (
+                            <div className="mt-3 p-2 bg-green-50 rounded text-sm">
+                              <p><strong>Transfer No:</strong> {values.selectedBill.transfer_no}</p>
+                              <p><strong>Branch:</strong> {values.selectedBill.to_branch_name}</p>
+                              <p><strong>Party (Linked Account):</strong> {values.selectedBill.linked_account_name || "⚠ Not linked"} {values.selectedBill.linked_account_type && <span className="text-xs text-gray-500">({values.selectedBill.linked_account_type})</span>}</p>
+                              <p><strong>Pending Amount:</strong> ₹{values.selectedBill.pending_amount}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Stock Return section */}
+                      {values.receiptType === "stockReturn" && (
+                        <div className="bg-gray-50 p-4 rounded-lg border">
+                          <div className="relative">
+                            <StockReturnDropdown
+                              refreshKey={open ? 1 : 0}
+                              onSelectBill={(bill: any) => {
+                                setFieldValue("billNo", bill.return_no);
+                                setFieldValue("selectedBill", bill);
+                                setFieldValue("amount", bill.pending_amount);
+                                toast.success(`Return ${bill.return_no} selected. Pending: ₹${bill.pending_amount}`);
+                              }}
+                            />
+                          </div>
+                          {values.selectedBill && (
+                            <div className="mt-3 p-2 bg-green-50 rounded text-sm">
+                              <p><strong>Return No:</strong> {values.selectedBill.return_no}</p>
+                              <p><strong>To Branch:</strong> {values.selectedBill.to_branch_name}</p>
+                              <p><strong>Party (Linked Account):</strong> {values.selectedBill.linked_account_name || "⚠ Not linked"}</p>
+                              <p><strong>Pending Amount:</strong> ₹{values.selectedBill.pending_amount}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <AccountSelect label="Bank Account" name="bankAccount" />
                         <Input label="Voucher No" name="voucherNo" disabled />
@@ -927,12 +1223,24 @@ const BankReceipt: React.FC = () => {
                         <div className="col-span-3">
                           <hr className="border-t-2 border-dashed border-blue-300 my-2" />
                         </div>
-<div className="col-span-3 md:col-span-2">
-  <PartySelect 
-    name="opAccount" 
-    disabled={values.receiptType === "salesEntry" || values.receiptType === "purchaseReturn"}
-  />
-</div>
+                        
+                        {values.receiptType === "stockTransfer" || values.receiptType === "stockReturn" ? (
+                          <div className="col-span-3 md:col-span-2">
+                            <label className="block text-sm font-medium mb-1">Party Name (Linked Account)</label>
+                            <div className="w-full p-2 border rounded bg-gray-100 text-gray-700">
+                              {values.selectedBill
+                                ? (values.selectedBill.linked_account_name || "⚠ No account linked")
+                                : "Select a bill to auto-fill party"}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="col-span-3 md:col-span-2">
+                            <PartySelect
+                              name="opAccount"
+                              disabled={values.receiptType === "salesEntry" || values.receiptType === "purchaseReturn"}
+                            />
+                          </div>
+                        )}
                         <Input label="Amount" name="amount" type="number" step="0.01" />
                       </div>
 

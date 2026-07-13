@@ -1,13 +1,20 @@
 import React, { useState, useEffect } from "react";
 import api from "../../api/api";
 import { toast } from "react-toastify";
+// ✅ NEW — role check ke liye (Stock Transfer GST toggle sirf superadmin dekh/on-off kar payega)
+import { useAuthStore } from "../../store/authStore";
 
 const Setting: React.FC = () => {
+    // ✅ NEW — current logged-in user ka role
+    const { user } = useAuthStore();
+    const isSuperAdmin = user?.role === "superadmin";
+
     const [gstToggle, setGstToggle] = useState(false);
     const [loading, setLoading] = useState(false);
     const [settingExists, setSettingExists] = useState(false);
     const [activePrefix, setActivePrefix] = useState("BP");
     const [salesGstToggle, setSalesGstToggle] = useState(false);
+    const [stockTransferGstToggle, setStockTransferGstToggle] = useState(false);
 
     const [prefixValues, setPrefixValues] = useState({
         BP: "",
@@ -52,6 +59,9 @@ const Setting: React.FC = () => {
         fetchSettings();
         fetchTaxApply(); // Combined both fetches
         fetchSalesTaxApply();
+        // ✅ NEW — Stock Transfer GST value sabke liye fetch hota hai (read-only display
+        // ke liye kaam aa sakta hai), lekin toggle button sirf superadmin ko dikhega.
+        fetchStockTransferTaxApply();
     }, []);
 
     const toggleSalesTax = async () => {
@@ -74,6 +84,14 @@ const Setting: React.FC = () => {
         setSalesGstToggle(Boolean(res.data.sales_gst_toggle));
     } catch (err) {
         console.error("Failed to fetch sales_gst_toggle", err);
+    }
+};
+const fetchStockTransferTaxApply = async () => {
+    try {
+        const res = await api.get("stock-transfer-tax-apply-update/");
+        setStockTransferGstToggle(Boolean(res.data.stock_transfer_gst_toggle));
+    } catch (err) {
+        console.error("Failed to fetch stock_transfer_gst_toggle", err);
     }
 };
     const fetchTaxApply = async () => {
@@ -108,6 +126,25 @@ const Setting: React.FC = () => {
             setLoading(false);
         }
     };
+
+    const toggleStockTransferTax = async () => {
+    // ✅ NEW — safety guard: sirf superadmin hi toggle kar sake (button waise bhi
+    // non-superadmin ko dikhega nahi, but yeh ek extra safeguard hai)
+    if (!isSuperAdmin) return;
+
+    const newValue = !stockTransferGstToggle;
+    setStockTransferGstToggle(newValue);
+    setLoading(true);
+    try {
+        await api.patch("stock-transfer-tax-apply-update/", { stock_transfer_gst_toggle: newValue });
+        toast.success(`Stock Transfer Tax ${newValue ? "Excluded (Add on top)" : "Included (Included in branch price)"} ✅`);
+    } catch (err) {
+        setStockTransferGstToggle(!newValue);
+        toast.error("Failed to update stock transfer tax ❌");
+    } finally {
+        setLoading(false);
+    }
+};
 
     /* ---------------- PREFIX CHANGE ---------------- */
     const handlePrefixChange = (key: string, value: string) => {
@@ -160,6 +197,26 @@ const Setting: React.FC = () => {
     </button>
     <span className={`text-sm font-medium ${salesGstToggle ? "text-blue-600" : "text-gray-500"}`}>{salesGstToggle ? "ON (GST added on top of price)" : "OFF (GST included in price)"}</span>
 </div>
+
+{/* ✅ UPDATED — Stock Transfer GST Toggle: ab SIRF superadmin role ko dikhega
+    aur wahi ise on/off kar payega. Doosre roles (branch/vendor/etc.) ke
+    liye yeh block render hi nahi hota. */}
+{/* {isSuperAdmin && (
+    <div className="flex items-center gap-4 mt-3">
+        <span className="font-medium text-gray-700">Stock Transfer Tax Apply</span>
+        <button
+            onClick={toggleStockTransferTax}
+            disabled={loading}
+            className={`relative inline-flex h-6 w-11 rounded-full transition ${stockTransferGstToggle ? "bg-purple-500" : "bg-gray-300"}`}
+        >
+            <span className={`inline-block h-5 w-5 bg-white rounded-full transform transition ${stockTransferGstToggle ? "translate-x-5" : "translate-x-1"}`} />
+        </button>
+        <span className={`text-sm font-medium ${stockTransferGstToggle ? "text-purple-600" : "text-gray-500"}`}>
+            {stockTransferGstToggle ? "ON (GST added on top of branch price — Exclusive)" : "OFF (GST included in branch price — Inclusive)"}
+        </span>
+        <span className="text-xs text-gray-400 italic">Superadmin only</span>
+    </div>
+)} */}
 
             {/* -------- PREFIX SETTINGS -------- */}
             <div>

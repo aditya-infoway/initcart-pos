@@ -13,6 +13,7 @@ import {
 } from "react-icons/fa";
 import { MdClose } from "react-icons/md";
 import api from "../../api/api";
+import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -193,6 +194,80 @@ const DisplayField: React.FC<{ label: string; value: string | number; icon?: any
   </div>
 );
 
+// ─── Account Select (moved to module level — fixes dropdown remount bug) ──────
+
+const AccountSelect: React.FC<Props> = ({ name, terms: termsProp }) => {
+  const [field, meta] = useField(name);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!termsProp || termsProp === "Credit") { setAccounts([]); return; }
+    setLoading(true);
+    api.get(`account-terms-type/?terms=${termsProp}`)
+      .then((res) => setAccounts(res.data))
+      .catch(() => console.error("Failed to fetch accounts"))
+      .finally(() => setLoading(false));
+  }, [termsProp]);
+
+  if (!termsProp || termsProp === "Credit") return null;
+
+  const icons: any = { Cash: FaMoneyBill, Bank: FaUniversity };
+  const Icon = icons[termsProp];
+  const label = termsProp === "Cash" ? "Cash Account" : termsProp === "Bank" ? "Bank Account" : "Account";
+
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+        {Icon && <Icon className="text-gray-400 text-sm" />}
+        {label}
+      </label>
+      <select
+        {...field}
+        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 transition-all text-sm bg-white
+          ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
+      >
+        <option value="">Select {label}</option>
+        {loading ? <option disabled>Loading...</option> : accounts.map((acc) => (
+          <option key={acc.id} value={acc.id}>{acc.account_name}</option>
+        ))}
+      </select>
+      {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
+    </div>
+  );
+};
+
+// ─── Party Select (moved to module level — fixes dropdown remount bug) ───────
+
+const PartySelect = ({ name }: { name: any }) => {
+  const [field, meta, helpers] = useField(name);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
+  useEffect(() => {
+    api.get("account-type/?group=Supplier")
+      .then((res) => setSuppliers(res.data))
+      .catch(() => console.error("Failed to load suppliers"));
+  }, []);
+
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+        <FaShoppingBag className="text-gray-400 text-sm" /> Party Name
+      </label>
+      <select
+        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 transition-all text-sm bg-white
+          ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
+        value={field.value}
+        onChange={(e) => helpers.setValue(e.target.value)}
+      >
+        <option value="">Select Supplier</option>
+        {suppliers.map((s) => <option key={s.id} value={s.id}>{s.account_name}</option>)}
+      </select>
+      {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
+    </div>
+  );
+};
+
 // ─── Items Table ──────────────────────────────────────────────────────────────
 
 const ItemsTable = ({ data, onDelete, totals }: any) => (
@@ -297,6 +372,7 @@ const today = new Date().toISOString().split("T")[0];
 
 const PurchaseEntryForm: React.FC = () => {
   const navigate = useNavigate();
+  const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
 
   const initialValues = {
     date: today,
@@ -389,78 +465,6 @@ const PurchaseEntryForm: React.FC = () => {
     };
   };
 
-  // ── Account Select (inner component — unchanged logic) ──
-  const AccountSelect: React.FC<Props> = ({ name, terms: termsProp }) => {
-    const [field, meta] = useField(name);
-    const [accounts, setAccounts] = useState<Account[]>([]);
-    const [loading, setLoading] = useState(false);
-
-    useEffect(() => {
-      if (!termsProp || termsProp === "Credit") { setAccounts([]); return; }
-      setLoading(true);
-      api.get(`account-terms-type/?terms=${termsProp}`)
-        .then((res) => setAccounts(res.data))
-        .catch(() => console.error("Failed to fetch accounts"))
-        .finally(() => setLoading(false));
-    }, [termsProp]);
-
-    if (!termsProp || termsProp === "Credit") return null;
-
-    const icons: any = { Cash: FaMoneyBill, Bank: FaUniversity };
-    const Icon = icons[termsProp];
-    const label = termsProp === "Cash" ? "Cash Account" : termsProp === "Bank" ? "Bank Account" : "Account";
-
-    return (
-      <div className="space-y-1">
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-          {Icon && <Icon className="text-gray-400 text-sm" />}
-          {label}
-        </label>
-        <select
-          {...field}
-          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 transition-all text-sm bg-white
-            ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
-        >
-          <option value="">Select {label}</option>
-          {loading ? <option disabled>Loading...</option> : accounts.map((acc) => (
-            <option key={acc.id} value={acc.id}>{acc.account_name}</option>
-          ))}
-        </select>
-        {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
-      </div>
-    );
-  };
-
-  // ── Party Select (inner component — unchanged logic) ──
-  const PartySelect = ({ name }: { name: any }) => {
-    const [field, meta, helpers] = useField(name);
-    const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-
-    useEffect(() => {
-      api.get("account-type/?group=Supplier")
-        .then((res) => setSuppliers(res.data))
-        .catch(() => console.error("Failed to load suppliers"));
-    }, []);
-
-    return (
-      <div className="space-y-1">
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-          <FaShoppingBag className="text-gray-400 text-sm" /> Party Name
-        </label>
-        <select
-          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 transition-all text-sm bg-white
-            ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
-          value={field.value}
-          onChange={(e) => helpers.setValue(e.target.value)}
-        >
-          <option value="">Select Supplier</option>
-          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.account_name}</option>)}
-        </select>
-        {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
-      </div>
-    );
-  };
-
   // ── Fetch branch type (unchanged) ──
   useEffect(() => {
     const fetchBranchType = async () => {
@@ -520,8 +524,11 @@ const PurchaseEntryForm: React.FC = () => {
     setOpenModal(true);
   };
 
-  // ── Submit (unchanged) ──
+  // ── Submit (location check added, rest unchanged) ──
   const handleSubmit = async (values: any) => {
+    const locationOk = await checkLocation();
+    if (!locationOk) return;
+
     if (addedItems.length === 0) { toast.error("At least one item required"); return; }
     const token = sessionStorage.getItem("accessToken");
     try {
@@ -618,8 +625,8 @@ const PurchaseEntryForm: React.FC = () => {
           validationSchema={validationSchema}
           validateOnChange={true}
           validateOnBlur={true}
-          onSubmit={(values, { setSubmitting }) => {
-            handleSubmit(values);
+          onSubmit={async (values, { setSubmitting }) => {
+            await handleSubmit(values);
             setSubmitting(false);
           }}
         >
@@ -885,7 +892,8 @@ const PurchaseEntryForm: React.FC = () => {
                     </button>
                     <button
                       type="submit"
-                      className="px-7 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2 text-sm"
+                      disabled={locationLoading}
+                      className="px-7 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2 text-sm disabled:opacity-50"
                     >
                       <FaSave /> Save
                     </button>

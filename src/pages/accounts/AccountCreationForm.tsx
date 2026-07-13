@@ -27,7 +27,7 @@ import {
 import { toast } from "react-toastify";
 import { Country, State, City } from "country-state-city";
 
-const groups = ["Customer", "Supplier", "Bank Account", "Case In Hand"];
+const groups = ["Customer", "Supplier", "Bank Account", "Case In Hand","Customer - Sundry Debitor", "Supplier - Sundry Creditor","Sundry Debitor(Internal)","Sundry Creditor(Internal)","Sundry Creditor(Main)"];
 
 // --- Validation Schema with Yup ---
 const validationSchema = Yup.object({
@@ -56,7 +56,7 @@ const validationSchema = Yup.object({
   ),
   panCard: Yup.string().matches(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, {
     message: "Invalid PAN Card format",
-    excludeEmptyString: true,
+    excludeEmptyString: true, 
   }),
 });
 
@@ -87,7 +87,7 @@ const FormInput = ({ label, icon: Icon, ...props }: any) => {
       </div>
       {isInvalid && (
         <div className="text-red-500 text-xs mt-1 flex items-center gap-1">
-          <span>⚠</span>
+          
           {meta.error}
         </div>
       )}
@@ -130,7 +130,7 @@ const FormSelect = ({ label, options, icon: Icon, ...props }: any) => {
       </div>
       {isInvalid && (
         <div className="text-red-500 text-xs mt-1 flex items-center gap-1">
-          <span>⚠</span>
+         
           {meta.error}
         </div>
       )}
@@ -216,6 +216,14 @@ const AccountCreationForm = () => {
       }
     }
   }, [id, location.state]);
+
+  // ✅ NEW — Stock Verification page se redirect hone par group auto pre-fill
+  useEffect(() => {
+    const presetGroup = (location.state as any)?.presetGroup;
+    if (presetGroup && !id && !location.state?.accountData) {
+      setInitialValues(prev => ({ ...prev, group: presetGroup }));
+    }
+  }, [location.state]);
 
   const fetchAccountData = async (accountId: string) => {
     setLoading(true);

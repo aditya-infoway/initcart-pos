@@ -40,3 +40,14 @@
 .read-the-docs {
   color: #888;
 } */
+
+/* Toast close button */
+.Toastify__close-button {
+  color: #000 !important;   /* Black */
+  opacity: 1 !important;
+}
+
+/* Hover */
+.Toastify__close-button:hover {
+  color: #333 !important;
+}

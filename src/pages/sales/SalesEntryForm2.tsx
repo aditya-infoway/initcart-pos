@@ -18,6 +18,7 @@ import api from "../../api/api";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import MobileSalesEntry from "./MobileSalesEntry";
+import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -754,6 +755,7 @@ const CartItemRow = ({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const SalesEntryForm2: React.FC = () => {
+  const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);  
   const navigate = useNavigate();
 
@@ -965,6 +967,9 @@ const SalesEntryForm2: React.FC = () => {
 
   // ── FINISH: save only, redirect ──
   const handleFinish = async (values: FormValues) => {
+        const locationOk = await checkLocation();
+    if (!locationOk) return;
+
     const err = validateCart(values);
     if (err) { toast.error(err); return; }
     try {
@@ -978,6 +983,8 @@ const SalesEntryForm2: React.FC = () => {
 
   // ── PRINT: save + show receipt ──
   const handlePrint = async (values: FormValues) => {
+    const locationOk = await checkLocation();
+if (!locationOk) return;
     const err = validateCart(values);
     if (err) { toast.error(err); return; }
     try {

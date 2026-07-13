@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FaArrowLeft, FaBox, FaCheckCircle, FaExchangeAlt,
@@ -30,6 +30,57 @@ function useDebounce(value: string, delay: number = 300) {
 
   return debouncedValue;
 }
+
+// ── GST helpers ───────────────────────────────────────────
+// Backend (pos/utils/gst_calc.py) values come back as Decimal → DRF
+// serializes them as strings. safeNum() parses either safely.
+const safeNum = (val: any): number => {
+  if (val === null || val === undefined || val === "") return 0;
+  const n = typeof val === "string" ? parseFloat(val) : val;
+  return isNaN(n) ? 0 : n;
+};
+
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/**
+ * Mirrors pos/utils/gst_calc.py -> calculate_gst_split(..., gst_toggle=False, ...)
+ * i.e. INCLUSIVE mode only (rate is the net price, GST already included) —
+ * same as what StockReturnCreateFromItemsView always uses on the backend.
+ * Used only for a live client-side ESTIMATE on the Create screen, before
+ * the return actually exists. The Detail view always shows the real,
+ * backend-persisted values.
+ */
+function calcGstSplitInclusive(
+  rate: number,
+  quantity: number,
+  taxPercent: number,
+  sameState: boolean | null
+) {
+  const netAmount = round2(rate * quantity);
+  let basicAmount = netAmount;
+  let tax = 0;
+  let cgst = 0;
+  let sgst = 0;
+  let igst = 0;
+
+  if (taxPercent > 0) {
+    tax = round2((netAmount * taxPercent) / 100);
+    basicAmount = round2(netAmount - tax);
+
+    if (sameState === true) {
+      const half = round2(tax / 2);
+      cgst = half;
+      sgst = round2(tax - half);
+    } else if (sameState === false) {
+      igst = tax;
+    }
+    // sameState === null → branch/company state not known yet on the
+    // create screen; we still show basic/tax/net, just no CGST/SGST/IGST split.
+  }
+
+  return { basic: basicAmount, tax, cgst, sgst, igst, net: netAmount };
+}
+
 // ── Types ─────────────────────────────────────────────────
 
 interface VerifiedItem {
@@ -72,6 +123,15 @@ interface ReturnItem {
   branch_stock: number;
   branch_variant_id: number;
   company_variant_id: number;
+  // ✅ GST fields — already computed & stored by backend
+  // (StockReturnItemReadSerializer already returns these)
+  tax_percent?: string;
+  basic_amount?: number | string;
+  tax_amount?: number | string;
+  cgst?: number | string;
+  sgst?: number | string;
+  igst?: number | string;
+  net_amount?: number | string;
 }
 
 interface ReturnDetail {
@@ -157,6 +217,65 @@ const DisplayField: React.FC<{ label: string; value: string | number; icon?: any
     </label>
     <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-700 font-mono">
       {value || "-"}
+    </div>
+  </div>
+);
+
+// ── Reusable GST Summary Card (same look as StockTransfer.tsx) ──
+
+interface GstTotals {
+  basic: number;
+  tax: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  net: number;
+}
+
+const GstSummaryCard: React.FC<{ totals: GstTotals; title?: string; estimateNote?: string }> = ({
+  totals,
+  title = "GST Summary",
+  estimateNote,
+}) => (
+  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl shadow-sm p-6 border border-blue-200">
+    <div className="flex items-center justify-between mb-4">
+      <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
+      {estimateNote && (
+        <span className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+          {estimateNote}
+        </span>
+      )}
+    </div>
+    <div className="space-y-1 text-sm">
+      <div className="flex justify-between py-1.5 border-b border-blue-100">
+        <span className="text-gray-600">Total Basic Amount</span>
+        <span className="font-medium">₹ {totals.basic.toFixed(2)}</span>
+      </div>
+      {totals.cgst > 0 || totals.sgst > 0 ? (
+        <>
+          <div className="flex justify-between py-1.5 border-b border-blue-100">
+            <span className="text-gray-600">CGST</span>
+            <span className="font-medium">₹ {totals.cgst.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between py-1.5 border-b border-blue-100">
+            <span className="text-gray-600">SGST</span>
+            <span className="font-medium">₹ {totals.sgst.toFixed(2)}</span>
+          </div>
+        </>
+      ) : totals.igst > 0 ? (
+        <div className="flex justify-between py-1.5 border-b border-blue-100">
+          <span className="text-gray-600">IGST</span>
+          <span className="font-medium">₹ {totals.igst.toFixed(2)}</span>
+        </div>
+      ) : null}
+      <div className="flex justify-between pt-2 text-base font-bold">
+        <span>Total Tax Amount</span>
+        <span className="text-blue-700">₹ {totals.tax.toFixed(2)}</span>
+      </div>
+      <div className="flex justify-between pt-2 text-base font-bold border-t-2 border-blue-300">
+        <span>Net Total (incl. GST)</span>
+        <span className="text-blue-700">₹ {totals.net.toFixed(2)}</span>
+      </div>
     </div>
   </div>
 );
@@ -255,6 +374,11 @@ export default function StockReturn() {
   const [returnNote, setReturnNote] = useState("");
   const [creating, setCreating] = useState(false);
 
+  // ✅ same_state flag — needed to know CGST+SGST vs IGST split on the
+  // create screen. true/false once known from user-branch/ response,
+  // null while unknown (estimate shows combined tax only in that case).
+  const [sameState, setSameState] = useState<boolean | null>(null);
+
   // Item selection modal (Purchase-Entry style: pick ONE item, fill inputs, Add)
   const [openModal, setOpenModal] = useState(false);
   const [modalItems, setModalItems] = useState<VerifiedItem[]>([]);
@@ -345,6 +469,15 @@ const fetchReturnNo = async () => {
     const res = await api.get(`stock-returns/next-number-preview/`);
     if (res.data.success) {
       setReturnNo(res.data.next_return_no);
+      // ✅ Backend compares branch.state vs company Branch.state (same
+      // logic as calculate_gst_split) and returns it directly — no
+      // guessing needed on the frontend, so the GST summary can show
+      // the correct CGST+SGST / IGST split right away, before submit.
+      if (typeof res.data.same_state === "boolean") {
+        setSameState(res.data.same_state);
+      } else {
+        setSameState(null);
+      }
     } else {
       setReturnNo("Will be generated on save");
     }
@@ -353,7 +486,8 @@ const fetchReturnNo = async () => {
   }
 };
 
-  // ── Fetch To Branch when opening create tab ──
+  // ── Fetch To Branch (display name only — same_state now comes from
+  // the next-number-preview/ call above) ──
   const fetchToBranch = async () => {
     try {
       const res = await api.get(`user-branch/`);
@@ -376,6 +510,7 @@ const fetchReturnNo = async () => {
     setUidCounter(1);
     setReturnNote("");
     setReturnDate(today);
+    setSameState(null);
     fetchReturnNo();
     fetchToBranch();
   };
@@ -504,6 +639,27 @@ const openSelectModal = () => {
     totalQty: addedItems.reduce((s, i) => s + i.quantity, 0),
     totalAmount: addedItems.reduce((s, i) => s + i.quantity * i.rate, 0),
   };
+
+  // ✅ Live GST estimate for the Create screen — inclusive mode, same
+  // formula as pos/utils/gst_calc.py (gst_toggle=False), split into
+  // CGST+SGST or IGST once sameState is known.
+  const createGstTotals: GstTotals = useMemo(() => {
+    return addedItems.reduce(
+      (acc, i) => {
+        const taxPercent = safeNum(String(i.taxSlab).replace("%", ""));
+        const g = calcGstSplitInclusive(i.rate, i.quantity, taxPercent, sameState);
+        return {
+          basic: acc.basic + g.basic,
+          tax: acc.tax + g.tax,
+          cgst: acc.cgst + g.cgst,
+          sgst: acc.sgst + g.sgst,
+          igst: acc.igst + g.igst,
+          net: acc.net + g.net,
+        };
+      },
+      { basic: 0, tax: 0, cgst: 0, sgst: 0, igst: 0, net: 0 }
+    );
+  }, [addedItems, sameState]);
 
   // ── Create return (submit) ──
   const createReturn = async () => {
@@ -1001,6 +1157,14 @@ const openSelectModal = () => {
             </div>
           </div>
 
+          {/* ── GST Summary card (live estimate — inclusive GST, same_state → CGST+SGST, else IGST) ── */}
+          {addedItems.length > 0 && (
+            <GstSummaryCard
+              totals={createGstTotals}
+              estimateNote={sameState === null ? "Estimate — final split confirmed on submit" : undefined}
+            />
+          )}
+
           {/* Info box */}
           <div className={`p-4 rounded-xl text-sm ${
             addedItems.length > 0
@@ -1193,6 +1357,25 @@ function ReturnDetailView({
   const pendingItems = returnData.items.filter(i => !i.is_packaging_ready);
   const packagedCount = returnData.items.filter(i => i.is_packaging_ready).length;
 
+  // ✅ GST Summary — from the real, backend-persisted values on each item
+  // (StockReturnItemReadSerializer already returns basic_amount/tax_amount/
+  // cgst/sgst/igst/net_amount, computed via calculate_gst_split at creation).
+  const gstTotals: GstTotals = useMemo(() => {
+    return returnData.items.reduce(
+      (acc, i) => ({
+        basic: acc.basic + safeNum(i.basic_amount),
+        tax: acc.tax + safeNum(i.tax_amount),
+        cgst: acc.cgst + safeNum(i.cgst),
+        sgst: acc.sgst + safeNum(i.sgst),
+        igst: acc.igst + safeNum(i.igst),
+        net: acc.net + safeNum(i.net_amount),
+      }),
+      { basic: 0, tax: 0, cgst: 0, sgst: 0, igst: 0, net: 0 }
+    );
+  }, [returnData.items]);
+
+  const hasGst = gstTotals.basic > 0 || gstTotals.tax > 0;
+
   const togglePackagingItem = (itemId: number) => {
     setPackagingItems(prev => {
       const next = new Set(prev);
@@ -1348,6 +1531,7 @@ function ReturnDetailView({
               <th className="px-3 py-3 text-center border-r border-blue-500">GST</th>
               <th className="px-3 py-3 text-center border-r border-blue-500">Qty</th>
               <th className="px-3 py-3 text-right border-r border-blue-500">Rate ₹</th>
+              <th className="px-3 py-3 text-right border-r border-blue-500">Net ₹</th>
               <th className="px-3 py-3 text-center border-r border-blue-500">Status</th>
               {canUpdatePackaging && (
                 <th className="px-3 py-3 text-center">Packaging</th>
@@ -1381,6 +1565,9 @@ function ReturnDetailView({
                   </td>
                   <td className="px-3 py-3 text-right font-mono text-xs font-semibold text-blue-600 border-r border-gray-200">
                     ₹{item.rate?.toFixed(2) || "0.00"}
+                  </td>
+                  <td className="px-3 py-3 text-right font-mono text-xs font-semibold text-indigo-600 border-r border-gray-200">
+                    ₹{safeNum(item.net_amount).toFixed(2)}
                   </td>
                   <td className="px-3 py-3 text-center border-r border-gray-200">
                     {item.is_returned_to_company ? (
@@ -1418,6 +1605,13 @@ function ReturnDetailView({
           </tbody>
         </table>
       </div>
+
+      {/* ✅ GST Summary card — real, backend-persisted totals */}
+      {hasGst && (
+        <div className="px-5 pt-4">
+          <GstSummaryCard totals={gstTotals} />
+        </div>
+      )}
 
       {/* Footer Messages */}
       {returnData.status === "received" && (

@@ -105,7 +105,7 @@ const Login = () => {
         
         toast.success(
           <div className="flex flex-col gap-1">
-            <div className="font-bold text-green-800">🎉 Login Successful!</div>
+            <div className="font-bold text-green-800"> Login Successful!</div>
             <div className="text-sm text-green-700">
               {welcomeMessage}
             </div>
@@ -119,6 +119,7 @@ const Login = () => {
             hideProgressBar: false,
             closeOnClick: true,
             pauseOnHover: true,
+            closeButton: true,
             draggable: true,
             theme: "colored",
             style: {

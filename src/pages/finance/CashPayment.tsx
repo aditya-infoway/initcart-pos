@@ -39,13 +39,29 @@ const validationSchema = Yup.object({
   cashAccount: Yup.number().required("Cash Account is required"),
   voucherNo: Yup.string().required("Voucher No is required"),
   date: Yup.string().required("Date is required"),
-  opAccount: Yup.number().required("Party is required"),
+  opAccount: Yup.number().nullable().when("paymentType", {
+    is: (val: string) => val !== "stockReceived" && val !== "stockReturn",
+    then: (schema) => schema.required("Party is required"),
+    otherwise: (schema) => schema.nullable(),
+  }),
   amount: Yup.number()
     .required("Amount is required")
     .positive("Amount must be positive"),
   narration: Yup.string(),
   paymentType: Yup.string().required("Payment type is required"),
 });
+
+/* ---------------- ROLE HELPER ---------------- */
+const getUserRole = (): string | null => {
+  try {
+    const userStr = sessionStorage.getItem("user");
+    if (!userStr) return null;
+    const user = JSON.parse(userStr);
+    return user.role || null;
+  } catch {
+    return null;
+  }
+};
 
 /* ---------------- INPUT COMPONENTS ---------------- */
 const Input = ({ label, ...props }: any) => {
@@ -74,7 +90,6 @@ const PartySelect = ({ name, disabled = false }: { name: string; disabled?: bool
     const fetchAccounts = async () => {
       try {
         const res = await api.get("account/");
-        // ✅ Check if response is array
         if (Array.isArray(res.data)) {
           setAccounts(res.data);
         } else if (res.data && Array.isArray(res.data.results)) {
@@ -171,7 +186,170 @@ const AccountSelect = ({ label, name }: { label: string; name: string }) => {
   );
 };
 
-// Bill Search Modal Component
+// Stock Received dropdown — party is always this branch's own single
+// "Sundry Creditor(Main)" account, no per-bill linking needed.
+const StockReceivedDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
+  const [bills, setBills] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string>("");
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    const loadBills = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get(`stock-received-bills/`);
+        setBills(res.data.bills || []);
+      } catch (err) {
+        console.error("Failed to load stock received bills:", err);
+        toast.error("Failed to load stock received bills");
+        setBills([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadBills();
+  }, [refreshKey]);
+
+  const selectedBill = bills.find((b) => String(b.id) === selectedId);
+
+  return (
+    <div className="relative">
+      <label className="block text-sm font-medium mb-1">Select Stock Received Bill</label>
+      <div
+        className="w-full p-2 border rounded bg-white cursor-pointer flex justify-between items-center"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span className={selectedBill ? "text-gray-900" : "text-gray-500"}>
+          {selectedBill
+            ? `${selectedBill.transfer_no} — from ${selectedBill.from_branch_name} — ₹${Number(selectedBill.pending_amount).toFixed(2)}`
+            : loading ? "Loading..." : bills.length === 0 ? "No pending bills" : "-- Select Transfer --"}
+        </span>
+        <span className="text-gray-400">▼</span>
+      </div>
+
+      {isOpen && !loading && bills.length > 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 overflow-hidden" style={{ maxHeight: '200px' }}>
+          <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
+            {bills.map((bill) => (
+              <div
+                key={bill.id}
+                className="p-2 border-b last:border-b-0 text-sm hover:bg-blue-50 cursor-pointer"
+                onClick={() => {
+                  setSelectedId(String(bill.id));
+                  onSelectBill(bill);
+                  setIsOpen(false);
+                }}
+              >
+                <div className="flex justify-between">
+                  <span className="font-medium">{bill.transfer_no}</span>
+                  <span className="text-gray-600">from {bill.from_branch_name}</span>
+                </div>
+                <div className="text-xs text-orange-600">
+                  Pending: ₹{Number(bill.pending_amount).toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isOpen && !loading && bills.length === 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 p-4 text-center text-gray-500 text-sm">
+          No pending stock received bills
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Stock Return REFUND dropdown — superadmin only. Party is the
+// branch-linked Sundry Debitor/Creditor account (Branch Master link),
+// same account used for outgoing Stock Transfer settlements.
+const StockReturnRefundDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
+  const [bills, setBills] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string>("");
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    const loadBills = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get(`stock-return-refund-bills/`);
+        setBills(res.data.bills || []);
+      } catch (err) {
+        console.error("Failed to load stock return refund bills:", err);
+        toast.error("Failed to load stock return refund bills");
+        setBills([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadBills();
+  }, [refreshKey]);
+
+  const selectedBill = bills.find((b) => String(b.id) === selectedId);
+
+  return (
+    <div className="relative">
+      <label className="block text-sm font-medium mb-1">Select Stock Return Bill</label>
+      <div
+        className="w-full p-2 border rounded bg-white cursor-pointer flex justify-between items-center"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span className={selectedBill ? "text-gray-900" : "text-gray-500"}>
+          {selectedBill
+            ? `${selectedBill.return_no} — ${selectedBill.from_branch_name} — ₹${Number(selectedBill.pending_amount).toFixed(2)}`
+            : loading ? "Loading..." : bills.length === 0 ? "No pending refunds" : "-- Select Return --"}
+        </span>
+        <span className="text-gray-400">▼</span>
+      </div>
+
+      {isOpen && !loading && bills.length > 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 overflow-hidden" style={{ maxHeight: '200px' }}>
+          <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
+            {bills.map((bill) => (
+              <div
+                key={bill.id}
+                className={`p-2 border-b last:border-b-0 text-sm ${
+                  bill.linked_account_id ? "hover:bg-blue-50 cursor-pointer" : "opacity-60 cursor-not-allowed bg-gray-50"
+                }`}
+                onClick={() => {
+                  if (!bill.linked_account_id) {
+                    toast.error(`${bill.from_branch_name} ka Sundry account link nahi hai. Branch Master mein pehle link karo.`);
+                    return;
+                  }
+                  setSelectedId(String(bill.id));
+                  onSelectBill(bill);
+                  setIsOpen(false);
+                }}
+              >
+                <div className="flex justify-between">
+                  <span className="font-medium">{bill.return_no}</span>
+                  <span className={bill.linked_account_id ? "text-gray-600" : "text-red-500 font-medium"}>
+                    {bill.linked_account_name || "No account linked"}
+                  </span>
+                </div>
+                <div className="text-xs text-orange-600">
+                  Pending: ₹{Number(bill.pending_amount).toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isOpen && !loading && bills.length === 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 p-4 text-center text-gray-500 text-sm">
+          No pending stock return refunds
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Bill Search Modal Component (Sales Return / Purchase Entry only)
 const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [bills, setBills] = useState<any[]>([]);
@@ -187,7 +365,7 @@ const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
     setLoading(true);
     try {
       const url = billType === 'salesReturn'
-        ? `sales-return-credit-bills/?query=${search}` 
+        ? `sales-return-credit-bills/?query=${search}`
         : `purchase-credit-bills/?query=${search}`;
       const res = await api.get(url);
       setBills(res.data.bills || []);
@@ -292,6 +470,7 @@ const CashPayment: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showBillModal, setShowBillModal] = useState(false);
   const [billType, setBillType] = useState<string>('');
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState("");
@@ -303,7 +482,11 @@ const CashPayment: React.FC = () => {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-    // ✅ Add Export to Excel function
+  useEffect(() => {
+    setIsSuperAdmin(getUserRole() === "superadmin");
+  }, []);
+
+  // Add Export to Excel function
   const exportToExcel = () => {
     if (filteredRows.length === 0) {
       toast.warning("No data to export");
@@ -340,14 +523,14 @@ const CashPayment: React.FC = () => {
     
     // Set column widths
     ws["!cols"] = [
-      { wch: 6 },   // SR No
-      { wch: 12 },  // Date
-      { wch: 15 },  // Voucher No
-      { wch: 8 },   // Type
-      { wch: 25 },  // Cash Account
-      { wch: 25 },  // Party Name
-      { wch: 15 },  // Amount
-      { wch: 40 },  // Narration
+      { wch: 6 },
+      { wch: 12 },
+      { wch: 15 },
+      { wch: 8 },
+      { wch: 25 },
+      { wch: 25 },
+      { wch: 15 },
+      { wch: 40 },
     ];
 
     // Create workbook and download
@@ -492,6 +675,40 @@ const CashPayment: React.FC = () => {
         return;
       }
 
+      // Stock Received — party auto = branch's own Sundry Creditor(Main)
+      if (values.selectedBill && values.paymentType === 'stockReceived') {
+        const stockPayload = {
+          stock_transfer_bill_id: values.selectedBill.id,
+          cash_account: values.cashAccount,
+          amount: values.amount,
+          date: values.date,
+        };
+
+        const res = await api.post("/pay-stock-received-bill-cash/", stockPayload);
+        toast.success(res.data.message || "Stock received payment made successfully");
+        resetForm();
+        setOpen(false);
+        fetchPayments(currentPage);
+        return;
+      }
+
+      // Stock Return refund — party auto = branch-linked Sundry account
+      if (values.selectedBill && values.paymentType === 'stockReturn') {
+        const stockReturnPayload = {
+          stock_return_bill_id: values.selectedBill.id,
+          cash_account: values.cashAccount,
+          amount: values.amount,
+          date: values.date,
+        };
+
+        const res = await api.post("/pay-stock-return-bill-cash/", stockReturnPayload);
+        toast.success(res.data.message || "Stock return refund paid successfully");
+        resetForm();
+        setOpen(false);
+        fetchPayments(currentPage);
+        return;
+      }
+
       // Manual Entry
       let payload: any = {
         cash_account: values.cashAccount,
@@ -553,11 +770,11 @@ const CashPayment: React.FC = () => {
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-      {/* ✅ Header with Export Button */}
+      {/* Header with Export Button */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">Cash Payment Register</h1>
         <div className="flex gap-2">
-          {/* ✅ Export Excel Button */}
+          {/* Export Excel Button */}
           <button
             onClick={exportToExcel}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition"
@@ -608,6 +825,8 @@ const CashPayment: React.FC = () => {
           <option value="CP">CP</option>
           <option value="PCP">PCP</option>
           <option value="SRCP">SRCP</option>
+          {!isSuperAdmin && <option value="STCP">STCP</option>}
+          {isSuperAdmin && <option value="STRCP">STRCP</option>}
         </select>
 
         {(searchTerm || filterType) && (
@@ -649,9 +868,13 @@ const CashPayment: React.FC = () => {
                         ? "bg-purple-100 text-purple-700"
                         : r.type === "SRCP"
                           ? "bg-orange-100 text-orange-700"
-                          : "bg-blue-100 text-blue-700"
-                      }`}>
-                      {r.type === "CP" ? "CP" : r.type === "PCP" ? "PCP" : r.type === "SRCP" ? "SRCP" : r.type || "CP"}
+                          : r.type === "STCP"
+                            ? "bg-cyan-100 text-cyan-700"
+                            : r.type === "STRCP"
+                              ? "bg-pink-100 text-pink-700"
+                              : "bg-blue-100 text-blue-700"
+                    }`}>
+                      {r.type || "CP"}
                     </span>
                   </td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cash_account_name || r.cash_account || "-"}</td>
@@ -679,7 +902,7 @@ const CashPayment: React.FC = () => {
               Showing {(currentPage - 1) * pageSize + 1}–
               {Math.min(currentPage * pageSize, filteredRows.length)} of {filteredRows.length} items
             </span>
-
+            
             <select
               value={pageSize}
               onChange={handlePageSizeChange}
@@ -697,37 +920,38 @@ const CashPayment: React.FC = () => {
             <button
               disabled={currentPage === 1}
               onClick={() => handlePageChange(currentPage - 1)}
-              className={`px-3 py-1 border rounded ${currentPage === 1
+              className={`px-3 py-1 border rounded ${
+                currentPage === 1
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
+              }`}
             >
               Prev
             </button>
 
-            {/* Smart Page Numbers */}
             {(() => {
               const maxVisible = 5;
               let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
               let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-
+              
               if (endPage - startPage + 1 < maxVisible) {
                 startPage = Math.max(1, endPage - maxVisible + 1);
               }
-
+              
               const pages = [];
               for (let i = startPage; i <= endPage; i++) {
                 pages.push(i);
               }
-
+              
               return pages.map((page) => (
                 <button
                   key={page}
                   onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1 border rounded ${currentPage === page
+                  className={`px-3 py-1 border rounded ${
+                    currentPage === page
                       ? "bg-blue-600 text-white"
                       : "bg-gray-200 hover:bg-gray-300"
-                    }`}
+                  }`}
                 >
                   {page}
                 </button>
@@ -737,10 +961,11 @@ const CashPayment: React.FC = () => {
             <button
               disabled={currentPage === totalPages}
               onClick={() => handlePageChange(currentPage + 1)}
-              className={`px-3 py-1 border rounded ${currentPage === totalPages
+              className={`px-3 py-1 border rounded ${
+                currentPage === totalPages
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
+              }`}
             >
               Next
             </button>
@@ -806,7 +1031,7 @@ const CashPayment: React.FC = () => {
                                 setFieldValue("opAccount", null);
                               }}
                             />
-                            <span>Manual Entry</span>
+                            <span>Manual</span>
                           </label>
                           <label className="flex items-center gap-2">
                             <input
@@ -820,7 +1045,7 @@ const CashPayment: React.FC = () => {
                                 setFieldValue("opAccount", null);
                               }}
                             />
-                            <span>Sales Return Credit Bill</span>
+                            <span>Sales Return</span>
                           </label>
                           <label className="flex items-center gap-2">
                             <input
@@ -834,8 +1059,42 @@ const CashPayment: React.FC = () => {
                                 setFieldValue("opAccount", null);
                               }}
                             />
-                            <span>Purchase Entry Credit Bill</span>
+                            <span>Purchase Entry</span>
                           </label>
+                          {/* Stock Received, only for non-superadmin branches */}
+                          {!isSuperAdmin && (
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                value="stockReceived"
+                                checked={values.paymentType === "stockReceived"}
+                                onChange={() => {
+                                  setFieldValue("paymentType", "stockReceived");
+                                  setFieldValue("billNo", "");
+                                  setFieldValue("selectedBill", null);
+                                  setFieldValue("opAccount", null);
+                                }}
+                              />
+                              <span>Stock Received</span>
+                            </label>
+                          )}
+                          {/* Stock Return refund, superadmin only */}
+                          {isSuperAdmin && (
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                value="stockReturn"
+                                checked={values.paymentType === "stockReturn"}
+                                onChange={() => {
+                                  setFieldValue("paymentType", "stockReturn");
+                                  setFieldValue("billNo", "");
+                                  setFieldValue("selectedBill", null);
+                                  setFieldValue("opAccount", null);
+                                }}
+                              />
+                              <span>Stock Return</span>
+                            </label>
+                          )}
                         </div>
                       </div>
 
@@ -873,6 +1132,52 @@ const CashPayment: React.FC = () => {
                         </div>
                       )}
 
+                      {/* Stock Received section — dropdown, party auto = Sundry Creditor(Main) */}
+                      {values.paymentType === "stockReceived" && (
+                        <div className="bg-gray-50 p-4 rounded-lg border">
+                          <StockReceivedDropdown
+                            refreshKey={open ? 1 : 0}
+                            onSelectBill={(bill: any) => {
+                              setFieldValue("billNo", bill.transfer_no);
+                              setFieldValue("selectedBill", bill);
+                              setFieldValue("amount", bill.pending_amount);
+                              toast.success(`Transfer ${bill.transfer_no} selected. Pending: ₹${bill.pending_amount}`);
+                            }}
+                          />
+                          {values.selectedBill && (
+                            <div className="mt-3 p-2 bg-green-50 rounded text-sm">
+                              <p><strong>Transfer No:</strong> {values.selectedBill.transfer_no}</p>
+                              <p><strong>From Branch:</strong> {values.selectedBill.from_branch_name}</p>
+                              <p><strong>Party (Your Account):</strong> {values.selectedBill.main_account_name || "⚠ Sundry Creditor(Main) not created"}</p>
+                              <p><strong>Pending Amount:</strong> ₹{values.selectedBill.pending_amount}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Stock Return refund section — superadmin only, party = branch-linked account */}
+                      {values.paymentType === "stockReturn" && (
+                        <div className="bg-gray-50 p-4 rounded-lg border">
+                          <StockReturnRefundDropdown
+                            refreshKey={open ? 1 : 0}
+                            onSelectBill={(bill: any) => {
+                              setFieldValue("billNo", bill.return_no);
+                              setFieldValue("selectedBill", bill);
+                              setFieldValue("amount", bill.pending_amount);
+                              toast.success(`Return ${bill.return_no} selected. Pending: ₹${bill.pending_amount}`);
+                            }}
+                          />
+                          {values.selectedBill && (
+                            <div className="mt-3 p-2 bg-green-50 rounded text-sm">
+                              <p><strong>Return No:</strong> {values.selectedBill.return_no}</p>
+                              <p><strong>Branch:</strong> {values.selectedBill.from_branch_name}</p>
+                              <p><strong>Party (Linked Account):</strong> {values.selectedBill.linked_account_name || "⚠ Not linked"} {values.selectedBill.linked_account_type && <span className="text-xs text-gray-500">({values.selectedBill.linked_account_type})</span>}</p>
+                              <p><strong>Pending Amount:</strong> ₹{values.selectedBill.pending_amount}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <AccountSelect label="Cash Account" name="cashAccount" />
                         <Input label="Voucher No" name="voucherNo" disabled />
@@ -880,12 +1185,32 @@ const CashPayment: React.FC = () => {
                         <div className="col-span-3">
                           <hr className="border-t-2 border-dashed border-blue-300 my-2" />
                         </div>
-<div className="col-span-3 md:col-span-2">
-  <PartySelect 
-    name="opAccount" 
-    disabled={values.paymentType === "salesReturn" || values.paymentType === "purchaseEntry"}
-  />
-</div>
+                        {values.paymentType === "stockReceived" ? (
+                          <div className="col-span-3 md:col-span-2">
+                            <label className="block text-sm font-medium mb-1">Party Name (Sundry Creditor Main)</label>
+                            <div className="w-full p-2 border rounded bg-gray-100 text-gray-700">
+                              {values.selectedBill
+                                ? (values.selectedBill.main_account_name || "No Sundry Creditor(Main) account for your branch")
+                                : "Select a transfer to auto-fill party"}
+                            </div>
+                          </div>
+                        ) : values.paymentType === "stockReturn" ? (
+                          <div className="col-span-3 md:col-span-2">
+                            <label className="block text-sm font-medium mb-1">Party Name (Linked Account)</label>
+                            <div className="w-full p-2 border rounded bg-gray-100 text-gray-700">
+                              {values.selectedBill
+                                ? (values.selectedBill.linked_account_name || "No account linked to this branch")
+                                : "Select a return to auto-fill party"}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="col-span-3 md:col-span-2">
+                            <PartySelect
+                              name="opAccount"
+                              disabled={values.paymentType === "salesReturn" || values.paymentType === "purchaseEntry"}
+                            />
+                          </div>
+                        )}
                         <Input label="Amount" name="amount" type="number" step="0.01" />
                       </div>
                       <div>

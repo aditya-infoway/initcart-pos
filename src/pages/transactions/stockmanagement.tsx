@@ -13,6 +13,65 @@ import Swal from "sweetalert2";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 
+// ── GST helpers ───────────────────────────────────────────
+// Backend (pos/utils/gst_calc.py) returns Decimal values → DRF often
+// serializes them as strings. safeNum() parses either safely.
+const safeNum = (val: any): number => {
+  if (val === null || val === undefined || val === "") return 0;
+  const n = typeof val === "string" ? parseFloat(val) : val;
+  return isNaN(n) ? 0 : n;
+};
+
+interface GstTotals {
+  basic: number;
+  tax: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  net: number;
+}
+
+// ── Reusable GST Summary Card (same look used on the branch StockReturn.tsx page) ──
+const GstSummaryCard: React.FC<{ totals: GstTotals; title?: string }> = ({
+  totals,
+  title = "GST Summary",
+}) => (
+  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl shadow-sm p-6 border border-blue-200">
+    <h3 className="text-sm font-semibold text-gray-800 mb-4">{title}</h3>
+    <div className="space-y-1 text-sm">
+      <div className="flex justify-between py-1.5 border-b border-blue-100">
+        <span className="text-gray-600">Total Basic Amount</span>
+        <span className="font-medium">₹ {totals.basic.toFixed(2)}</span>
+      </div>
+      {totals.cgst > 0 || totals.sgst > 0 ? (
+        <>
+          <div className="flex justify-between py-1.5 border-b border-blue-100">
+            <span className="text-gray-600">CGST</span>
+            <span className="font-medium">₹ {totals.cgst.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between py-1.5 border-b border-blue-100">
+            <span className="text-gray-600">SGST</span>
+            <span className="font-medium">₹ {totals.sgst.toFixed(2)}</span>
+          </div>
+        </>
+      ) : totals.igst > 0 ? (
+        <div className="flex justify-between py-1.5 border-b border-blue-100">
+          <span className="text-gray-600">IGST</span>
+          <span className="font-medium">₹ {totals.igst.toFixed(2)}</span>
+        </div>
+      ) : null}
+      <div className="flex justify-between pt-2 text-base font-bold">
+        <span>Total Tax Amount</span>
+        <span className="text-blue-700">₹ {totals.tax.toFixed(2)}</span>
+      </div>
+      <div className="flex justify-between pt-2 text-base font-bold border-t-2 border-blue-300">
+        <span>Net Total (incl. GST)</span>
+        <span className="text-blue-700">₹ {totals.net.toFixed(2)}</span>
+      </div>
+    </div>
+  </div>
+);
+
 // ── Types ─────────────────────────────────────────────────
 
 interface BranchDetails {
@@ -47,6 +106,15 @@ interface ReturnItem {
   branch_stock: number;
   branch_variant_id: number;
   company_variant_id: number;
+  // ✅ GST fields — already computed & persisted by the backend at
+  // creation time (StockReturnItemReadSerializer already returns these)
+  tax_percent?: string;
+  basic_amount?: number | string;
+  tax_amount?: number | string;
+  cgst?: number | string;
+  sgst?: number | string;
+  igst?: number | string;
+  net_amount?: number | string;
 }
 
 interface ReturnDetail {
@@ -203,7 +271,7 @@ const showErrorAlert = async (title: string, message: string) => {
   });
 };
 
-// ── ✅ NEW: fetch ALL pages of stock-returns (used to build the branch-wise
+// ── ✅ fetch ALL pages of stock-returns (used to build the branch-wise
 // summary + client-side filtered list, without needing any backend change) ──
 async function fetchAllReturns(): Promise<ReturnListItem[]> {
   let page = 1;
@@ -301,7 +369,7 @@ function PaginationBar({
 }
 
 // ════════════════════════════════════════════════════════════
-// ✅ NEW: BRANCH-WISE STATUS SUMMARY TABLE (generic, reusable)
+// ✅ BRANCH-WISE STATUS SUMMARY TABLE (generic, reusable)
 // Shows: Branch | Total | <status columns...>
 // Clicking a count opens that branch's filtered list (status = "" for Total)
 // ════════════════════════════════════════════════════════════
@@ -388,11 +456,11 @@ export default function StockReturnManagement() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  // ✅ NEW: all returns fetched once (all pages), used for branch summary + client filtering
+  // ✅ all returns fetched once (all pages), used for branch summary + client filtering
   const [allReturns, setAllReturns] = useState<ReturnListItem[]>([]);
   const [loadingAll, setLoadingAll] = useState(false);
 
-  // ✅ NEW: "branches" = summary landing page, "list" = filtered return list for that branch
+  // ✅ "branches" = summary landing page, "list" = filtered return list for that branch
   const [view, setView] = useState<"branches" | "list">("branches");
   const [branchFilter, setBranchFilter] = useState<{ branch_name: string; status: string } | null>(null);
   const [search, setSearch] = useState("");
@@ -414,7 +482,7 @@ export default function StockReturnManagement() {
     loadAllReturns();
   }, [loadAllReturns]);
 
-  // ✅ NEW: branch-wise summary derived from allReturns
+  // ✅ branch-wise summary derived from allReturns
   const branchSummary: ReturnBranchSummaryRow[] = useMemo(() => {
     const map = new Map<string, ReturnBranchSummaryRow>();
     allReturns.forEach(r => {
@@ -437,7 +505,7 @@ export default function StockReturnManagement() {
     return Array.from(map.values()).sort((a, b) => a.branch_name.localeCompare(b.branch_name));
   }, [allReturns]);
 
-  // ✅ NEW: returns filtered to the selected branch (+ optional status) + search
+  // ✅ returns filtered to the selected branch (+ optional status) + search
   const filteredReturns = useMemo(() => {
     if (!branchFilter) return [];
     const q = search.trim().toLowerCase();
@@ -623,7 +691,7 @@ export default function StockReturnManagement() {
           </div>
         </div>
 
-        {/* ✅ NEW: BRANCH SUMMARY (landing) VIEW */}
+        {/* ✅ BRANCH SUMMARY (landing) VIEW */}
         {view === "branches" && (
           <div className="space-y-4">
             <div className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between">
@@ -788,7 +856,10 @@ export default function StockReturnManagement() {
 
 // ════════════════════════════════════════════════════════════
 // ADMIN RETURN DETAIL VIEW - BLUE THEME WITH BRANCH DETAILS
-// (UNCHANGED)
+// ✅ NOW WITH GST SUMMARY (built from the real, backend-persisted values
+// on each item — StockReturnItemReadSerializer already returns
+// basic_amount/tax_amount/cgst/sgst/igst/net_amount, computed via
+// calculate_gst_split at return-creation time).
 // ════════════════════════════════════════════════════════════
 
 interface AdminReturnDetailViewProps {
@@ -841,6 +912,23 @@ function AdminReturnDetailView({
   const totalPackaged = returnData.items.filter(i => i.is_packaging_ready).length;
   const totalItems = returnData.items.length;
   const allPackaged = totalPackaged === totalItems && totalItems > 0;
+
+  // ✅ GST Summary totals — from the real, persisted per-item values
+  const gstTotals: GstTotals = useMemo(() => {
+    return returnData.items.reduce(
+      (acc, i) => ({
+        basic: acc.basic + safeNum(i.basic_amount),
+        tax: acc.tax + safeNum(i.tax_amount),
+        cgst: acc.cgst + safeNum(i.cgst),
+        sgst: acc.sgst + safeNum(i.sgst),
+        igst: acc.igst + safeNum(i.igst),
+        net: acc.net + safeNum(i.net_amount),
+      }),
+      { basic: 0, tax: 0, cgst: 0, sgst: 0, igst: 0, net: 0 }
+    );
+  }, [returnData.items]);
+
+  const hasGst = gstTotals.basic > 0 || gstTotals.tax > 0;
 
   // ── Branch Details Card with input boxes for phone/email/address ──
   // ── From Branch details card with blue-toned readonly input boxes ──
@@ -1052,6 +1140,7 @@ function AdminReturnDetailView({
               <th className="px-3 py-3 text-center border-r border-blue-500">GST</th>
               <th className="px-3 py-3 text-center border-r border-blue-500">Qty</th>
               <th className="px-3 py-3 text-right border-r border-blue-500">Rate ₹</th>
+              <th className="px-3 py-3 text-right border-r border-blue-500">Net ₹</th>
               <th className="px-3 py-3 text-center border-r border-blue-500">Branch Stock</th>
               <th className="px-3 py-3 text-center border-r border-blue-500">Company Stock</th>
               <th className="px-3 py-3 text-center">Status</th>
@@ -1085,6 +1174,9 @@ function AdminReturnDetailView({
                   </td>
                   <td className="px-3 py-3 text-right font-mono text-xs font-semibold text-blue-600 border-r border-gray-200">
                     ₹{item.rate?.toFixed(2) || "0.00"}
+                  </td>
+                  <td className="px-3 py-3 text-right font-mono text-xs font-semibold text-indigo-600 border-r border-gray-200">
+                    ₹{safeNum(item.net_amount).toFixed(2)}
                   </td>
                   <td className="px-3 py-3 text-center border-r border-gray-200">
                     <span className={`text-xs font-semibold ${(item.branch_stock || 0) <= 0 ? "text-red-500" : "text-gray-700"}`}>
@@ -1124,6 +1216,9 @@ function AdminReturnDetailView({
               <td className="px-3 py-2 text-right font-bold text-blue-600">
                 ₹{returnData.items.reduce((sum, i) => sum + (i.quantity * i.rate), 0).toFixed(2)}
               </td>
+              <td className="px-3 py-2 text-right font-bold text-indigo-600">
+                ₹{gstTotals.net.toFixed(2)}
+              </td>
               <td colSpan={3} className="px-3 py-2 text-xs text-gray-400 text-center">
                 {totalPackaged} of {totalItems} items packaged
               </td>
@@ -1131,6 +1226,14 @@ function AdminReturnDetailView({
           </tfoot>
         </table>
       </div>
+
+      {/* ✅ GST Summary card — real, backend-persisted totals (same style as
+          the branch StockReturn.tsx page) */}
+      {hasGst && (
+        <div className="px-5 pt-4">
+          <GstSummaryCard totals={gstTotals} />
+        </div>
+      )}
 
       {/* Footer Status Messages */}
       {returnData.status === "received" && (

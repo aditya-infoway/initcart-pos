@@ -63,6 +63,7 @@ export const menuItems: MenuCategory[] = [
         icon: <FaUserTie size={20} />,
         submenu: [
           { name: "Account Creation", to: "/addAccounts" },
+          { name: "Branch Master", to: "/branchMaster"},
           { name: "Add Items", to: "/AddItems" },
           { name: "Website Items", to: "/WebItems" },
           { name: "Item Barcodes", to: "/PendingBarcodes" },
@@ -119,6 +120,16 @@ export const menuItems: MenuCategory[] = [
         title: "Stock Transfer",
         icon: <FaExchangeAlt size={20} />,
         to: "/stockTransfer",
+        submenu: [],
+      },
+    ],
+  },
+    {
+    items: [
+      {
+        title: "B2B Stock Transfer",
+        icon: <FaExchangeAlt size={20} />,
+        to: "/b2bstockTransfer",
         submenu: [],
       },
     ],
@@ -331,26 +342,35 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
           items: category.items.filter(item => 
             item.title !== "Stock Verification" && 
             item.title !== "Order Items" &&
-            item.title !== "Stock Return"  // ← Branch ke liye
+            item.title !== "Stock Return"  &&
+            item.title !== "B2B Stock Transfer"
           )
         }))
         .filter(category => category.items.length > 0);
     }
     
-    if (isBranchOrVendor) {
-      // ✅ BRANCH:
-      // Show: Stock Verification, Order Items, Stock Return
-      // Hide: Stock Transfer, Stock Return Verification
-      return menuItems
-        .map(category => ({
-          ...category,
-          items: category.items.filter(item => 
-            item.title !== "Stock Transfer" && 
-            item.title !== "Stock Return Verification"  // ← Superadmin ke liye
-          )
-        }))
-        .filter(category => category.items.length > 0);
-    }
+if (isBranchOrVendor) {
+  return menuItems
+    .map(category => ({
+      ...category,
+      items: category.items
+        .map(item => {
+          // ✅ If this is the "Master" menu item, filter its submenu
+          if (item.title === "Master" && item.submenu) {
+            return {
+              ...item,
+              submenu: item.submenu.filter(sub => sub.name !== "Branch Master")
+            };
+          }
+          return item;
+        })
+        .filter(item => 
+          item.title !== "Stock Transfer" && 
+          item.title !== "Stock Return Verification"
+        )
+    }))
+    .filter(category => category.items.length > 0);
+}
     
     // ✅ OTHER ROLES:
     // Hide all stock-related menus
