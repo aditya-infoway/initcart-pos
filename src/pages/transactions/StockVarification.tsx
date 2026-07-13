@@ -1,9 +1,13 @@
 // src/pages/branch/StockVerification.tsx
 // Stock Verification Page — Branch users ke liye incoming transfers verify karne ki page
 // Roles: branch, vendor, branch_customer, branch_agent, branch_both
+// ✅ UPDATED — GST Summary card added (Transfer create karte waqt jo GST summary dikhti hai,
+//    ab wahi summary yaha verify karte waqt bhi dikhegi — chahe Manual transfer ho ya
+//    Order Tracking se aaya hua transfer ho, dono me same tarike se dikhega)
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import {
   FaCheckCircle,
   FaBox,
@@ -22,6 +26,17 @@ import { HiOutlineDocumentText } from "react-icons/hi";
 import { BsCheckAll } from "react-icons/bs";
 import api from "../../api/api";
 import { toast } from "react-toastify";
+
+// ── Helpers ───────────────────────────────────────────────
+const safeNumber = (val: any): number => {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === "string") {
+    const parsed = parseFloat(val);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof val === "number") return val;
+  return 0;
+};
 
 // ── Types ─────────────────────────────────────────────────
 interface TransferListItem {
@@ -54,6 +69,14 @@ interface TransferItemDetail {
   branch_price: number;
   sales_price: number;
   mrp: number;
+  // ✅ GST breakup fields
+  tax_percent?: string;
+  basic_amount?: number;
+  tax_amount?: number;
+  cgst?: number;
+  sgst?: number;
+  igst?: number;
+  net_amount?: number;
 }
 
 interface TransferDetail {
@@ -78,6 +101,8 @@ interface TransferDetail {
   items: TransferItemDetail[];
 }
 
+
+
 // ════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════
@@ -93,6 +118,8 @@ export default function StockVerification() {
   const [verifyingAll, setVerifyingAll] = useState(false);
   const [websiteDisplay, setWebsiteDisplay] = useState(false);
   const [search, setSearch] = useState("");
+  const navigate = useNavigate();
+  const [showCreditorPopup, setShowCreditorPopup] = useState(false);
   const [pagination, setPagination] = useState({
     count: 0,
     next: null as string | null,
@@ -137,8 +164,39 @@ export default function StockVerification() {
     }
     setDetailLoading(false);
   }
-
-  async function verifySingleItem(transferId: number, itemId: number) {
+// ── CreditorPopup Component ──────────────────────────────────
+const CreditorPopup = () =>
+  showCreditorPopup ? (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4">
+        <h3 className="text-lg font-bold text-gray-800 mb-2">Account Required</h3>
+        <p className="text-sm text-gray-600 mb-5">
+          Before verifying stock, you need to create a "Sundry Creditor(Main)" account.
+          Click OK to go to the account creation page.
+        </p>
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={() => setShowCreditorPopup(false)}
+            className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              setShowCreditorPopup(false);
+              navigate("/accounts", {
+                state: { presetGroup: "Sundry Creditor(Main)" },
+              });
+            }}
+            className="px-4 py-2 rounded-lg text-sm text-white bg-emerald-600 hover:bg-emerald-700 font-semibold"
+          >
+            OK, Create Account
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+async function verifySingleItem(transferId: number, itemId: number) {
     setVerifyingItem(itemId);
     try {
       const res = await api.post(
@@ -147,28 +205,23 @@ export default function StockVerification() {
       );
       if (res.data.success) {
         toast.success(res.data.message || "Item verified!");
-        // Refresh detail
         await loadTransferDetail(transferId);
-        // Refresh list
         loadTransfers(pagination.page);
       } else {
         toast.error(res.data.message || "Verification failed");
       }
     } catch (e: any) {
-      toast.error(
-        e.response?.data?.message || "Error verifying item"
-      );
+      if (e.response?.data?.error_code === 'NO_SUNDRY_CREDITOR_ACCOUNT') {
+        setShowCreditorPopup(true);   // ✅ NEW
+      } else {
+        toast.error(e.response?.data?.message || "Error verifying item");
+      }
     }
     setVerifyingItem(null);
   }
 
-  async function verifyAllItems(transferId: number) {
-    if (
-      !confirm(
-        "Sare pending items ek sath verify karne chahte ho? Stock add ho jayega."
-      )
-    )
-      return;
+async function verifyAllItems(transferId: number) {
+    if (!confirm("verify all items?.")) return;
     setVerifyingAll(true);
     try {
       const res = await api.post(
@@ -183,9 +236,11 @@ export default function StockVerification() {
         toast.error(res.data.message || "Verification failed");
       }
     } catch (e: any) {
-      toast.error(
-        e.response?.data?.message || "Error verifying items"
-      );
+      if (e.response?.data?.error_code === 'NO_SUNDRY_CREDITOR_ACCOUNT') {
+        setShowCreditorPopup(true);   // ✅ NEW
+      } else {
+        toast.error(e.response?.data?.message || "Error verifying items");
+      }
     }
     setVerifyingAll(false);
   }
@@ -200,8 +255,10 @@ export default function StockVerification() {
   });
 
   // ── Detail View ──────────────────────────────────────────
-  if (selectedTransfer) {
-    return (
+if (selectedTransfer) {
+  return (
+    <>
+      <CreditorPopup />
       <DetailView
         transferId={selectedTransfer.id}
         detail={selectedTransfer.detail}
@@ -214,12 +271,14 @@ export default function StockVerification() {
         onVerifyAll={verifyAllItems}
         onBack={() => setSelectedTransfer(null)}
       />
-    );
-  }
+    </>
+  );
+}
 
   // ── List View ────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50">
+      <CreditorPopup/>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -231,9 +290,7 @@ export default function StockVerification() {
               <h1 className="text-xl font-bold text-gray-900">
                 Stock Verification
               </h1>
-              <p className="text-xs text-gray-400">
-                Incoming transfers verify karo · Stock update hoga
-              </p>
+
             </div>
           </div>
 
@@ -267,6 +324,7 @@ export default function StockVerification() {
             />
           </div>
         </div>
+        
 
         {/* Transfers List */}
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -289,9 +347,6 @@ export default function StockVerification() {
             <div className="py-16 text-center text-gray-400">
               <FaWarehouse className="text-4xl text-gray-200 mx-auto mb-3" />
               <p className="font-medium">No incoming transfers</p>
-              <p className="text-xs mt-1">
-                Superadmin ne koi transfer nahi bheja abhi
-              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -424,6 +479,7 @@ export default function StockVerification() {
   );
 }
 
+
 // ════════════════════════════════════════════════════════════
 // DETAIL VIEW COMPONENT
 // ════════════════════════════════════════════════════════════
@@ -452,6 +508,23 @@ function DetailView({
   onVerifyAll,
   onBack,
 }: DetailViewProps) {
+  // ✅ GST Totals — same pattern as Stock Transfer create page
+  const gstTotals = useMemo(() => {
+    const items = detail?.items || [];
+    return {
+      basic: items.reduce((a, b) => a + safeNumber(b.basic_amount), 0),
+      tax: items.reduce((a, b) => a + safeNumber(b.tax_amount), 0),
+      cgst: items.reduce((a, b) => a + safeNumber(b.cgst), 0),
+      sgst: items.reduce((a, b) => a + safeNumber(b.sgst), 0),
+      igst: items.reduce((a, b) => a + safeNumber(b.igst), 0),
+      net: items.reduce((a, b) => a + safeNumber(b.net_amount), 0),
+    };
+  }, [detail]);
+
+  const hasGst = (detail?.items || []).some(
+    (i) => safeNumber(i.basic_amount) > 0
+  );
+
   if (loading || !detail) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -769,6 +842,47 @@ function DetailView({
             )}
           </div>
         </div>
+
+        {/* ✅ GST Summary card — Transfer create karte waqt jo dikhti thi, wahi ab yaha bhi */}
+        {hasGst && (
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl shadow-sm p-6 border border-emerald-200">
+            <div className="flex items-center gap-2 mb-4">
+              <HiOutlineDocumentText className="text-emerald-600" />
+              <h3 className="text-sm font-semibold text-gray-800">GST Summary</h3>
+            </div>
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between py-1.5 border-b border-emerald-100">
+                <span className="text-gray-600">Total Basic Amount</span>
+                <span className="font-medium">₹ {gstTotals.basic.toFixed(2)}</span>
+              </div>
+              {gstTotals.cgst > 0 || gstTotals.sgst > 0 ? (
+                <>
+                  <div className="flex justify-between py-1.5 border-b border-emerald-100">
+                    <span className="text-gray-600">CGST</span>
+                    <span className="font-medium">₹ {gstTotals.cgst.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between py-1.5 border-b border-emerald-100">
+                    <span className="text-gray-600">SGST</span>
+                    <span className="font-medium">₹ {gstTotals.sgst.toFixed(2)}</span>
+                  </div>
+                </>
+              ) : gstTotals.igst > 0 ? (
+                <div className="flex justify-between py-1.5 border-b border-emerald-100">
+                  <span className="text-gray-600">IGST</span>
+                  <span className="font-medium">₹ {gstTotals.igst.toFixed(2)}</span>
+                </div>
+              ) : null}
+              <div className="flex justify-between pt-2 text-base font-bold border-t-2 border-emerald-300">
+                <span>Total Tax Amount</span>
+                <span className="text-emerald-700">₹ {gstTotals.tax.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between pt-2 text-base font-bold">
+                <span>Net Total (incl. Tax)</span>
+                <span className="text-emerald-700">₹ {gstTotals.net.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

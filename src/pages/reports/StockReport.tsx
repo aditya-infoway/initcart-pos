@@ -110,8 +110,7 @@ const fetchStockData = async (branchId?: string) => {
       : `stock-report/?page=1&page_size=10000`;
     const res = await api.get(url);
 
-      console.log("📊 Stock API response:", res.data);
-
+     
       // Backend paginated response: { count, next, previous, results }
       let items: any[] = [];
 

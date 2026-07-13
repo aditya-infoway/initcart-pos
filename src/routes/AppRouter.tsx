@@ -55,6 +55,7 @@ import SalesProfitReport from "../pages/registers/SalesProfitReport";
 import BranchOrderRequest from "../pages/transactions/BranchOrderRequest";
 import StockReturnManagement from "../pages/transactions/stockmanagement";
 import StockReturn from "../pages/transactions/stockreturn";
+import BranchMaster from "../pages/accounts/BranchMaster";
 // import AccountCreationForm from "../pages/accounts/AccountCreationForm";
 
 const AppRouter = () => (
@@ -122,6 +123,7 @@ const AppRouter = () => (
         <Route path="/order-items" element={<BranchOrderRequest/>}/>
         <Route path="/stockReturnverification" element={<StockReturnManagement/>}/>
         <Route path="/stockReturn" element={<StockReturn/>}/>
+        <Route path="/branchMaster" element={<BranchMaster/>}/>
         {/* <Route path="/productcategory" element={<ProductCategory />} />
         <Route path="/servicecategory" element={<ServiceCategory />} />
         <Route path="/productvendor" element={<ProductVendor />} />

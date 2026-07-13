@@ -17,6 +17,8 @@ import api from "../../api/api";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 
+import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const VARIANT_BY_BRANCH: Record<string, string[]> = {
@@ -759,6 +761,8 @@ const ItemsTable = ({ items, onDelete, totals }: any) => (
 const SalesEntryForm: React.FC = () => {
   const navigate = useNavigate();
 
+  const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
+
   // ── Cart & counter ──
   const [addedItems, setAddedItems] = useState<Item[]>([]);
   const [idCounter, setIdCounter] = useState<number>(1);
@@ -976,6 +980,8 @@ const SalesEntryForm: React.FC = () => {
   };
 
   const handleSubmit = async (values: FormValues) => {
+        const locationOk = await checkLocation();
+    if (!locationOk) return;
     if (addedItems.length === 0) { toast.error("At least one item is required"); return; }
     if ((values.paymentTerms === "Cash" || values.paymentTerms === "Bank") && !values.account) {
       toast.error("Please select account");
