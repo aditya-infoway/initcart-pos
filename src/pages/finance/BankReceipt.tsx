@@ -5,6 +5,7 @@ import api from "../../api/api";
 import { toast } from "react-toastify";
 import { FaSearch, FaTimes, FaFileExcel } from "react-icons/fa";
 import * as XLSX from "xlsx";
+import { printReceipt } from "../../utils/ReceiptPrint";
 
 /* ---------------- VALIDATION ---------------- */
 const today = new Date().toISOString().split("T")[0];
@@ -44,7 +45,7 @@ const validationSchema = Yup.object({
   voucherNo: Yup.string().required("Voucher No is required"),
   date: Yup.string().required("Date is required"),
   opAccount: Yup.number().nullable().when("receiptType", {
-    is: (val: string) => val !== "stockTransfer" && val !== "stockReturn",
+    is: (val: string) => val !== "stockTransfer" && val !== "stockReturn" && val !== "b2bSale", 
     then: (schema) => schema.required("Party is required"),
     otherwise: (schema) => schema.nullable(),
   }),
@@ -368,6 +369,90 @@ const StockReturnDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill
       {isOpen && !loading && bills.length === 0 && (
         <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 p-4 text-center text-gray-500 text-sm">
           No pending stock return bills
+        </div>
+      )}
+    </div>
+  );
+};
+
+// B2BSaleDropdown — Superadmin ke pending B2B Sales dikhata hai (Stock Transfer wala exact pattern)
+const B2BSaleDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
+  const [bills, setBills] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string>("");
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    const loadBills = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get(`b2b-sale-credit-bills/`);
+        setBills(res.data.bills || []);
+      } catch (err) {
+        console.error("Failed to load B2B sale bills:", err);
+        toast.error("Failed to load B2B sale bills");
+        setBills([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadBills();
+  }, [refreshKey]);
+
+  const selectedBill = bills.find((b) => String(b.id) === selectedId);
+
+  return (
+    <div className="relative">
+      <label className="block text-sm font-medium mb-1">Select B2B Sale Bill</label>
+      <div
+        className="w-full p-2 border rounded bg-white cursor-pointer flex justify-between items-center"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span className={selectedBill ? "text-gray-900" : "text-gray-500"}>
+          {selectedBill
+            ? `${selectedBill.sale_no} — ${selectedBill.linked_account_name || "⚠ No account linked"} — ₹${Number(selectedBill.pending_amount).toFixed(2)}`
+            : loading ? "Loading..." : bills.length === 0 ? "No pending bills" : "-- Select Sale --"}
+        </span>
+        <span className="text-gray-400">▼</span>
+      </div>
+
+      {isOpen && !loading && bills.length > 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 overflow-hidden" style={{ maxHeight: '200px' }}>
+          <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
+            {bills.map((bill) => (
+              <div
+                key={bill.id}
+                className={`p-2 border-b last:border-b-0 text-sm ${
+                  bill.linked_account_id ? "hover:bg-blue-50 cursor-pointer" : "opacity-60 cursor-not-allowed bg-gray-50"
+                }`}
+                onClick={() => {
+                  if (!bill.linked_account_id) {
+                    toast.error(`${bill.to_branch_name} Sundry account not linked.`);
+                    return;
+                  }
+                  setSelectedId(String(bill.id));
+                  onSelectBill(bill);
+                  setIsOpen(false);
+                }}
+              >
+                <div className="flex justify-between">
+                  <span className="font-medium">{bill.sale_no}</span>
+                  <span className={bill.linked_account_id ? "text-gray-600" : "text-red-500 font-medium"}>
+                    {bill.linked_account_name || "⚠ No account linked"}
+                  </span>
+                </div>
+                <div className="text-xs text-orange-600">
+                  Pending: ₹{Number(bill.pending_amount).toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isOpen && !loading && bills.length === 0 && (
+        <div className="absolute right-0 mt-1 w-full bg-white border rounded shadow-lg z-50 p-4 text-center text-gray-500 text-sm">
+          No pending B2B sale bills
         </div>
       )}
     </div>
@@ -717,6 +802,26 @@ const BankReceipt: React.FC = () => {
         return;
       }
 
+      // ✅ NEW — For B2B Sale bill — party auto-selected on backend (to_branch)
+      if (values.selectedBill && values.receiptType === 'b2bSale') {
+        const b2bSalePayload = {
+          b2b_sale_bill_id: values.selectedBill.id,
+          bank_account: values.bankAccount,
+          amount: values.amount,
+          date: values.date,
+          mode: values.mode,
+          cheque_no: values.mode === "CHEQUE" ? values.chequeNo : null,
+          cheque_date: values.mode === "CHEQUE" ? values.chequeDate : null,
+          cheque_clear_date: values.mode === "CHEQUE" ? values.chequeClearDate : null,
+        };
+        const res = await api.post("/receive-b2b-sale-bill-bank/", b2bSalePayload);
+        toast.success(res.data.message || "B2B Sale payment received successfully");
+        resetForm();
+        setOpen(false);
+        fetchReceipts(currentPage);
+        return;
+      }
+
       // For Stock Return bill — party auto-selected on backend (own Sundry Creditor(Main))
       if (values.selectedBill && values.receiptType === 'stockReturn') {
         const stockReturnPayload = {
@@ -852,6 +957,7 @@ const BankReceipt: React.FC = () => {
           <option value="SBR">SBR</option>
           <option value="PRBR">PRBR</option>
           {isSuperAdmin && <option value="STBR">STBR</option>}
+          {isSuperAdmin && <option value="B2BBR">B2BSBR</option>}
           {isBranch && <option value="STRBR">STRBR</option>}
         </select>
 
@@ -880,6 +986,7 @@ const BankReceipt: React.FC = () => {
               <th className="p-3 border border-gray-200 whitespace-nowrap">Cheque No</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Cheque Date</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Clear Date</th>
+              <th className="p-3 border border-gray-200 whitespace-nowrap">Receipt</th>
             </tr>
           </thead>
           <tbody className="text-center">
@@ -912,7 +1019,19 @@ const BankReceipt: React.FC = () => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.mode || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_no || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_date || "-"}</td>
-                  <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_clear_date || "-"}</td>
+
+
+
+<td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_clear_date || "-"}</td>
+<td className="p-3 border border-gray-200 whitespace-nowrap">
+  <button
+    type="button"
+    onClick={() => printReceipt(r, "bank")}
+    className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
+  >
+    Print
+  </button>
+</td>
                 </tr>
               ))
             ) : (
@@ -1112,6 +1231,25 @@ const BankReceipt: React.FC = () => {
                               <span>Stock Transfer</span>
                             </label>
                           )}
+
+                          {/* ✅ NEW — B2B Sale, superadmin only */}
+                          {isSuperAdmin && (
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                value="b2bSale"
+                                checked={values.receiptType === "b2bSale"}
+                                onChange={() => {
+                                  setFieldValue("receiptType", "b2bSale");
+                                  setFieldValue("billNo", "");
+                                  setFieldValue("selectedBill", null);
+                                  setFieldValue("opAccount", null);
+                                }}
+                              />
+                              <span>B2B Sale</span>
+                            </label>
+                          )}
+
                           {/* Stock Return, branch users only */}
                           {isBranch && (
                             <label className="flex items-center gap-2">
@@ -1191,6 +1329,32 @@ const BankReceipt: React.FC = () => {
                         </div>
                       )}
 
+                    {/* ✅ NEW — B2B Sale section */}
+                      {values.receiptType === "b2bSale" && (
+                        <div className="bg-gray-50 p-4 rounded-lg border">
+                          <div className="relative">
+                            <B2BSaleDropdown
+                              refreshKey={open ? 1 : 0}
+                              onSelectBill={(bill: any) => {
+                                setFieldValue("billNo", bill.sale_no);
+                                setFieldValue("selectedBill", bill);
+                                setFieldValue("amount", bill.pending_amount);
+                                toast.success(`Sale ${bill.sale_no} selected. Pending: ₹${bill.pending_amount}`);
+                              }}
+                            />
+                          </div>
+                          {values.selectedBill && (
+                            <div className="mt-3 p-2 bg-green-50 rounded text-sm">
+                              <p><strong>Sale No:</strong> {values.selectedBill.sale_no}</p>
+                              <p><strong>Branch:</strong> {values.selectedBill.to_branch_name}</p>
+                              <p><strong>Party (Linked Account):</strong> {values.selectedBill.linked_account_name || "⚠ Not linked"}</p>
+                              <p><strong>Pending Amount:</strong> ₹{values.selectedBill.pending_amount}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+
                       {/* Stock Return section */}
                       {values.receiptType === "stockReturn" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
@@ -1224,7 +1388,7 @@ const BankReceipt: React.FC = () => {
                           <hr className="border-t-2 border-dashed border-blue-300 my-2" />
                         </div>
                         
-                        {values.receiptType === "stockTransfer" || values.receiptType === "stockReturn" ? (
+                        {values.receiptType === "stockTransfer" || values.receiptType === "stockReturn" || values.receiptType === "b2bSale" ? (
                           <div className="col-span-3 md:col-span-2">
                             <label className="block text-sm font-medium mb-1">Party Name (Linked Account)</label>
                             <div className="w-full p-2 border rounded bg-gray-100 text-gray-700">

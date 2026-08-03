@@ -153,8 +153,9 @@ const AccountSelect: React.FC<{ name: string; terms: string }> = ({ name, terms 
 // ─── CustomerAddModal ─────────────────────────────────────────────────────────
 
 const CustomerAddModal = ({ isOpen, onClose, onCustomerAdded }: any) => {
-  const [fd, setFd] = useState({ account_name: "", state: "", mobile: "", address: "" });
+  const [fd, setFd] = useState({ account_name: "", state: "", mobile: "", email: "", address: "" });
   const [loading, setLoading] = useState(false);
+ 
   const submit = async () => {
     if (!fd.account_name) { toast.error("Name required"); return; }
     if (!fd.state) { toast.error("State required"); return; }
@@ -163,7 +164,7 @@ const CustomerAddModal = ({ isOpen, onClose, onCustomerAdded }: any) => {
       const r = await api.post("customer-create/", fd);
       toast.success("Customer added");
       onCustomerAdded(r.data.customer); onClose();
-      setFd({ account_name: "", state: "", mobile: "", address: "" });
+      setFd({ account_name: "", state: "", mobile: "", email: "", address: "" });
     } catch (e: any) { toast.error(e.response?.data?.message || "Failed"); }
     finally { setLoading(false); }
   };
@@ -181,6 +182,7 @@ const CustomerAddModal = ({ isOpen, onClose, onCustomerAdded }: any) => {
             { label: "Customer Name *", key: "account_name", type: "text" },
             { label: "State *", key: "state", type: "text" },
             { label: "Mobile", key: "mobile", type: "tel" },
+            { label: "Email", key: "email", type: "email" },
           ].map(({ label, key, type }) => (
             <div key={key}>
               <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">{label}</label>
@@ -249,7 +251,7 @@ const ReferralCodeInput: React.FC<{ name: string; onVerified: (data: any) => voi
   const [toggleStatus, setToggleStatus] = useState<{ walk_in_toggle: boolean; mode: string; description: string } | null>(null);
   const lookupCalledByEnter = useRef(false);
   const isVerifying = useRef(false);
-  const blurTimeout = useRef<number | null>(null); //  NEW
+  const blurTimeout = useRef<number | null>(null);
 
   useEffect(() => {
     const fetchToggle = async () => {
@@ -779,6 +781,12 @@ const SalesEntryForm2: React.FC = () => {
   //  NEW: Referral agent state
   const [referralAgentData, setReferralAgentData] = useState<any>(null);
 
+  //  NEW: prevents duplicate submissions (double-click / slow network) while
+  //  a sale is being saved (and the receipt email is being sent in the background).
+  //  null = idle, "save" = Save button in-flight, "print" = Finish & Print in-flight.
+  const [submitAction, setSubmitAction] = useState<null | "save" | "print">(null);
+  const isSubmitting = submitAction !== null;
+
   const setFieldValueRef = useRef<any>(null);
   const formValuesRef = useRef<any>(null);
 
@@ -967,34 +975,55 @@ const SalesEntryForm2: React.FC = () => {
 
   // ── FINISH: save only, redirect ──
   const handleFinish = async (values: FormValues) => {
-        const locationOk = await checkLocation();
+    //  Guard: ignore extra clicks while a save is already in progress
+    if (isSubmitting) return;
+
+    const locationOk = await checkLocation();
     if (!locationOk) return;
 
     const err = validateCart(values);
     if (err) { toast.error(err); return; }
+
+    setSubmitAction("save");
+    const toastId = toast.info("Saving sale & sending receipt email... please wait, don't click again.", { autoClose: false });
     try {
       const r = await api.post("salesentry-create/", buildPayload(values));
-      toast.success("Sale saved!");
+      toast.update(toastId, { render: "Sale saved successfully!", type: "success", autoClose: 2500, isLoading: false });
       if (r.data.stock_alerts) r.data.stock_alerts.forEach((m: any) => toast.error(m));
       setAddedItems([]); setIdCounter(1);
       navigate("/Addsalesitem");
-    } catch { toast.error("Error saving sale"); }
+    } catch {
+      toast.update(toastId, { render: "Error saving sale", type: "error", autoClose: 3000, isLoading: false });
+    } finally {
+      setSubmitAction(null);
+    }
   };
 
   // ── PRINT: save + show receipt ──
   const handlePrint = async (values: FormValues) => {
+    //  Guard: ignore extra clicks while a save is already in progress
+    if (isSubmitting) return;
+
     const locationOk = await checkLocation();
-if (!locationOk) return;
+    if (!locationOk) return;
+
     const err = validateCart(values);
     if (err) { toast.error(err); return; }
+
+    setSubmitAction("print");
+    const toastId = toast.info("Saving sale & sending receipt email... please wait, don't click again.", { autoClose: false });
     try {
       const r = await api.post("salesentry-create/", buildPayload(values));
-      toast.success("Sale saved!");
+      toast.update(toastId, { render: "Sale saved successfully!", type: "success", autoClose: 2500, isLoading: false });
       if (r.data.stock_alerts) r.data.stock_alerts.forEach((m: any) => toast.error(m));
       setSavedSaleId(r.data.id);
       setAddedItems([]); setIdCounter(1);
       setShowReceiptModal(true);
-    } catch { toast.error("Error saving sale"); }
+    } catch {
+      toast.update(toastId, { render: "Error saving sale", type: "error", autoClose: 3000, isLoading: false });
+    } finally {
+      setSubmitAction(null);
+    }
   };
 
   const initialValues: FormValues = {
@@ -1058,7 +1087,7 @@ if (!locationOk) return;
               onKeyDown={e => { const t = e.target as HTMLElement; if (e.key === "Enter" && t.tagName !== "BUTTON" && t.tagName !== "TEXTAREA") e.preventDefault(); }}>
 
               {/* ══════════════════════════════════════
-                  LEFT 65% — Items
+                  LEFT — Items
               ══════════════════════════════════════ */}
               <div className="flex-1 flex flex-col overflow-hidden border-r border-slate-200">
 
@@ -1110,7 +1139,7 @@ if (!locationOk) return;
                 {/* Grid / List */}
                 <div className="flex-1 overflow-y-auto p-4">
                   {viewMode === "grid" ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-3">
                       {filteredItems.map((item, i) => (
                         <ProductCard key={i} item={item} onAdd={addItemToCart} branchType={branchType} />
                       ))}
@@ -1171,168 +1200,200 @@ if (!locationOk) return;
               </div>
 
               {/* ══════════════════════════════════════
-                  RIGHT 35% — Billing Panel
+                  RIGHT — Billing Panel
+                  Everything above the action buttons scrolls together;
+                  the Save / Finish & Print buttons stay pinned at the bottom.
               ══════════════════════════════════════ */}
-              <div className="w-[380px] xl:w-[420px] flex flex-col shrink-0 overflow-hidden"
+              <div className="w-[460px] xl:w-[520px] shrink-0 relative overflow-hidden"
                 style={{ background: "linear-gradient(180deg, #eff6ff 0%, #f0f4ff 100%)" }}>
 
-                {/* Panel header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-blue-200 bg-white/70 shrink-0">
-                  <h2 className="text-sm font-black text-blue-700 flex items-center gap-2">
-                    <FaReceipt className="text-blue-500" size={13} /> Billing
-                  </h2>
-                  <button type="button" onClick={() => { setAddedItems([]); setIdCounter(1); }}
-                    className="flex items-center gap-1 text-[11px] text-red-500 hover:text-red-700 font-bold transition">
-                    <FaTimes size={9} /> RESET
-                  </button>
-                </div>
+                {/* ── Scrollable billing content ──
+                    Positioned absolutely to fill the panel, independent of the
+                    fixed button bar below. pb-24 leaves room so the last item
+                    is never hidden behind the fixed buttons. */}
+                <div className="absolute inset-0 overflow-y-auto flex flex-col pb-24">
 
-                {/* Bill details */}
-                <div className="px-3 py-3 border-b border-blue-200 bg-white/50 space-y-2.5 shrink-0">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide flex items-center gap-1 mb-1">
-                        <FaCalendarAlt size={8} /> Date
-                      </label>
-                      <BillingInput name="date" type="date" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide flex items-center gap-1 mb-1">
-                        <FaFileInvoice size={8} /> Invoice No
-                      </label>
-                      <div className="w-full px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-[11px] font-mono text-blue-700 truncate">
-                        {values.billNo || "Auto Generated"}
-                      </div>
-                    </div>
+                  {/* Panel header */}
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-blue-200 bg-white/70 shrink-0">
+                    <h2 className="text-sm font-black text-blue-700 flex items-center gap-2">
+                      <FaReceipt className="text-blue-500" size={13} /> Billing
+                    </h2>
+                    <button type="button" onClick={() => { setAddedItems([]); setIdCounter(1); }}
+                      className="flex items-center gap-1 text-[11px] text-red-500 hover:text-red-700 font-bold transition">
+                      <FaTimes size={9} /> RESET
+                    </button>
                   </div>
 
-                  <PartySelect name="customerName" />
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide mb-1 block">Payment</label>
-                      <BillingSelect name="paymentTerms" options={paymentTerms} />
-                    </div>
-                    {values.paymentTerms?.toLowerCase() === "credit" ? (
+                  {/* Bill details */}
+                  <div className="px-3 py-3 border-b border-blue-200 bg-white/50 space-y-2.5 shrink-0">
+                    <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide mb-1 block">Due Date</label>
-                        <BillingInput name="dueDate" type="date" />
+                        <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide flex items-center gap-1 mb-1">
+                          <FaCalendarAlt size={8} /> Date
+                        </label>
+                        <BillingInput name="date" type="date" />
                       </div>
-                    ) : (
+                      <div>
+                        <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide flex items-center gap-1 mb-1">
+                          <FaFileInvoice size={8} /> Invoice No
+                        </label>
+                        <div className="w-full px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-[11px] font-mono text-blue-700 truncate">
+                          {values.billNo || "Auto Generated"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <PartySelect name="customerName" />
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide mb-1 block">Payment</label>
+                        <BillingSelect name="paymentTerms" options={paymentTerms} />
+                      </div>
+                      {values.paymentTerms?.toLowerCase() === "credit" ? (
+                        <div>
+                          <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide mb-1 block">Due Date</label>
+                          <BillingInput name="dueDate" type="date" />
+                        </div>
+                      ) : (
+                        <AccountSelect name="account" terms={values.paymentTerms} />
+                      )}
+                    </div>
+                    {values.paymentTerms?.toLowerCase() === "credit" && (
                       <AccountSelect name="account" terms={values.paymentTerms} />
                     )}
+                    
+                    {/* ──  NEW: Referral Code Input ── */}
+                    <ReferralCodeInput 
+                      name="referralCode" 
+                      onVerified={(data) => setReferralAgentData(data)}
+                    />
                   </div>
-                  {values.paymentTerms?.toLowerCase() === "credit" && (
-                    <AccountSelect name="account" terms={values.paymentTerms} />
-                  )}
-                  
-                  {/* ──  NEW: Referral Code Input ── */}
-                  <ReferralCodeInput 
-                    name="referralCode" 
-                    onVerified={(data) => setReferralAgentData(data)}
-                  />
-                </div>
 
-                {/* Cart column headers */}
-                <div className="flex items-center px-3 py-1.5 border-b border-blue-200 bg-blue-100/60 shrink-0">
-                  <span className="flex-1 text-[10px] font-bold text-blue-600 uppercase tracking-wide">ITEM</span>
-                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wide mr-8">QTY</span>
-                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">AMOUNT</span>
-                </div>
+                  {/* Cart column headers */}
+                  <div className="flex items-center px-3 py-1.5 border-b border-blue-200 bg-blue-100/60 shrink-0">
+                    <span className="flex-1 text-[10px] font-bold text-blue-600 uppercase tracking-wide">ITEM</span>
+                    <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wide mr-8">QTY</span>
+                    <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">AMOUNT</span>
+                  </div>
 
-                {/* Cart */}
-                <div className="flex-1 overflow-y-auto px-3">
-                  <AnimatePresence>
-                    {addedItems.map(item => (
-                      <CartItemRow key={item.id} item={item}
-                        onQtyChange={(id, qty) => updateItem(id, { quantity: qty })}
-                        onPriceChange={(id, price) => updateItem(id, { price })}
-                        onDiscountChange={(id, disc) => updateItem(id, { discountPercent: disc })}
-                        onDelete={id => setAddedItems(p => p.filter(i => i.id !== id))}
-                      />
-                    ))}
-                  </AnimatePresence>
-                  {addedItems.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-10 text-blue-200">
-                      <FaShoppingCart size={32} />
-                      <p className="mt-2 text-xs font-medium text-blue-300">Cart is empty</p>
-                      <p className="text-[11px] text-blue-200 mt-0.5">Click items on the left to add</p>
+                  {/* Cart */}
+                  <div className="px-3">
+                    <AnimatePresence>
+                      {addedItems.map(item => (
+                        <CartItemRow key={item.id} item={item}
+                          onQtyChange={(id, qty) => updateItem(id, { quantity: qty })}
+                          onPriceChange={(id, price) => updateItem(id, { price })}
+                          onDiscountChange={(id, disc) => updateItem(id, { discountPercent: disc })}
+                          onDelete={id => setAddedItems(p => p.filter(i => i.id !== id))}
+                        />
+                      ))}
+                    </AnimatePresence>
+                    {addedItems.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-10 text-blue-200">
+                        <FaShoppingCart size={32} />
+                        <p className="mt-2 text-xs font-medium text-blue-300">Cart is empty</p>
+                        <p className="text-[11px] text-blue-200 mt-0.5">Click items on the left to add</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Summary */}
+                  <div className="shrink-0 border-t border-blue-200 bg-white/80">
+                    {/* Extra charges */}
+                    <div className="px-3 pt-2 pb-1">
+                      <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wide mb-1.5">Additional Charges</p>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[
+                          { name: "freightCharge", ph: "Freight" },
+                          { name: "otherExpense", ph: "Other Exp" },
+                          { name: "roundAmount", ph: "Round Off" },
+                        ].map(({ name, ph }) => (
+                          <div key={name}>
+                            <label className="text-[9px] text-slate-500 block mb-0.5">{ph}</label>
+                            <input type="number" value={(values as any)[name]}
+                              onChange={e => setFieldValue(name, e.target.value)}
+                              placeholder="0"
+                              className="w-full px-2 py-1.5 text-xs border border-blue-200 rounded-lg bg-white text-center focus:ring-1 focus:ring-blue-400" />
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  )}
-                </div>
 
-                {/* Summary + Actions */}
-                <div className="shrink-0 border-t border-blue-200 bg-white/80">
-                  {/* Extra charges */}
-                  <div className="px-3 pt-2 pb-1">
-                    <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wide mb-1.5">Additional Charges</p>
-                    <div className="grid grid-cols-3 gap-1.5">
+                    {/* Summary rows */}
+                    <div className="px-3 py-2 space-y-1 border-t border-blue-100">
                       {[
-                        { name: "freightCharge", ph: "Freight" },
-                        { name: "otherExpense", ph: "Other Exp" },
-                        { name: "roundAmount", ph: "Round Off" },
-                      ].map(({ name, ph }) => (
-                        <div key={name}>
-                          <label className="text-[9px] text-slate-500 block mb-0.5">{ph}</label>
-                          <input type="number" value={(values as any)[name]}
-                            onChange={e => setFieldValue(name, e.target.value)}
-                            placeholder="0"
-                            className="w-full px-2 py-1.5 text-xs border border-blue-200 rounded-lg bg-white text-center focus:ring-1 focus:ring-blue-400" />
+                        { label: "Subtotal (Taxable)", value: `₹${totals.totalBasic.toFixed(2)}`, cls: "" },
+                        { label: "Total Discount", value: `-₹${totals.totalDiscount.toFixed(2)}`, cls: "text-emerald-600" },
+                        ...(totals.totalCgst > 0 || totals.totalSgst > 0
+                          ? [{ label: "CGST + SGST", value: `₹${(totals.totalCgst + totals.totalSgst).toFixed(2)}`, cls: "text-purple-600" }]
+                          : totals.totalIgst > 0
+                          ? [{ label: "IGST", value: `₹${totals.totalIgst.toFixed(2)}`, cls: "text-purple-600" }]
+                          : []),
+                        { label: "Estimated Tax", value: `₹${totals.totalTax.toFixed(2)}`, cls: "text-purple-600" },
+                        ...(Number(values.freightCharge || 0) > 0 ? [{ label: "Freight", value: `₹${Number(values.freightCharge).toFixed(2)}`, cls: "" }] : []),
+                        ...(Number(values.otherExpense || 0) > 0 ? [{ label: "Other Expense", value: `₹${Number(values.otherExpense).toFixed(2)}`, cls: "" }] : []),
+                        ...(Number(values.roundAmount || 0) !== 0 ? [{ label: "Round Off", value: `₹${Number(values.roundAmount).toFixed(2)}`, cls: "" }] : []),
+                      ].map((row: any) => (
+                        <div key={row.label} className="flex justify-between text-[11px]">
+                          <span className="text-slate-500">{row.label}</span>
+                          <span className={`font-semibold ${row.cls || "text-slate-700"}`}>{row.value}</span>
                         </div>
                       ))}
                     </div>
-                  </div>
 
-                  {/* Summary rows */}
-                  <div className="px-3 py-2 space-y-1 border-t border-blue-100">
-                    {[
-                      { label: "Subtotal (Taxable)", value: `₹${totals.totalBasic.toFixed(2)}`, cls: "" },
-                      { label: "Total Discount", value: `-₹${totals.totalDiscount.toFixed(2)}`, cls: "text-emerald-600" },
-                      ...(totals.totalCgst > 0 || totals.totalSgst > 0
-                        ? [{ label: "CGST + SGST", value: `₹${(totals.totalCgst + totals.totalSgst).toFixed(2)}`, cls: "text-purple-600" }]
-                        : totals.totalIgst > 0
-                        ? [{ label: "IGST", value: `₹${totals.totalIgst.toFixed(2)}`, cls: "text-purple-600" }]
-                        : []),
-                      { label: "Estimated Tax", value: `₹${totals.totalTax.toFixed(2)}`, cls: "text-purple-600" },
-                      ...(Number(values.freightCharge || 0) > 0 ? [{ label: "Freight", value: `₹${Number(values.freightCharge).toFixed(2)}`, cls: "" }] : []),
-                      ...(Number(values.otherExpense || 0) > 0 ? [{ label: "Other Expense", value: `₹${Number(values.otherExpense).toFixed(2)}`, cls: "" }] : []),
-                      ...(Number(values.roundAmount || 0) !== 0 ? [{ label: "Round Off", value: `₹${Number(values.roundAmount).toFixed(2)}`, cls: "" }] : []),
-                    ].map((row: any) => (
-                      <div key={row.label} className="flex justify-between text-[11px]">
-                        <span className="text-slate-500">{row.label}</span>
-                        <span className={`font-semibold ${row.cls || "text-slate-700"}`}>{row.value}</span>
-                      </div>
-                    ))}
-                  </div>
+                    {/* Grand Total band */}
+                    <div className="mx-3 mb-2 flex items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl px-4 py-2.5 shadow-md shadow-blue-200">
+                      <span className="text-xs font-bold text-white/80">Grand Total</span>
+                      <span className="text-xl font-black text-white">₹{grandTotal.toFixed(2)}</span>
+                    </div>
 
-                  {/* Grand Total band */}
-                  <div className="mx-3 mb-2 flex items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl px-4 py-2.5 shadow-md shadow-blue-200">
-                    <span className="text-xs font-bold text-white/80">Grand Total</span>
-                    <span className="text-xl font-black text-white">₹{grandTotal.toFixed(2)}</span>
+                    {/* Narration */}
+                    <div className="px-3 pb-3">
+                      <textarea value={values.narration} onChange={e => setFieldValue("narration", e.target.value)}
+                        placeholder="Narration (optional)" rows={1}
+                        className="w-full px-2.5 py-1.5 text-xs border border-blue-200 rounded-lg bg-white/70 resize-none focus:ring-1 focus:ring-blue-400" />
+                    </div>
                   </div>
+                </div>
 
-                  {/* Narration */}
-                  <div className="px-3 pb-2">
-                    <textarea value={values.narration} onChange={e => setFieldValue("narration", e.target.value)}
-                      placeholder="Narration (optional)" rows={1}
-                      className="w-full px-2.5 py-1.5 text-xs border border-blue-200 rounded-lg bg-white/70 resize-none focus:ring-1 focus:ring-blue-400" />
-                  </div>
-
-                  {/* ── Action Buttons ── */}
-                  <div className="px-3 pb-3 grid grid-cols-2 gap-2">
-                    {/* FINISH — save only, go to list */}
-                    <button type="button"
-                      onClick={() => handleFinish(formValuesRef.current)}
-                      className="py-3 bg-slate-700 hover:bg-slate-800 text-white rounded-xl font-bold text-xs transition flex items-center justify-center gap-2 shadow">
-                      <FaSave size={12} /> SAVE
-                    </button>
-                    {/* PRINT — save + open receipt */}
-                    <button type="button"
-                      onClick={() => handlePrint(formValuesRef.current)}
-                      className="py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
-                      <FaPrint size={12} /> FINISH & PRINT
-                    </button>
-                  </div>
+                {/* ── Fixed Action Bar — pinned to the bottom of the panel, completely
+                    outside the scrollable billing content (Amazon "Buy Now" style).
+                    This bar's position never shifts, no matter how much the
+                    billing content above it scrolls. ── */}
+                <div className="absolute bottom-0 left-0 right-0 border-t border-blue-200 bg-white z-20 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] px-3 py-3 grid grid-cols-2 gap-2">
+                  {/* SAVE — save only, go to list */}
+                  <button type="button"
+                    onClick={() => handleFinish(formValuesRef.current)}
+                    disabled={isSubmitting}
+                    className="py-3 bg-slate-700 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs transition flex items-center justify-center gap-2 shadow">
+                    {submitAction === "save" ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-white/60 border-t-transparent rounded-full animate-spin" />
+                        SAVING...
+                      </>
+                    ) : (
+                      <>
+                        <FaSave size={12} /> SAVE
+                      </>
+                    )}
+                  </button>
+                  {/* PRINT — save + open receipt */}
+                  <button type="button"
+                    onClick={() => handlePrint(formValuesRef.current)}
+                    disabled={isSubmitting}
+                    className="py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
+                    {submitAction === "print" ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-white/60 border-t-transparent rounded-full animate-spin" />
+                        SAVING...
+                      </>
+                    ) : (
+                      <>
+                        <FaPrint size={12} /> FINISH & PRINT
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </Form>

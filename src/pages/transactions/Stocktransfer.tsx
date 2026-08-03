@@ -1239,7 +1239,7 @@ export default function StockTransfer() {
 
   async function loadBranches() {
     try {
-      const res = await api.get("branches/");
+      const res = await api.get("branches/?ownership_type=branch");
       const myId = getMyBranchId();
       setBranches((res.data.data || []).filter((b: BranchOption) => b.id !== myId && b.status === "active"));
     } catch { showMsg("Error loading branches", "error"); }
@@ -1946,7 +1946,7 @@ function DetailView({ detail, onBack, onComplete, onCancel }: {
           </table>
         </div>
 
-        {/* ✅ GST Summary Card - ONLY TOTAL GST */}
+        {/* GST Summary Card - ONLY TOTAL GST */}
         {hasGst && (
           <div className="mt-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
             <h4 className="text-sm font-semibold text-gray-700 mb-3">GST Summary</h4>

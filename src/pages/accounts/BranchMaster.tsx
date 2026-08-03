@@ -14,11 +14,13 @@ import {
 } from "react-icons/fa";
 import { MdClose, MdLocationOn } from "react-icons/md";
 import * as XLSX from "xlsx";
+import { Country, State, City } from "country-state-city";
 
 /* ---------------- TYPES ---------------- */
 interface Branch {
     id: number;
     branch_type: "fashion" | "mart" | "electronics";
+    ownership_type: "branch" | "franchise";
     branch_name: string;
     owner_name: string;
     email: string;
@@ -47,6 +49,7 @@ interface Branch {
 
 interface BranchFormValues {
     branch_type: "fashion" | "mart" | "electronics";
+    ownership_type: "branch" | "franchise"; 
     branch_name: string;
     owner_name: string;
     email: string;
@@ -70,6 +73,7 @@ interface BranchFormValues {
 // Create validation - all fields required including password and country
 const BranchCreateSchema = Yup.object().shape({
     branch_type: Yup.string().required("Branch Type is required"),
+    ownership_type: Yup.string().required("Business type is required"),
     branch_name: Yup.string().required("Branch Name is required"),
     owner_name: Yup.string().required("Owner Name is required"),
     email: Yup.string().email("Invalid email").required("Email is required"),
@@ -94,6 +98,7 @@ const BranchCreateSchema = Yup.object().shape({
 // Update validation - password and country are optional
 const BranchUpdateSchema = Yup.object().shape({
     branch_type: Yup.string().required("Branch Type is required"),
+    ownership_type: Yup.string().required("Business type is required"),
     branch_name: Yup.string().required("Branch Name is required"),
     owner_name: Yup.string().required("Owner Name is required"),
     email: Yup.string().email("Invalid email").required("Email is required"),
@@ -285,6 +290,28 @@ const ViewModal: React.FC<ViewModalProps> = ({ isOpen, onClose, branchId }) => {
                                 </div>
                                 <div className="font-semibold text-gray-800 mt-1">{branch.branch_name}</div>
                             </div>
+
+                                    {/* ✅ Display Ownership Type with Badge */}
+        <div>
+            <div className="text-xs text-gray-400 uppercase tracking-wide">Business Type</div>
+            <div className="mt-1">
+                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold 
+                    ${branch.ownership_type === 'franchise' 
+                        ? 'bg-gray-100 text-gray-700' 
+                        : 'bg-blue-100 text-blue-700'}`}
+                >
+                    {branch.ownership_type === 'franchise' ? (
+                        <>
+                            <span className="mr-1"></span> Franchise
+                        </>
+                    ) : (
+                        <>
+                            <span className="mr-1"></span> Branch
+                        </>
+                    )}
+                </span>
+            </div>
+        </div>
 
                             <div>
                                 <div className="text-xs text-gray-400 uppercase tracking-wide">Linked Account</div>
@@ -523,6 +550,9 @@ const BranchMaster: React.FC = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [debitorAccounts, setDebitorAccounts] = useState<{ id: number, account_name: string }[]>([]);
     const [creditorAccounts, setCreditorAccounts] = useState<{ id: number, account_name: string }[]>([]);
+    const [countries] = useState(Country.getAllCountries());
+    const [states, setStates] = useState<any[]>([]);
+    const [cities, setCities] = useState<any[]>([]);
 
 
     // File states
@@ -573,6 +603,33 @@ const BranchMaster: React.FC = () => {
             setCreditorAccounts(res.data.creditor_accounts || []);
         }).catch(() => { });
     }, [modalOpen, editingBranch]);
+
+    // Load states when country changes
+useEffect(() => {
+    if (editingBranch?.country) {
+        const countryData = Country.getAllCountries().find(
+            (c) => c.name === editingBranch.country
+        );
+        if (countryData) {
+            setStates(State.getStatesOfCountry(countryData.isoCode));
+        }
+    }
+}, [editingBranch]);
+
+// Load cities when state changes
+useEffect(() => {
+    if (editingBranch?.state && editingBranch?.country) {
+        const countryData = Country.getAllCountries().find(
+            (c) => c.name === editingBranch.country
+        );
+        const stateData = State.getStatesOfCountry(countryData?.isoCode || "").find(
+            (s) => s.name === editingBranch.state
+        );
+        if (countryData && stateData) {
+            setCities(City.getCitiesOfState(countryData.isoCode, stateData.isoCode));
+        }
+    }
+}, [editingBranch]);
 
     useEffect(() => {
         fetchBranches(currentPage);
@@ -906,6 +963,7 @@ const BranchMaster: React.FC = () => {
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Logo</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Branch Name</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Type</th>
+                            <th className="p-3 border border-gray-200 whitespace-nowrap">Business</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Owner</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Email</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Phone</th>
@@ -947,6 +1005,14 @@ const BranchMaster: React.FC = () => {
                                             {getBranchTypeDisplay(branch.branch_type)}
                                         </span>
                                     </td>
+
+                                                    <td className="p-3 border border-gray-200 whitespace-nowrap">
+                    <span className={`px-2 py-1 rounded text-xs font-semibold ${branch.ownership_type === 'franchise' 
+                        ? 'bg-gray-100 text-gray-700' 
+                        : 'bg-gray-100 text-gray-700'}`}>
+                        {branch.ownership_type === 'franchise' ? 'Franchise' : 'Branch'}
+                    </span>
+                </td>
                                     <td className="p-3 border border-gray-200 whitespace-nowrap">
                                         {branch.owner_name}
                                     </td>
@@ -1117,6 +1183,7 @@ const BranchMaster: React.FC = () => {
                         <Formik
                             initialValues={{
                                 branch_type: editingBranch?.branch_type || "fashion",
+                                ownership_type: editingBranch?.ownership_type || "branch",
                                 branch_name: editingBranch?.branch_name || "",
                                 owner_name: editingBranch?.owner_name || "",
                                 email: editingBranch?.email || "",
@@ -1164,6 +1231,8 @@ const BranchMaster: React.FC = () => {
                                                 <div className="text-red-500 text-xs mt-1">{errors.branch_type}</div>
                                             )}
                                         </div>
+
+ 
 
                                         <div>
                                             <label className="text-sm font-medium block mb-1">Branch Name *</label>
@@ -1275,163 +1344,268 @@ const BranchMaster: React.FC = () => {
 
                                    
 
-                                    {/* Branch Linked Account — single dropdown (Sundry Debitor OR Creditor) */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="text-sm font-medium block mb-1">
-                                                Linked Account (Sundry Debitor / Creditor)
-                                            </label>
-                                            <select
-                                                name="linked_account"
-                                                value={
-                                                    values.sundry_debitor_account ||
-                                                    values.sundry_creditor_account ||
-                                                    ""
-                                                }
-                                                onChange={(e) => {
-                                                    const selectedId = e.target.value;
-                                                    if (!selectedId) {
-                                                        setFieldValue("sundry_debitor_account", "");
-                                                        setFieldValue("sundry_creditor_account", "");
-                                                        return;
-                                                    }
-                                                    const isDebitor = debitorAccounts.some(
-                                                        (a) => String(a.id) === selectedId
-                                                    );
-                                                    if (isDebitor) {
-                                                        setFieldValue("sundry_debitor_account", selectedId);
-                                                        setFieldValue("sundry_creditor_account", "");
-                                                    } else {
-                                                        setFieldValue("sundry_creditor_account", selectedId);
-                                                        setFieldValue("sundry_debitor_account", "");
-                                                    }
-                                                }}
-                                                className="w-full border p-2 rounded border-gray-300"
-                                            >
-                                                <option value="">-- Select Account --</option>
-                                                {debitorAccounts.length > 0 && (
-                                                    <optgroup label="Sundry Debitor Accounts">
-                                                        {debitorAccounts.map((a) => (
-                                                            <option key={`d-${a.id}`} value={a.id}>
-                                                                {a.account_name}
-                                                            </option>
-                                                        ))}
-                                                    </optgroup>
-                                                )}
-                                                {creditorAccounts.length > 0 && (
-                                                    <optgroup label="Sundry Creditor Accounts">
-                                                        {creditorAccounts.map((a) => (
-                                                            <option key={`c-${a.id}`} value={a.id}>
-                                                                {a.account_name}
-                                                            </option>
-                                                        ))}
-                                                    </optgroup>
-                                                )}
-                                            </select>
-                                        </div>
-                                    </div>
+{/* Branch Linked Account + Business Type - SAME ROW */}
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    {/* Linked Account Dropdown */}
+    <div>
+        <label className="text-sm font-medium block mb-1">
+            Linked Account (Sundry Debitor / Creditor)
+        </label>
+        <select
+            name="linked_account"
+            value={
+                values.sundry_debitor_account ||
+                values.sundry_creditor_account ||
+                ""
+            }
+            onChange={(e) => {
+                const selectedId = e.target.value;
+                if (!selectedId) {
+                    setFieldValue("sundry_debitor_account", "");
+                    setFieldValue("sundry_creditor_account", "");
+                    return;
+                }
+                const isDebitor = debitorAccounts.some(
+                    (a) => String(a.id) === selectedId
+                );
+                if (isDebitor) {
+                    setFieldValue("sundry_debitor_account", selectedId);
+                    setFieldValue("sundry_creditor_account", "");
+                } else {
+                    setFieldValue("sundry_creditor_account", selectedId);
+                    setFieldValue("sundry_debitor_account", "");
+                }
+            }}
+            className="w-full border p-2 rounded border-gray-300"
+        >
+            <option value="">-- Select Account --</option>
+            {debitorAccounts.length > 0 && (
+                <optgroup label="Sundry Debitor Accounts">
+                    {debitorAccounts.map((a) => (
+                        <option key={`d-${a.id}`} value={a.id}>
+                            {a.account_name}
+                        </option>
+                    ))}
+                </optgroup>
+            )}
+            {creditorAccounts.length > 0 && (
+                <optgroup label="Sundry Creditor Accounts">
+                    {creditorAccounts.map((a) => (
+                        <option key={`c-${a.id}`} value={a.id}>
+                            {a.account_name}
+                        </option>
+                    ))}
+                </optgroup>
+            )}
+        </select>
+    </div>
+
+    {/* ✅ Radio Buttons for Business Type - SAME ROW as Linked Account */}
+    <div>
+        <label className="text-sm font-medium block mb-1">Business Type *</label>
+        <div className="flex gap-6 mt-1.5">
+            <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                    type="radio"
+                    name="ownership_type"
+                    value="branch"
+                    checked={values.ownership_type === "branch"}
+                    onChange={() => setFieldValue("ownership_type", "branch")}
+                    className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Branch</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                    type="radio"
+                    name="ownership_type"
+                    value="franchise"
+                    checked={values.ownership_type === "franchise"}
+                    onChange={() => setFieldValue("ownership_type", "franchise")}
+                    className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Franchise</span>
+            </label>
+        </div>
+        {touched.ownership_type && errors.ownership_type && (
+            <div className="text-red-500 text-xs mt-1">{errors.ownership_type}</div>
+        )}
+    </div>
+</div>
 
                                     <hr className="border-t-2 border-dashed border-blue-300 my-2" />
 
-                                    {/* Address */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="md:col-span-2">
-                                            <label className="text-sm font-medium block mb-1">Address *</label>
-                                            <textarea
-                                                name="address"
-                                                placeholder="Enter address"
-                                                rows={2}
-                                                value={values.address}
-                                                onChange={handleChange}
-                                                onBlur={handleBlur}
-                                                className={`w-full border p-2 rounded ${touched.address && errors.address
-                                                        ? "border-red-500"
-                                                        : "border-gray-300"
-                                                    }`}
-                                            />
-                                            {touched.address && errors.address && (
-                                                <div className="text-red-500 text-xs mt-1">{errors.address}</div>
-                                            )}
-                                        </div>
+{/* Address */}
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div className="md:col-span-2">
+        <label className="text-sm font-medium block mb-1">Address *</label>
+        <textarea
+            name="address"
+            placeholder="Enter address"
+            rows={2}
+            value={values.address}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            className={`w-full border p-2 rounded ${
+                touched.address && errors.address
+                    ? "border-red-500"
+                    : "border-gray-300"
+            }`}
+        />
+        {touched.address && errors.address && (
+            <div className="text-red-500 text-xs mt-1">{errors.address}</div>
+        )}
+    </div>
 
-                                        <div>
-                                            <label className="text-sm font-medium block mb-1">City *</label>
-                                            <input
-                                                type="text"
-                                                name="city"
-                                                placeholder="Enter city"
-                                                value={values.city}
-                                                onChange={handleChange}
-                                                onBlur={handleBlur}
-                                                className={`w-full border p-2 rounded ${touched.city && errors.city
-                                                        ? "border-red-500"
-                                                        : "border-gray-300"
-                                                    }`}
-                                            />
-                                            {touched.city && errors.city && (
-                                                <div className="text-red-500 text-xs mt-1">{errors.city}</div>
-                                            )}
-                                        </div>
+    {/* Country Dropdown */}
+    <div>
+        <label className="text-sm font-medium block mb-1">
+            Country {editingBranch ? "(Optional)" : "*"}
+        </label>
+        <select
+            name="country"
+            value={values.country}
+            onChange={(e) => {
+                const selectedCountry = e.target.value;
+                setFieldValue("country", selectedCountry);
+                setFieldValue("state", "");
+                setFieldValue("city", "");
+                
+                // Load states for selected country
+                if (selectedCountry) {
+                    const countryData = Country.getAllCountries().find(
+                        (c) => c.name === selectedCountry
+                    );
+                    if (countryData) {
+                        setStates(State.getStatesOfCountry(countryData.isoCode));
+                    } else {
+                        setStates([]);
+                    }
+                } else {
+                    setStates([]);
+                }
+                setCities([]);
+            }}
+            onBlur={handleBlur}
+            className={`w-full border p-2 rounded ${
+                touched.country && errors.country
+                    ? "border-red-500"
+                    : "border-gray-300"
+            }`}
+        >
+            <option value="">Select Country</option>
+            {countries.map((country) => (
+                <option key={country.isoCode} value={country.name}>
+                    {country.name}
+                </option>
+            ))}
+        </select>
+        {touched.country && errors.country && (
+            <div className="text-red-500 text-xs mt-1">{errors.country}</div>
+        )}
+    </div>
 
-                                        <div>
-                                            <label className="text-sm font-medium block mb-1">State *</label>
-                                            <input
-                                                type="text"
-                                                name="state"
-                                                placeholder="Enter state"
-                                                value={values.state}
-                                                onChange={handleChange}
-                                                onBlur={handleBlur}
-                                                className={`w-full border p-2 rounded ${touched.state && errors.state
-                                                        ? "border-red-500"
-                                                        : "border-gray-300"
-                                                    }`}
-                                            />
-                                            {touched.state && errors.state && (
-                                                <div className="text-red-500 text-xs mt-1">{errors.state}</div>
-                                            )}
-                                        </div>
+    {/* State Dropdown */}
+    <div>
+        <label className="text-sm font-medium block mb-1">State *</label>
+        <select
+            name="state"
+            value={values.state}
+            onChange={(e) => {
+                const selectedState = e.target.value;
+                setFieldValue("state", selectedState);
+                setFieldValue("city", "");
+                
+                // Load cities for selected state
+                if (selectedState && values.country) {
+                    const countryData = Country.getAllCountries().find(
+                        (c) => c.name === values.country
+                    );
+                    const stateData = State.getStatesOfCountry(
+                        countryData?.isoCode || ""
+                    ).find((s) => s.name === selectedState);
+                    if (countryData && stateData) {
+                        setCities(
+                            City.getCitiesOfState(
+                                countryData.isoCode,
+                                stateData.isoCode
+                            )
+                        );
+                    } else {
+                        setCities([]);
+                    }
+                } else {
+                    setCities([]);
+                }
+            }}
+            onBlur={handleBlur}
+            disabled={!values.country}
+            className={`w-full border p-2 rounded ${
+                touched.state && errors.state
+                    ? "border-red-500"
+                    : "border-gray-300"
+            } ${!values.country ? "bg-gray-100 cursor-not-allowed" : ""}`}
+        >
+            <option value="">Select State</option>
+            {states.map((state) => (
+                <option key={state.isoCode} value={state.name}>
+                    {state.name}
+                </option>
+            ))}
+        </select>
+        {touched.state && errors.state && (
+            <div className="text-red-500 text-xs mt-1">{errors.state}</div>
+        )}
+    </div>
 
-                                        <div>
-                                            <label className="text-sm font-medium block mb-1">
-                                                Country {editingBranch ? "(Optional)" : "*"}
-                                            </label>
-                                            <input
-                                                type="text"
-                                                name="country"
-                                                placeholder={editingBranch ? "Enter country (optional)" : "Enter country"}
-                                                value={values.country}
-                                                onChange={handleChange}
-                                                onBlur={handleBlur}
-                                                className={`w-full border p-2 rounded ${touched.country && errors.country
-                                                        ? "border-red-500"
-                                                        : "border-gray-300"
-                                                    }`}
-                                            />
-                                            {touched.country && errors.country && (
-                                                <div className="text-red-500 text-xs mt-1">{errors.country}</div>
-                                            )}
-                                        </div>
+    {/* City Dropdown */}
+    <div>
+        <label className="text-sm font-medium block mb-1">City *</label>
+        <select
+            name="city"
+            value={values.city}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            disabled={!values.state}
+            className={`w-full border p-2 rounded ${
+                touched.city && errors.city
+                    ? "border-red-500"
+                    : "border-gray-300"
+            } ${!values.state ? "bg-gray-100 cursor-not-allowed" : ""}`}
+        >
+            <option value="">Select City</option>
+            {cities.map((city) => (
+                <option key={city.name} value={city.name}>
+                    {city.name}
+                </option>
+            ))}
+        </select>
+        {touched.city && errors.city && (
+            <div className="text-red-500 text-xs mt-1">{errors.city}</div>
+        )}
+    </div>
 
-                                        <div>
-                                            <label className="text-sm font-medium block mb-1">Pincode *</label>
-                                            <input
-                                                type="text"
-                                                name="pincode"
-                                                placeholder="Enter pincode"
-                                                value={values.pincode}
-                                                onChange={handleChange}
-                                                onBlur={handleBlur}
-                                                className={`w-full border p-2 rounded ${touched.pincode && errors.pincode
-                                                        ? "border-red-500"
-                                                        : "border-gray-300"
-                                                    }`}
-                                            />
-                                            {touched.pincode && errors.pincode && (
-                                                <div className="text-red-500 text-xs mt-1">{errors.pincode}</div>
-                                            )}
-                                        </div>
-                                    </div>
+    {/* Pincode */}
+    <div>
+        <label className="text-sm font-medium block mb-1">Pincode *</label>
+        <input
+            type="text"
+            name="pincode"
+            placeholder="Enter pincode"
+            value={values.pincode}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            className={`w-full border p-2 rounded ${
+                touched.pincode && errors.pincode
+                    ? "border-red-500"
+                    : "border-gray-300"
+            }`}
+        />
+        {touched.pincode && errors.pincode && (
+            <div className="text-red-500 text-xs mt-1">{errors.pincode}</div>
+        )}
+    </div>
+</div>
 
                                     <hr className="border-t-2 border-dashed border-blue-300 my-2" />
 

@@ -1,5 +1,5 @@
 // salesEntryForm.tsx
-// Fixed: item row uses local state (not Formik), Enter key prevention, proper add validation
+// FULL WIDTH - No side padding, edges touch screen borders
 
 import React, { useEffect, useRef, useState } from "react";
 import { Formik, Form, useField } from "formik";
@@ -383,7 +383,6 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
   const [scanning, setScanning] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus on mount
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 300);
   }, []);
@@ -401,7 +400,6 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
 
     setScanning(true);
     try {
-      // Step 1: Check in local cached items first (fast path)
       const localMatch = itemsModalData.find(
         (item: any) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
       );
@@ -422,14 +420,12 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
         return;
       }
 
-      // Step 2: API call if not found locally
       const token = sessionStorage.getItem("accessToken");
       const res = await api.get(`sale-search-item/?query=${encodeURIComponent(trimmed)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (res.data && res.data.length > 0) {
-        // Exact barcode match prefer karo
         const apiMatch = res.data.find(
           (item: any) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
         );
@@ -480,7 +476,7 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
     } finally {
       setBarcodeValue("");
       setScanning(false);
-      inputRef.current?.focus(); // Always refocus for next scan
+      inputRef.current?.focus();
     }
   };
 
@@ -528,6 +524,7 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
     </div>
   );
 };
+
 // ─── Receipt Component ────────────────────────────────────────────────────────
 
 const ReceiptComponent = ({ savedSaleId, showReceiptModal, handleCloseReceipt }: any) => {
@@ -622,41 +619,41 @@ const ReceiptComponent = ({ savedSaleId, showReceiptModal, handleCloseReceipt }:
                 </tbody>
               </table>
               <hr className="my-3" />
-<div className="space-y-1 text-sm">
-  <div className="flex justify-between">
-    <span><strong>Taxable Amount:</strong></span>
-    <span>₹{(saleData.total_basic ?? 0).toFixed(2)}</span>
-  </div>
-  <div className="flex justify-between">
-    <span><strong>Discount:</strong></span>
-    <span>-₹{(saleData.total_discount ?? 0).toFixed(2)}</span>
-  </div>
-  <div className="flex justify-between">
-    <span><strong>Tax (GST):</strong></span>
-    <span>₹{(saleData.tax_amount ?? 0).toFixed(2)}</span>
-  </div>
-  {(saleData.freight ?? 0) > 0 && (
-    <div className="flex justify-between">
-      <span><strong>Freight:</strong></span>
-      <span>₹{(saleData.freight ?? 0).toFixed(2)}</span>
-    </div>
-  )}
-  {(saleData.other_expense ?? 0) > 0 && (
-    <div className="flex justify-between">
-      <span><strong>Other Expense:</strong></span>
-      <span>₹{(saleData.other_expense ?? 0).toFixed(2)}</span>
-    </div>
-  )}
-  <div className="flex justify-between">
-    <span><strong>Round Off:</strong></span>
-    <span>₹{(saleData.round_off ?? 0).toFixed(2)}</span>
-  </div>
-  <hr className="border-dashed my-1" />
-  <div className="flex justify-between text-lg font-bold">
-    <span>NET PAYABLE:</span>
-    <span>₹{(saleData.grand_total ?? 0).toFixed(2)}</span>
-  </div>
-</div>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span><strong>Taxable Amount:</strong></span>
+                  <span>₹{(saleData.total_basic ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span><strong>Discount:</strong></span>
+                  <span>-₹{(saleData.total_discount ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span><strong>Tax (GST):</strong></span>
+                  <span>₹{(saleData.tax_amount ?? 0).toFixed(2)}</span>
+                </div>
+                {(saleData.freight ?? 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span><strong>Freight:</strong></span>
+                    <span>₹{(saleData.freight ?? 0).toFixed(2)}</span>
+                  </div>
+                )}
+                {(saleData.other_expense ?? 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span><strong>Other Expense:</strong></span>
+                    <span>₹{(saleData.other_expense ?? 0).toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span><strong>Round Off:</strong></span>
+                  <span>₹{(saleData.round_off ?? 0).toFixed(2)}</span>
+                </div>
+                <hr className="border-dashed my-1" />
+                <div className="flex justify-between text-lg font-bold">
+                  <span>NET PAYABLE:</span>
+                  <span>₹{(saleData.grand_total ?? 0).toFixed(2)}</span>
+                </div>
+              </div>
               <hr className="my-3" />
               <div className="text-center mt-4 font-semibold">
                 <p>THANKS FOR SHOPPING {saleData.customer_name}</p>
@@ -767,11 +764,11 @@ const SalesEntryForm: React.FC = () => {
   const [addedItems, setAddedItems] = useState<Item[]>([]);
   const [idCounter, setIdCounter] = useState<number>(1);
 
-  // ── Item row: LOCAL STATE (not Formik) — this is the key fix ──
+  // ── Item row: LOCAL STATE (not Formik) ──
   const [currentItem, setCurrentItem] = useState({ ...emptyCurrentItem });
   const [currentItemErrors, setCurrentItemErrors] = useState<Record<string, string>>({});
 
-  // ── Customer ID mirrored at component level (for tax calculation) ──
+  // ── Customer ID mirrored at component level ──
   const [selectedCustomerId, setSelectedCustomerId] = useState<number>(0);
 
   // ── Modal / UI state ──
@@ -784,7 +781,13 @@ const SalesEntryForm: React.FC = () => {
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [savedSaleId, setSavedSaleId] = useState<number | null>(null);
 
-  // Ref to Formik setFieldValue (only for bill-level fields now)
+  //  NEW: guards against duplicate sales entries from double/triple clicking
+  //  "Save Entry" (e.g. while the server is saving the sale and sending the
+  //  receipt email, which can take a few seconds). While true, the Save
+  //  button is disabled and shows a "Saving..." state.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Ref to Formik setFieldValue
   const setFieldValueRef = useRef<any>(null);
   const formValuesRef = useRef<any>(null);
 
@@ -842,7 +845,7 @@ const SalesEntryForm: React.FC = () => {
     fetchItems();
   }, [branchType]);
 
-  // ── Tax calculation for current item row (component level, no Formik) ──
+  // ── Tax calculation for current item row ──
   useEffect(() => {
     if (!currentItem.itemId || !selectedCustomerId) {
       setCurrentItem(prev => ({
@@ -878,7 +881,7 @@ const SalesEntryForm: React.FC = () => {
     calc();
   }, [currentItem.itemId, currentItem.quantity, currentItem.price, currentItem.discountPercent, selectedCustomerId]);
 
-  // ── applyItemToForm: now just sets currentItem local state ──
+  // ── applyItemToForm ──
   const applyItemToForm = (row: any) => {
     let finalPrice = row.salesPrice;
     const supportsFractional = row.unit_supports_fractional || false;
@@ -898,12 +901,11 @@ const SalesEntryForm: React.FC = () => {
       unit_name: row.unit_name || row.unit,
       quantity: "1", 
     });
-    setCurrentItemErrors({}); // Clear any previous errors
+    setCurrentItemErrors({});
   };
 
-  // ── Add item: uses currentItem state, NOT Formik ──
+  // ── Add item ──
   const handleAddItem = async () => {
-    // Validate first (show errors only on Add click)
     const errors: Record<string, string> = {};
     if (!selectedCustomerId) { toast.error("Select Customer first"); return; }
     if (!currentItem.itemId)                                   errors.itemId = "Item select karein";
@@ -950,7 +952,6 @@ const SalesEntryForm: React.FC = () => {
         },
       ]);
       setIdCounter(p => p + 1);
-      // Reset item row for next entry
       setCurrentItem({ ...emptyCurrentItem });
       setCurrentItemErrors({});
       toast.success("Item added!");
@@ -980,7 +981,12 @@ const SalesEntryForm: React.FC = () => {
   };
 
   const handleSubmit = async (values: FormValues) => {
-        const locationOk = await checkLocation();
+    //  Guard: ignore any extra "Save Entry" clicks/submits while a save is
+    //  already in flight — this is what stops duplicate sales entries from
+    //  being created when the user clicks Save two or three times.
+    if (isSubmitting) return;
+
+    const locationOk = await checkLocation();
     if (!locationOk) return;
     if (addedItems.length === 0) { toast.error("At least one item is required"); return; }
     if ((values.paymentTerms === "Cash" || values.paymentTerms === "Bank") && !values.account) {
@@ -1020,19 +1026,41 @@ const SalesEntryForm: React.FC = () => {
     if (values.paymentTerms === "Cash") payload.cash_account = Number(values.account);
     if (values.paymentTerms === "Bank") payload.bank_account = Number(values.account);
 
+    //  Lock the button and let the user know exactly what's happening —
+    //  the sale is being saved AND the receipt email is being sent, so this
+    //  can take a moment. The toast stays up (autoClose: false) until we
+    //  get a response, then flips to success/error.
+    setIsSubmitting(true);
+    const toastId = toast.info(
+      "Saving sale & sending receipt email... please wait, don't click Save again.",
+      { autoClose: false }
+    );
+
     try {
       const res = await api.post("salesentry-create/", payload);
-      toast.success("Sales Entry Saved Successfully");
+      toast.update(toastId, {
+        render: "Sale saved successfully!",
+        type: "success",
+        autoClose: 2500,
+        isLoading: false,
+      });
       if (res.data.stock_alerts) res.data.stock_alerts.forEach((msg: any) => toast.error(msg));
       setSavedSaleId(res.data.id);
       setAddedItems([]);
       setIdCounter(1);
       setCurrentItem({ ...emptyCurrentItem });
       setCurrentItemErrors({});
-      setShowConfirmModal(true); // ← receipt prompt only here, on actual save
+      setShowConfirmModal(true);
     } catch (error: any) {
       console.error("Save error:", error.response?.data || error);
-      toast.error("Error while saving sales entry");
+      toast.update(toastId, {
+        render: "Error while saving sales entry",
+        type: "error",
+        autoClose: 3000,
+        isLoading: false,
+      });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1040,7 +1068,6 @@ const SalesEntryForm: React.FC = () => {
 
   const variantFields = VARIANT_BY_BRANCH[branchType || ""] || [];
 
-  // ── Item row input helper (local state, NOT Formik) ──
   const ItemRowInput = ({
     label, field, type = "text", placeholder = "", readOnly = false, icon: Icon,
   }: {
@@ -1063,14 +1090,13 @@ const SalesEntryForm: React.FC = () => {
             value={currentItem[field] as string}
             onChange={(e) => {
               setCurrentItem(prev => ({ ...prev, [field]: e.target.value }));
-              // Clear error on change
               if (currentItemErrors[field]) {
                 setCurrentItemErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
               }
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
-                e.preventDefault(); // Never submit form from item row
+                e.preventDefault();
               }
             }}
             placeholder={placeholder}
@@ -1086,11 +1112,11 @@ const SalesEntryForm: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-6 pb-24">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-4 px-0">
+      <div className="w-full px-3 sm:px-4">
 
         {/* ── Header ── */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-4">
           <button
             onClick={() => navigate("/Addsalesitem")}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition shadow-sm text-sm"
@@ -1110,22 +1136,16 @@ const SalesEntryForm: React.FC = () => {
             setFieldValueRef.current = setFieldValue;
             formValuesRef.current = values;
 
-            // Sync customerName → selectedCustomerId (for tax calculation)
-            // eslint-disable-next-line react-hooks/rules-of-hooks
             useEffect(() => {
               setSelectedCustomerId(Number(values.customerName) || 0);
             }, [values.customerName]);
 
-            // Fetch default customer
-            // eslint-disable-next-line react-hooks/rules-of-hooks
             useEffect(() => {
               api.get("default-customer/")
                 .then((res) => { if (res.data?.id) setFieldValue("customerName", res.data.id); })
                 .catch(console.error);
             }, []);
 
-            // Fetch voucher number
-            // eslint-disable-next-line react-hooks/rules-of-hooks
             useEffect(() => {
               api.get(`voucher/generate/?type=SI`)
                 .then((res) => setFieldValue("billNo", res.data.voucher_no))
@@ -1140,7 +1160,6 @@ const SalesEntryForm: React.FC = () => {
               Number(values.roundAmount || 0);
 
             return (
-              // ── KEY FIX: Prevent Enter from submitting form (except on submit button) ──
               <Form
                 onKeyDown={(e) => {
                   const target = e.target as HTMLElement;
@@ -1153,12 +1172,12 @@ const SalesEntryForm: React.FC = () => {
                   }
                 }}
               >
-                <div className="space-y-4">
+                <div className="space-y-3">
 
                   {/* ── Bill Details ── */}
-                  <div className="bg-white rounded-xl shadow-lg p-6">
-                    <h2 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-4">Bill Details</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-xl shadow-lg p-4">
+                    <h2 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-3">Bill Details</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       <FormInput label="Date" name="date" type="date" icon={FaCalendarAlt} />
                       <DisplayField label="Bill No." value={values.billNo || "Auto Generated"} icon={FaFileInvoice} />
                       <PartySelect name="customerName" />
@@ -1168,7 +1187,7 @@ const SalesEntryForm: React.FC = () => {
                         <FormInput label="Due Date" name="dueDate" type="date" icon={FaCalendarAlt} />
                       )}
                       <div className="lg:col-span-2">
-                        <FormTextArea label="Narration" name="narration" placeholder="Optional notes..." rows={3} icon={FaEdit} />
+                        <FormTextArea label="Narration" name="narration" placeholder="Optional notes..." rows={2} icon={FaEdit} />
                       </div>
                     </div>
                   </div>
@@ -1179,7 +1198,6 @@ const SalesEntryForm: React.FC = () => {
                     customerName={values.customerName}
                     onItemSelected={(row: any) => {
                       applyItemToForm(row);
-                      // Focus qty after small delay (item row is local state)
                       setTimeout(() => {
                         const qtyInput = document.querySelector<HTMLInputElement>('[data-qty-input="true"]');
                         if (qtyInput) qtyInput.focus();
@@ -1187,22 +1205,22 @@ const SalesEntryForm: React.FC = () => {
                     }}
                   />
 
-                  {/* ── Item Entry (uses local state, NOT Formik) ── */}
-                  <div className="bg-white rounded-xl shadow-lg p-6">
-                    <h3 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-4 flex items-center gap-2">
+                  {/* ── Item Entry ── */}
+                  <div className="bg-white rounded-xl shadow-lg p-4">
+                    <h3 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-3 flex items-center gap-2">
                       <FaBox className="text-blue-600" /> Item Entry
                       {currentItem.itemName && (
                         <span className="ml-2 text-green-600 font-normal">— {currentItem.itemName}</span>
                       )}
                     </h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-3 items-end">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 xl:grid-cols-9 gap-2 items-end">
 
                       {/* Select Item button */}
                       <div className="flex flex-col justify-end">
                         <button
                           type="button"
                           onClick={() => setOpenModal(true)}
-                          className={`px-3 py-2 rounded-lg transition flex items-center justify-center gap-1 text-sm h-[38px]
+                          className={`px-3 py-2 rounded-lg transition flex items-center justify-center gap-1 text-sm h-[38px] w-full
                             ${currentItemErrors.itemId
                               ? "bg-red-500 text-white hover:bg-red-600 ring-2 ring-red-300"
                               : "bg-green-600 text-white hover:bg-green-700"}`}
@@ -1214,10 +1232,10 @@ const SalesEntryForm: React.FC = () => {
                         )}
                       </div>
 
-                      {/* HSN Code (read-only, filled by selection) */}
-                      <ItemRowInput label="HSN Code" field="hsnCode" placeholder="HSN" readOnly />
+                      {/* HSN Code */}
+                      <ItemRowInput label="HSN" field="hsnCode" placeholder="HSN" readOnly />
 
-                      {/* Quantity — focused after item select */}
+                      {/* Quantity */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">Qty</label>
                         <input
@@ -1254,7 +1272,7 @@ const SalesEntryForm: React.FC = () => {
                         {currentItemErrors.price && <p className="text-xs text-red-500">{currentItemErrors.price}</p>}
                       </div>
 
-                      {/* Unit (read-only) */}
+                      {/* Unit */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">Unit</label>
                         <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-700 font-mono">
@@ -1277,7 +1295,7 @@ const SalesEntryForm: React.FC = () => {
                         />
                       </div>
 
-                      {/* Tax% (read-only) */}
+                      {/* Tax% */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">Tax%</label>
                         <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-700 font-mono">
@@ -1285,9 +1303,9 @@ const SalesEntryForm: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Net Value (read-only) */}
+                      {/* Net Value */}
                       <div className="space-y-1">
-                        <label className="text-sm font-medium text-gray-700">Net Value</label>
+                        <label className="text-sm font-medium text-gray-700">Net</label>
                         <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-blue-700 font-bold font-mono">
                           {currentItem.netValue}
                         </div>
@@ -1298,7 +1316,7 @@ const SalesEntryForm: React.FC = () => {
                         <button
                           type="button"
                           onClick={handleAddItem}
-                          className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-1 text-sm h-[38px]"
+                          className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-1 text-sm h-[38px] w-full"
                         >
                           <FaCheckCircle size={12} /> Add
                         </button>
@@ -1330,21 +1348,21 @@ const SalesEntryForm: React.FC = () => {
                   />
 
                   {/* ── Charges + Summary ── */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    <div className="lg:col-span-2 bg-white rounded-xl shadow-lg p-6">
-                      <h3 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-4 flex items-center gap-2">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                    <div className="lg:col-span-2 bg-white rounded-xl shadow-lg p-4">
+                      <h3 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-3 flex items-center gap-2">
                         <FaTruck className="text-blue-600" /> Additional Charges
                       </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <FormInput label="Freight Charge" name="freightCharge" type="number" placeholder="0" icon={FaTruck} />
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <FormInput label="Freight" name="freightCharge" type="number" placeholder="0" icon={FaTruck} />
                         <FormInput label="Other Expense" name="otherExpense" type="number" placeholder="0" />
                         <FormInput label="Round Amount" name="roundAmount" type="number" placeholder="0" />
                       </div>
                     </div>
 
-                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-lg p-6 border border-blue-200">
-                      <h3 className="text-sm font-semibold text-gray-800 mb-4">Payment Summary</h3>
-                      <div className="space-y-2 text-sm">
+                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-lg p-4 border border-blue-200">
+                      <h3 className="text-sm font-semibold text-gray-800 mb-3">Payment Summary</h3>
+                      <div className="space-y-1.5 text-sm">
                         {[
                           { label: "Total Basic", value: `₹ ${Number(totals.totalBasic || 0).toFixed(2)}` },
                           ...(totals.totalCgst > 0 || totals.totalSgst > 0
@@ -1361,7 +1379,7 @@ const SalesEntryForm: React.FC = () => {
                           { label: "Other Expense", value: `₹ ${Number(values.otherExpense || 0).toFixed(2)}` },
                           { label: "Round Off", value: `₹ ${Number(values.roundAmount || 0).toFixed(2)}` },
                         ].map((row) => (
-                          <div key={row.label} className="flex justify-between py-1.5 border-b border-blue-100">
+                          <div key={row.label} className="flex justify-between py-1 border-b border-blue-100">
                             <span className="text-gray-600">{row.label}</span>
                             <span className="font-medium">{row.value}</span>
                           </div>
@@ -1375,30 +1393,45 @@ const SalesEntryForm: React.FC = () => {
                   </div>
 
                   {/* ── Action Buttons (sticky bottom) ── */}
-                  <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t p-3 flex gap-3 justify-center z-10">
+                  <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t p-3 flex gap-3 justify-center z-10 flex-wrap">
                     <button
                       type="button"
                       onClick={handleDeleteAll}
-                      className="px-5 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition flex items-center gap-2 text-sm"
+                      disabled={isSubmitting}
+                      className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <FaTrash /> Clear All
                     </button>
                     <button
                       type="submit"
-                      className="px-7 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2 text-sm"
+                      disabled={isSubmitting}
+                      className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed min-w-[140px] justify-center"
                     >
-                      <FaSave /> Save Entry
+                      {isSubmitting ? (
+                                              <>
+
+                          <span className="w-4 h-4 border-2 border-white/60 border-t-transparent rounded-full animate-spin" />
+                          Saving...
+                     
+                        </>
+                      ) : (
+                        <>
+                          <FaSave /> Save Entry
+                        </>
+                      )}
                     </button>
                     <button
                       type="button"
                       onClick={() => navigate("/Addsalesitem")}
-                      className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm"
+                      disabled={isSubmitting}
+                      className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       List
                     </button>
                     <button
                       type="button"
-                      className="px-5 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition flex items-center gap-2 text-sm"
+                      disabled={isSubmitting}
+                      className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <FaTimes /> Close
                     </button>
@@ -1408,27 +1441,26 @@ const SalesEntryForm: React.FC = () => {
                 {/* ── Item Selection Modal ── */}
                 <AnimatePresence>
                   {openModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-2">
                       <motion.div
                         initial={{ scale: 0.9, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0.9, opacity: 0 }}
                         className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl overflow-hidden"
                       >
-                        <div className="flex justify-between items-center px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
-                          <h3 className="text-xl font-semibold flex items-center gap-2"><FaBox /> Select Item Variant</h3>
+                        <div className="flex justify-between items-center px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+                          <h3 className="text-lg font-semibold flex items-center gap-2"><FaBox /> Select Item Variant</h3>
                           <button onClick={() => setOpenModal(false)} className="hover:bg-white/20 rounded-lg p-1 transition">
                             <MdClose size={24} />
                           </button>
                         </div>
-                        <div className="p-6">
-                          <div className="flex justify-between items-center mb-4 gap-4">
+                        <div className="p-4">
+                          <div className="flex flex-wrap justify-between items-center mb-3 gap-2">
                             <input
                               type="text"
                               placeholder="Search item, HSN, barcode..."
                               value={searchTerm}
                               onKeyDown={(e) => {
-                                // ── KEY FIX: Prevent Enter in search from submitting the outer Form ──
                                 if (e.key === "Enter") e.preventDefault();
                               }}
                               onChange={async (e) => {
@@ -1471,48 +1503,47 @@ const SalesEntryForm: React.FC = () => {
                                   console.error("Search API error:", err);
                                 }
                               }}
-                              className="flex-1 max-w-sm px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                              className="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
                             />
-                            <div className="px-4 py-2 bg-gray-100 rounded-lg text-sm text-gray-600">
+                            <div className="px-3 py-1.5 bg-gray-100 rounded-lg text-sm text-gray-600">
                               <span className="font-semibold">{filteredItems.length}</span> items in stock
                             </div>
                           </div>
 
-                          <div className="border rounded-lg overflow-x-auto max-h-[480px]">
+                          <div className="border rounded-lg overflow-x-auto max-h-[420px]">
                             <table className="w-full text-sm min-w-[900px]">
                               <thead className="bg-gradient-to-r from-blue-600 to-blue-700 text-white sticky top-0">
                                 <tr>
-                                  <th className="px-3 py-2 text-center">Action</th>
-                                  <th className="px-3 py-2 text-left">Item Name</th>
-                                  <th className="px-3 py-2 text-left">HSN Code</th>
-                                  <th className="px-3 py-2 text-left">Barcode</th>
+                                  <th className="px-2 py-2 text-center">Action</th>
+                                  <th className="px-2 py-2 text-left">Item Name</th>
+                                  <th className="px-2 py-2 text-left">HSN</th>
+                                  <th className="px-2 py-2 text-left">Barcode</th>
                                   {variantFields.map((f) => (
-                                    <th key={f} className="px-3 py-2 text-left capitalize">{f}</th>
+                                    <th key={f} className="px-2 py-2 text-left capitalize">{f}</th>
                                   ))}
-                                  <th className="px-3 py-2 text-right">S.Price</th>
-                                  <th className="px-3 py-2 text-center">Stock</th>
-                                  <th className="px-3 py-2 text-center">Unit</th>
-                                  <th className="px-3 py-2 text-center">Tax%</th>
+                                  <th className="px-2 py-2 text-right">Price</th>
+                                  <th className="px-2 py-2 text-center">Stock</th>
+                                  <th className="px-2 py-2 text-center">Unit</th>
+                                  <th className="px-2 py-2 text-center">Tax%</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {filteredItems.map((row, idx) => (
                                   <tr key={idx} className="border-b hover:bg-gray-50 transition">
-                                    <td className="px-3 py-2 text-center">
+                                    <td className="px-2 py-2 text-center">
                                       <button
                                         type="button"
                                         onClick={() => {
                                           applyItemToForm(row);
                                           setOpenModal(false);
                                           setSearchTerm("");
-                                          // Focus qty after modal closes
                                           setTimeout(() => {
                                             const qtyInput = document.querySelector<HTMLInputElement>('[data-qty-input="true"]');
                                             if (qtyInput) qtyInput.focus();
                                           }, 200);
                                         }}
                                         disabled={row.current_stock <= 0}
-                                        className={`px-3 py-1 rounded-lg text-xs transition flex items-center gap-1 mx-auto
+                                        className={`px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 mx-auto
                                           ${row.current_stock > 0
                                             ? "bg-green-500 text-white hover:bg-green-600"
                                             : "bg-gray-300 text-gray-500 cursor-not-allowed"}`}
@@ -1520,20 +1551,20 @@ const SalesEntryForm: React.FC = () => {
                                         <FaCheckCircle size={10} /> Select
                                       </button>
                                     </td>
-                                    <td className="px-3 py-2 font-medium">{row.itemName}</td>
-                                    <td className="px-3 py-2 font-mono text-xs">{row.hsnCode}</td>
-                                    <td className="px-3 py-2 font-mono text-xs text-gray-500">{row.barcode || "-"}</td>
+                                    <td className="px-2 py-2 font-medium">{row.itemName}</td>
+                                    <td className="px-2 py-2 font-mono text-xs">{row.hsnCode}</td>
+                                    <td className="px-2 py-2 font-mono text-xs text-gray-500">{row.barcode || "-"}</td>
                                     {variantFields.map((f, i) => (
-                                      <td key={i} className="px-3 py-2">{row[f] ?? "-"}</td>
+                                      <td key={i} className="px-2 py-2">{row[f] ?? "-"}</td>
                                     ))}
-                                    <td className="px-3 py-2 text-right">₹{row.salesPrice}</td>
-                                    <td className="px-3 py-2 text-center">
+                                    <td className="px-2 py-2 text-right">₹{row.salesPrice}</td>
+                                    <td className="px-2 py-2 text-center">
                                       <span className={`font-semibold ${row.current_stock <= 0 ? "text-red-600" : "text-green-600"}`}>
                                         {row.current_stock}
                                       </span>
                                     </td>
-                                    <td className="px-3 py-2 text-center">{row.unit}</td>
-                                    <td className="px-3 py-2 text-center">{row.taxSlab}</td>
+                                    <td className="px-2 py-2 text-center">{row.unit}</td>
+                                    <td className="px-2 py-2 text-center">{row.taxSlab}</td>
                                   </tr>
                                 ))}
                                 {filteredItems.length === 0 && (
@@ -1547,7 +1578,7 @@ const SalesEntryForm: React.FC = () => {
                             </table>
                           </div>
                         </div>
-                        <div className="flex justify-center p-6 pt-0">
+                        <div className="flex justify-center p-4 pt-0">
                           <button
                             type="button"
                             onClick={() => { setOpenModal(false); setSearchTerm(""); }}
@@ -1565,7 +1596,7 @@ const SalesEntryForm: React.FC = () => {
           }}
         </Formik>
 
-        {/* ── Print Confirmation Modal (shown only after actual Save) ── */}
+        {/* ── Print Confirmation Modal ── */}
         <AnimatePresence>
           {showConfirmModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">

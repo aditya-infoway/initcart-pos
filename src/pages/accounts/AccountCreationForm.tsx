@@ -54,6 +54,7 @@ const validationSchema = Yup.object({
       excludeEmptyString: true,
     }
   ),
+  email: Yup.string().email("Invalid email address"),
   panCard: Yup.string().matches(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, {
     message: "Invalid PAN Card format",
     excludeEmptyString: true, 
@@ -158,6 +159,7 @@ const AccountCreationForm = () => {
     country: "",
     state: "",
     city: "",
+    email:"",
     pincode: "",
     phone: "",
     mobile: "",
@@ -189,6 +191,7 @@ const AccountCreationForm = () => {
           country: editData.country || "",
           state: editData.state || "",
           city: editData.city || "",
+          email: editData.email || "",   
           pincode: editData.pincode || "",
           phone: editData.phone || "",
           mobile: editData.mobile || "",
@@ -242,6 +245,7 @@ const AccountCreationForm = () => {
         country: data.country || "",
         state: data.state || "",
         city: data.city || "",
+        email: data.email || "",  
         pincode: data.pincode || "",
         phone: data.phone || "",
         mobile: data.mobile || "",
@@ -319,6 +323,7 @@ const AccountCreationForm = () => {
         country: values.country,
         state: values.state,
         city: values.city,
+        email: values.email,
         pincode: values.pincode,
         phone: values.phone,
         mobile: values.mobile,
@@ -515,6 +520,13 @@ const AccountCreationForm = () => {
                       placeholder="10-digit mobile"
                       maxLength={10}
                       icon={MdPhoneAndroid}
+                    />
+                    <FormInput
+                      label="Email"
+                      name="email"
+                      type="email"
+                      placeholder="customer@example.com"
+                      icon={MdEmail}
                     />
                   </div>
                 </div>

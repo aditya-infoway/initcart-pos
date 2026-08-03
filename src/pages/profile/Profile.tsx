@@ -1,10 +1,11 @@
+// branchProfile
 // src/pages/Profile.tsx
 
 import React, { useState, useEffect } from "react";
 import {
   FaUserTie, FaEnvelope, FaPhone, FaStore, FaMapMarkerAlt,
   FaCity, FaMapPin, FaCreditCard, FaFileAlt, FaCalendarAlt,
-  FaImage, FaGlobe, FaEdit, FaSave, FaTimes
+  FaImage, FaGlobe, FaEdit, FaSave, FaTimes, FaEye, FaEyeSlash
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
@@ -53,6 +54,24 @@ interface UserData {
 const Profile: React.FC = () => {
   const [branchData, setBranchData] = useState<BranchProfile | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
+
+  // ✅ current_password added — backend isko branch ke maujooda panel password se verify karega
+  const [branchPwdData, setBranchPwdData] = useState({
+    current_password: "",
+    new_password: "",
+    confirm_password: "",
+  });
+  const [savingBranchPwd, setSavingBranchPwd] = useState(false);
+
+  // ✅ eye toggle state for the 3 password fields
+  const [showBranchPwd, setShowBranchPwd] = useState({
+    current: false,
+    next: false,
+    confirm: false,
+  });
+  const toggleBranchPwd = (key: "current" | "next" | "confirm") =>
+    setShowBranchPwd((p) => ({ ...p, [key]: !p[key] }));
+
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
   const [isEditing, setIsEditing] = useState<boolean>(false);
@@ -76,7 +95,25 @@ const Profile: React.FC = () => {
   const { accessToken, logout } = useAuthStore();
   const API_BASE_URL = "http://localhost:8000";
 
-  // ✅ Check if current user is Superadmin
+  // ── NEW: Superadmin — apni PURI branch info (name, type, owner, phone, address, bank) edit ──
+  const [isEditingBranchInfo, setIsEditingBranchInfo] = useState<boolean>(false);
+  const [branchInfoData, setBranchInfoData] = useState({
+    branch_name: "",
+    branch_type: "fashion",
+    owner_name: "",
+    phone: "",
+    address: "",
+    email: "",
+    pincode: "",
+  });
+  const [savingBranchInfo, setSavingBranchInfo] = useState<boolean>(false);
+
+  // ── NEW: Logo upload — is se bhi alag ──
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [savingLogo, setSavingLogo] = useState<boolean>(false);
+
+  //  Check if current user is Superadmin
   const isSuperAdmin = () => {
     return userData?.role === 'superadmin';
   };
@@ -104,8 +141,8 @@ const Profile: React.FC = () => {
 
         setBranchData(data.data);
         setEditData(data.data);
-        
-        // ✅ Save user data for role check
+
+        //  Save user data for role check
         if (data.user) {
           setUserData(data.user);
         } else {
@@ -230,6 +267,98 @@ const Profile: React.FC = () => {
     setCities([]);
   };
 
+  // ── NEW: Branch Info edit handlers ──
+  const handleEditBranchInfo = () => {
+    setIsEditingBranchInfo(true);
+    setBranchInfoData({
+      branch_name: branchData?.branch_name || "",
+      branch_type: branchData?.branch_type || "fashion",
+      owner_name: branchData?.owner_name || "",
+      phone: branchData?.phone || "",
+      address: branchData?.address || "",
+      email: branchData?.email || "",
+      pincode: branchData?.pincode || "",
+    });
+  };
+
+  const handleCancelBranchInfo = () => {
+    setIsEditingBranchInfo(false);
+  };
+
+  const handleSaveBranchInfo = async () => {
+    if (!branchInfoData.branch_name.trim()) {
+      toast.error("Branch name is required");
+      return;
+    }
+    if (!branchInfoData.email.trim() || !/^\S+@\S+\.\S+$/.test(branchInfoData.email)) {
+      toast.error("Valid email is required");
+      return;
+    }
+    setSavingBranchInfo(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pos/auth/me/`, {
+        method: "PATCH",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(branchInfoData),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        const msg = data.errors?.email?.[0] || data.message || "Failed to update";
+        throw new Error(msg);
+      }
+
+      setBranchData(data.data);
+      setIsEditingBranchInfo(false);
+      toast.success("Branch info updated successfully!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update branch info");
+    } finally {
+      setSavingBranchInfo(false);
+    }
+  };
+
+  // ── NEW: Logo handlers ──
+  const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+  };
+
+  const handleCancelLogo = () => {
+    setLogoFile(null);
+    setLogoPreview(null);
+  };
+
+  const handleSaveLogo = async () => {
+    if (!logoFile) return;
+    setSavingLogo(true);
+    try {
+      const formData = new FormData();
+      formData.append("branch_logo", logoFile);
+
+      const response = await fetch(`${API_BASE_URL}/api/pos/auth/me/`, {
+        method: "PATCH",
+        headers: { "Authorization": `Bearer ${accessToken}` },
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.message || "Failed to update logo");
+
+      setBranchData(data.data);
+      setLogoFile(null);
+      setLogoPreview(null);
+      toast.success("Logo updated successfully!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update logo");
+    } finally {
+      setSavingLogo(false);
+    }
+  };
+
   // ---- Native select handlers ----
   const handleCountryChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = e.target.value === "" ? "" : Number(e.target.value);
@@ -303,7 +432,7 @@ const Profile: React.FC = () => {
   const handleSaveProfile = async () => {
     if (!editData) return;
 
-    // ✅ Sirf City, State, Country validate karo
+    //  Sirf City, State, Country validate karo
     if (!editData.city?.trim() || !editData.state?.trim() || !editData.country?.trim()) {
       toast.error("City, State, and Country are required!");
       return;
@@ -311,7 +440,7 @@ const Profile: React.FC = () => {
 
     setSaving(true);
     try {
-      // ✅ Sirf location fields hi payload me bhejo
+      //  Sirf location fields hi payload me bhejo
       const payload = {
         city: editData.city,
         state: editData.state,
@@ -390,6 +519,48 @@ const Profile: React.FC = () => {
     }
   };
 
+  // ✅ UPDATED: current_password required, sent to backend for verification
+  const handleSaveBranchPassword = async () => {
+    if (!branchPwdData.current_password) {
+      toast.error("Current password is required");
+      return;
+    }
+    if (!branchPwdData.new_password || branchPwdData.new_password.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+    if (branchPwdData.new_password !== branchPwdData.confirm_password) {
+      toast.error("Passwords do not match");
+      return;
+    }
+
+    setSavingBranchPwd(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pos/auth/me/`, {
+        method: "PATCH",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          branch_password: branchPwdData.new_password,
+          current_branch_password: branchPwdData.current_password,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.message || "Failed to update");
+
+      setBranchData(data.data);
+      setBranchPwdData({ current_password: "", new_password: "", confirm_password: "" });
+      setShowBranchPwd({ current: false, next: false, confirm: false });
+      toast.success("Branch panel login password updated!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update branch password");
+    } finally {
+      setSavingBranchPwd(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -402,7 +573,7 @@ const Profile: React.FC = () => {
     return (
       <div className="flex justify-center items-center min-h-screen">
         <div className="text-center">
-          <p className="text-red-500 text-xl">⚠️ {error}</p>
+          <p className="text-red-500 text-xl"> {error}</p>
           <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded">
             Retry
           </button>
@@ -423,18 +594,37 @@ const Profile: React.FC = () => {
       <div className="w-full bg-gradient-to-r from-blue-600 to-blue-700 py-8 px-6 flex flex-col items-center text-white rounded-xl shadow-lg mb-8">
         <div className="relative mb-6">
           <div className="w-32 h-32 rounded-full border-4 border-blue-200 shadow-lg overflow-hidden bg-white flex items-center justify-center">
-            {logoUrl ? (
+            {logoPreview ? (
+              <img src={logoPreview} alt="preview" className="w-full h-full object-cover" />
+            ) : logoUrl ? (
               <img src={logoUrl} alt={branchData.branch_name} className="w-full h-full object-cover" />
             ) : (
               <FaStore className="text-blue-600" size={48} />
             )}
           </div>
-          {logoUrl && (
-            <div className="absolute -bottom-2 -right-2 bg-blue-800 text-white p-2 rounded-full shadow-lg">
+
+          {isSuperAdminUser && (
+            <label className="absolute -bottom-2 -right-2 bg-blue-800 text-white p-2 rounded-full shadow-lg cursor-pointer hover:bg-blue-900 transition">
               <FaImage size={14} />
-            </div>
+              <input type="file" accept="image/*" onChange={handleLogoSelect} className="hidden" />
+            </label>
           )}
         </div>
+
+        {isSuperAdminUser && logoFile && (
+          <div className="flex items-center gap-2 mb-4 bg-white/10 px-3 py-1.5 rounded-lg">
+            <span className="text-xs text-blue-100">{logoFile.name}</span>
+            <button onClick={handleSaveLogo} disabled={savingLogo}
+              className="flex items-center gap-1 px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 disabled:opacity-50">
+              <FaSave size={10} /> {savingLogo ? "Saving..." : "Save Logo"}
+            </button>
+            <button onClick={handleCancelLogo}
+              className="flex items-center gap-1 px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300">
+              <FaTimes size={10} /> Cancel
+            </button>
+          </div>
+        )}
+
         <h2 className="text-3xl font-bold tracking-tight">{branchData.branch_name}</h2>
         <div className="flex items-center gap-4 mt-2">
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(branchData.status)}`}>
@@ -443,15 +633,15 @@ const Profile: React.FC = () => {
           <span className="text-blue-200 bg-blue-800 px-3 py-1 rounded-full text-sm">
             {getBranchTypeDisplay(branchData.branch_type)}
           </span>
-          {/* ✅ SUPERADMIN: Show location status */}
+          {/*  SUPERADMIN: Show location status */}
           {isSuperAdminUser && !isLocationComplete() && (
             <span className="px-3 py-1 rounded-full text-sm font-medium bg-yellow-500 text-white animate-pulse">
-              ⚠️ Location Incomplete
+               Location Incomplete
             </span>
           )}
           {isSuperAdminUser && isLocationComplete() && (
             <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-500 text-white">
-              ✅ Location Set
+               Location Set
             </span>
           )}
         </div>
@@ -461,7 +651,7 @@ const Profile: React.FC = () => {
         </p>
         {isSuperAdminUser && (
           <p className="text-xs text-blue-200 mt-1 bg-blue-800/50 px-3 py-1 rounded-full">
-            👑 Super Admin
+             Super Admin
           </p>
         )}
       </div>
@@ -473,19 +663,19 @@ const Profile: React.FC = () => {
             <h3 className="text-2xl font-semibold text-gray-800 flex items-center gap-2">
               <FaStore className="text-blue-600" /> Branch Information
             </h3>
-            {/* ✅ SUPERADMIN: Edit button only for superadmin */}
-            {isSuperAdminUser && !isEditing && (
-              <button onClick={handleEdit} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
-                <FaEdit size={14} /> Update Location
+            {isSuperAdminUser && !isEditingBranchInfo && (
+              <button onClick={handleEditBranchInfo}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+                <FaEdit size={14} /> Edit Branch Info
               </button>
             )}
-            {isSuperAdminUser && isEditing && (
+            {isSuperAdminUser && isEditingBranchInfo && (
               <div className="flex gap-2">
-                <button onClick={handleCancelEdit} className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition">
+                <button onClick={handleCancelBranchInfo} className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition">
                   <FaTimes size={14} /> Cancel
                 </button>
-                <button onClick={handleSaveProfile} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50">
-                  <FaSave size={14} /> {saving ? "Saving..." : "Save"}
+                <button onClick={handleSaveBranchInfo} disabled={savingBranchInfo} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50">
+                  <FaSave size={14} /> {savingBranchInfo ? "Saving..." : "Save"}
                 </button>
               </div>
             )}
@@ -539,9 +729,15 @@ const Profile: React.FC = () => {
               <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
                 <FaStore className="text-blue-600" /> Branch Name
               </label>
-              <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
-                {branchData.branch_name}
-              </div>
+              {isSuperAdminUser && isEditingBranchInfo ? (
+                <input type="text" value={branchInfoData.branch_name}
+                  onChange={(e) => setBranchInfoData(p => ({ ...p, branch_name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+              ) : (
+                <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
+                  {branchData.branch_name}
+                </div>
+              )}
             </div>
 
             {/* Owner Name */}
@@ -549,9 +745,15 @@ const Profile: React.FC = () => {
               <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
                 <FaUserTie className="text-blue-600" /> Owner Name
               </label>
-              <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
-                {branchData.owner_name}
-              </div>
+              {isSuperAdminUser && isEditingBranchInfo ? (
+                <input type="text" value={branchInfoData.owner_name}
+                  onChange={(e) => setBranchInfoData(p => ({ ...p, owner_name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+              ) : (
+                <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
+                  {branchData.owner_name}
+                </div>
+              )}
             </div>
 
             {/* Phone */}
@@ -559,9 +761,15 @@ const Profile: React.FC = () => {
               <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
                 <FaPhone className="text-blue-600" /> Phone
               </label>
-              <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
-                {branchData.phone}
-              </div>
+              {isSuperAdminUser && isEditingBranchInfo ? (
+                <input type="text" value={branchInfoData.phone}
+                  onChange={(e) => setBranchInfoData(p => ({ ...p, phone: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+              ) : (
+                <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
+                  {branchData.phone}
+                </div>
+              )}
             </div>
 
             {/* Email */}
@@ -569,9 +777,15 @@ const Profile: React.FC = () => {
               <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
                 <FaEnvelope className="text-blue-600" /> Email
               </label>
-              <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
-                {branchData.email}
-              </div>
+              {isSuperAdminUser && isEditingBranchInfo ? (
+                <input type="email" value={branchInfoData.email}
+                  onChange={(e) => setBranchInfoData(p => ({ ...p, email: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+              ) : (
+                <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
+                  {branchData.email}
+                </div>
+              )}
             </div>
 
             {/* Branch Type */}
@@ -579,53 +793,91 @@ const Profile: React.FC = () => {
               <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
                 <FaStore className="text-blue-600" /> Branch Type
               </label>
-              <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
-                {getBranchTypeDisplay(branchData.branch_type)}
-              </div>
+              {isSuperAdminUser && isEditingBranchInfo ? (
+                <select value={branchInfoData.branch_type}
+                  onChange={(e) => setBranchInfoData(p => ({ ...p, branch_type: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 bg-white">
+                  <option value="fashion">Fashion</option>
+                  <option value="mart">Mart</option>
+                  <option value="electronics">Electronics</option>
+                </select>
+              ) : (
+                <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
+                  {getBranchTypeDisplay(branchData.branch_type)}
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* ── ADDRESS / LOCATION DETAILS ── */}
-        {/* ✅ SUPERADMIN: Editable with dropdowns */}
-        {/* ✅ NORMAL BRANCH: Read-only */}
         <div className="bg-white p-6 rounded-xl shadow-md mb-6">
           <div className="flex justify-between items-center mb-6 border-b pb-2">
             <h3 className="text-2xl font-semibold text-gray-800 flex items-center gap-2">
               <FaMapMarkerAlt className="text-blue-600" /> Address Details
               {isSuperAdminUser && !isLocationComplete() && (
                 <span className="ml-4 text-sm text-yellow-600 bg-yellow-50 px-3 py-1 rounded-full">
-                  ⚠️ Required
+                   Required
                 </span>
               )}
               {isSuperAdminUser && isLocationComplete() && (
                 <span className="ml-4 text-sm text-green-600 bg-green-50 px-3 py-1 rounded-full">
-                  ✅ Complete
+                   Complete
                 </span>
               )}
             </h3>
-            {isSuperAdminUser && isEditing && (
-              <span className="text-xs text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                Editing Location
-              </span>
-            )}
+{isSuperAdminUser && !isEditing && (
+  <button
+    onClick={handleEdit}
+    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+  >
+    <FaEdit size={14} /> Edit Location
+  </button>
+)}
+{isSuperAdminUser && isEditing && (
+  <div className="flex gap-2">
+    <button
+      onClick={handleCancelEdit}
+      className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+    >
+      <FaTimes size={14} /> Cancel
+    </button>
+    <button
+      onClick={handleSaveProfile}
+      disabled={saving}
+      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50"
+    >
+      <FaSave size={14} /> {saving ? "Saving..." : "Save Location"}
+    </button>
+  </div>
+)}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Address - READ ONLY for both */}
+            {/* Complete Address */}
             <div className="md:col-span-2 space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
                 <FaMapMarkerAlt className="text-blue-600" /> Complete Address
               </label>
-              <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
-                {branchData.address || "Not specified"}
-              </div>
+              {isSuperAdminUser && isEditingBranchInfo ? (
+                <textarea
+                  value={branchInfoData.address}
+                  onChange={(e) => setBranchInfoData(p => ({ ...p, address: e.target.value }))}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter complete address"
+                />
+              ) : (
+                <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
+                  {branchData.address || "Not specified"}
+                </div>
+              )}
             </div>
 
             {/* Country */}
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
-                <FaGlobe className="text-blue-600" /> Country 
+                <FaGlobe className="text-blue-600" /> Country
                 {isSuperAdminUser && <span className="text-red-500">*</span>}
               </label>
               {isSuperAdminUser && isEditing ? (
@@ -714,19 +966,103 @@ const Profile: React.FC = () => {
               )}
             </div>
 
-            {/* Pincode - READ ONLY for both */}
+            {/* Pincode */}
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
                 <FaMapPin className="text-blue-600" /> Pincode
               </label>
-              <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
-                {branchData.pincode || "Not specified"}
-              </div>
+              {isSuperAdminUser && isEditingBranchInfo ? (
+                <input type="text" value={branchInfoData.pincode}
+                  onChange={(e) => setBranchInfoData(p => ({ ...p, pincode: e.target.value }))}
+                  maxLength={10}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter pincode" />
+              ) : (
+                <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800">
+                  {branchData.pincode || "Not specified"}
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Bank Details - READ ONLY */}
+        {/* ✅ SUPERADMIN-ONLY: Branch Panel Login Password (decoupled from superadmin panel) */}
+        {isSuperAdminUser && (
+          <div className="bg-white p-6 rounded-xl shadow-md mb-6">
+            <h3 className="text-2xl font-semibold text-gray-800 mb-2 border-b pb-2">
+              Branch Panel Login Password
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium text-gray-600">Current Branch Password *</label>
+                <div className="relative">
+                  <input
+                    type={showBranchPwd.current ? "text" : "password"}
+                    value={branchPwdData.current_password}
+                    onChange={(e) => setBranchPwdData(p => ({ ...p, current_password: e.target.value }))}
+                    className="w-full px-3 py-2 pr-11 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleBranchPwd("current")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    tabIndex={-1}
+                  >
+                    {showBranchPwd.current ? <FaEyeSlash size={16} /> : <FaEye size={16} />}
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-600">New Branch Password</label>
+                <div className="relative">
+                  <input
+                    type={showBranchPwd.next ? "text" : "password"}
+                    value={branchPwdData.new_password}
+                    onChange={(e) => setBranchPwdData(p => ({ ...p, new_password: e.target.value }))}
+                    className="w-full px-3 py-2 pr-11 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleBranchPwd("next")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    tabIndex={-1}
+                  >
+                    {showBranchPwd.next ? <FaEyeSlash size={16} /> : <FaEye size={16} />}
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-600">Confirm Password</label>
+                <div className="relative">
+                  <input
+                    type={showBranchPwd.confirm ? "text" : "password"}
+                    value={branchPwdData.confirm_password}
+                    onChange={(e) => setBranchPwdData(p => ({ ...p, confirm_password: e.target.value }))}
+                    className="w-full px-3 py-2 pr-11 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleBranchPwd("confirm")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    tabIndex={-1}
+                  >
+                    {showBranchPwd.confirm ? <FaEyeSlash size={16} /> : <FaEye size={16} />}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={handleSaveBranchPassword}
+              disabled={savingBranchPwd}
+              className="mt-4 px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition disabled:opacity-50"
+            >
+              {savingBranchPwd ? "Saving..." : "Update Branch Login Password"}
+            </button>
+          </div>
+        )}
+
+        {/* Bank Details - HAMESHA READ ONLY, superadmin ke liye bhi */}
         <div className="bg-white p-6 rounded-xl shadow-md mb-6">
           <h3 className="text-2xl font-semibold text-gray-800 mb-6 border-b pb-2">
             <FaCreditCard className="inline mr-2 text-blue-600" /> Bank Details

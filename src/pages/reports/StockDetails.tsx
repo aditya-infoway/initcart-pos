@@ -103,14 +103,14 @@ const StockDetail: React.FC = () => {
     const totalOutward = totalPurchaseReturns + totalSold;
     const netMovement = totalInward - totalOutward;
 
-    // Prepare main data for export
-    const exportData = history.map((row, index) => ({
+const exportData = history.map((row, index) => ({
       "SR No": index + 1,
       "Date": row.date ? new Date(row.date).toLocaleDateString("en-IN") : "Opening",
       "Type": row.type,
       "Party Name": row.partyName || "-",
       "Bill No": row.billNo || "-",
       "Quantity (In/Out)": row.qty,
+      "Purchase Price (₹)": row.qty !== 0 && row.billAmount > 0 ? (row.billAmount / Math.abs(row.qty)).toFixed(2) : "0.00",
       "Bill Amount (₹)": row.billAmount.toFixed(2),
       "Current Stock (₹)": row.currentStock.toFixed(2),
     }));
@@ -119,13 +119,14 @@ const StockDetail: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(exportData);
     
     // Set column widths
-    ws["!cols"] = [
+ws["!cols"] = [
       { wch: 6 },   // SR No
       { wch: 12 },  // Date
       { wch: 18 },  // Type
       { wch: 25 },  // Party Name
       { wch: 15 },  // Bill No
       { wch: 12 },  // Quantity
+      { wch: 15 },  // Purchase Price
       { wch: 15 },  // Bill Amount
       { wch: 15 },  // Current Stock
     ];
@@ -134,30 +135,30 @@ const StockDetail: React.FC = () => {
     const summaryData = [
       [],
       ["=".repeat(10)],
-      ["📊 STOCK SUMMARY REPORT"],
+      [" STOCK SUMMARY REPORT"],
       ["=".repeat(10)],
       [],
       ["Item Name:", itemName || `Variant #${variantId}`],
       ["Variant ID:", variantId],
       [],
-      ["📈 STOCK MOVEMENT SUMMARY"],
+      [" STOCK MOVEMENT SUMMARY"],
       ["-".repeat(10)],
       ["Opening Stock:", openingStock],
       [],
-      ["▶️ INWARD MOVEMENT:"],
+      [" INWARD MOVEMENT:"],
       ["  - Total Purchased:", totalPurchased],
       ["  - Total Sales Returns:", totalSalesReturns],
       ["  - Total Inward:", totalInward],
       [],
-      ["◀️ OUTWARD MOVEMENT:"],
+      [" OUTWARD MOVEMENT:"],
       ["  - Total Purchase Returns:", totalPurchaseReturns],
       ["  - Total Sold:", totalSold],
       ["  - Total Outward:", totalOutward],
       [],
-      ["📊 NET MOVEMENT:"],
+      [" NET MOVEMENT:"],
       ["  - Net Movement (Inward - Outward):", netMovement],
       [],
-      ["🏁 CLOSING STOCK:"],
+      [" CLOSING STOCK:"],
       ["  - Current Stock:", currentStock],
       ["  - Formula: Opening + Total Purchased - Total Purchase Returns - Total Sold + Total Sales Returns"],
       ["  - Calculation:", `${openingStock} + ${totalPurchased} - ${totalPurchaseReturns} - ${totalSold} + ${totalSalesReturns} = ${currentStock}`],
@@ -248,7 +249,7 @@ const StockDetail: React.FC = () => {
   const handlePrint = () => {
     const w = window.open("", "_blank");
     if (!w) return;
-    const rows = history
+const rows = history
       .map(
         (r, i) => `<tr style="border-bottom:1px solid #eee">
         <td style="padding:4px 8px">${i + 1}</td>
@@ -257,6 +258,7 @@ const StockDetail: React.FC = () => {
         <td style="padding:4px 8px">${r.partyName || "—"}</td>
         <td style="padding:4px 8px">${r.billNo || "—"}</td>
         <td style="padding:4px 8px;text-align:right">${fmt(Math.abs(r.qty))}</td>
+        <td style="padding:4px 8px;text-align:right">₹${r.qty !== 0 && r.billAmount > 0 ? fmt(r.billAmount / Math.abs(r.qty)) : "0.00"}</td>
         <td style="padding:4px 8px;text-align:right">₹${fmt(r.billAmount)}</td>
         <td style="padding:4px 8px;text-align:right">${fmt(r.currentStock)}</td>
       </tr>`
@@ -269,7 +271,7 @@ const StockDetail: React.FC = () => {
       <h2>Stock History — ${itemName || "Variant #" + variantId}</h2>
       <table><thead><tr>
         <th>SR</th><th>Date</th><th>Type</th><th>Party</th><th>Bill No</th>
-        <th>Qty</th><th>Bill Amount</th><th>Current Stock</th>
+        <th>Qty</th><th>Purchase Price</th><th>Bill Amount</th><th>Current Stock</th>
       </tr></thead><tbody>${rows}</tbody></table>
       <p>Opening: ${fmt(openingStock)} | Current Stock: ${fmt(currentStock)}</p>
       </body></html>`);
@@ -399,7 +401,7 @@ const StockDetail: React.FC = () => {
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10">
               <tr className="bg-blue-600 text-white">
-                {["#", "Date", "Type", "Party Name", "Bill No", "Qty", "Bill Amount", "Current Stock"].map((h) => (
+                {["#", "Date", "Type", "Party Name", "Bill No", "Qty", "Bill Amount","Purchase Price", "Current Stock"].map((h) => (
                   <th
                     key={h}
                     className="p-3 border border-blue-500 whitespace-nowrap text-left font-medium"
@@ -468,8 +470,16 @@ const StockDetail: React.FC = () => {
                         {isOutgoing ? "-" : isIncoming ? "+" : ""}
                         {fmt(Math.abs(row.qty))}
                       </td>
+                      
+
                       <td className="p-2 border border-gray-100 text-right text-gray-600">
                         {row.billAmount > 0 ? `₹${fmt(row.billAmount)}` : "—"}
+                      </td>
+                                            {/* ✅ NEW — Purchase Price (per-unit) column */}
+                      <td className="p-2 border border-gray-100 text-right text-gray-600">
+                        {row.qty !== 0 && row.billAmount > 0
+                          ? `₹${fmt(row.billAmount / Math.abs(row.qty))}`
+                          : "—"}
                       </td>
                       <td className="p-2 border border-gray-100 text-right font-bold whitespace-nowrap">
                         <span
@@ -486,11 +496,9 @@ const StockDetail: React.FC = () => {
                   );
                 })
               )}
-
-              {/* Totals footer on last page */}
-              {(page === totalPages || totalPages <= 1) && history.length > 0 && (
+{(page === totalPages || totalPages <= 1) && history.length > 0 && (
                 <tr className="bg-indigo-50 font-bold border-t-2 border-indigo-300">
-                  <td colSpan={5} className="p-3 border text-right text-indigo-700">
+                  <td colSpan={6} className="p-3 border text-right text-indigo-700">
                     CLOSING STOCK
                   </td>
                   <td colSpan={2} className="p-3 border text-right text-gray-600 text-sm">
