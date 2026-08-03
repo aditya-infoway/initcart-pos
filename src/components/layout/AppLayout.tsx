@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import api from "../../api/api";
 import { useAuthStore } from "../../store/authStore";
-import { FaBalanceScale, FaBars, FaBook, FaChartLine, FaRegFileAlt, FaBookOpen, FaExchangeAlt, FaCheckCircle, FaShoppingCart } from "react-icons/fa";
+import { FaBalanceScale, FaBars, FaBook, FaChartLine, FaRegFileAlt, FaBookOpen, FaExchangeAlt, FaCheckCircle, FaShoppingCart, FaRibbon } from "react-icons/fa";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toAbsoluteUrl } from "../../utils/reuseable";
 import Sidebar from "./Sidebar";
@@ -104,12 +104,32 @@ export const menuItems: MenuCategory[] = [
       },
     ],
   },
+    {
+    items: [
+      {
+        title: "B2B Stock Return",
+        icon: <FaCheckCircle size={20} />,
+        to: "/b2bstockReturn",
+        submenu: [],
+      },
+    ],
+  },
   {
     items: [
       {
         title: "Stock Return Verification",
         icon: <FaCheckCircle size={20} />,
         to: "/stockReturnverification",
+        submenu: [],
+      },
+    ],
+  },
+    {
+    items: [
+      {
+        title: "B2B Stock Returns",
+        icon: <FaCheckCircle size={20} />,
+        to: "/b2bstockReturnverification",
         submenu: [],
       },
     ],
@@ -129,8 +149,11 @@ export const menuItems: MenuCategory[] = [
       {
         title: "B2B Stock Transfer",
         icon: <FaExchangeAlt size={20} />,
-        to: "/b2bstockTransfer",
-        submenu: [],
+        submenu: [
+
+          {name:"Send Order", to: "/B2BOrderRequest"},
+          {name:"Received orders" , to:"/B2BStockTransfer"},
+        ],
       },
     ],
   },
@@ -141,6 +164,7 @@ export const menuItems: MenuCategory[] = [
         icon: <MdOutlineInventory2 size={20} />,
         submenu: [
           { name: "Purchase Entry", to: "/Addpurchaseitem" },
+          { name: "B2B Purchase Verify", to: "/b2bpurchaseverify" },
           { name: "Purchase Return", to: "/purchaseReturnList" },
           { name: "Create Order", to: "#" },
           { name: "Purchase Order Verify", to: "#" },
@@ -156,6 +180,8 @@ export const menuItems: MenuCategory[] = [
         submenu: [
           { name: "Sales Entry & Report", to: "/Addsalesitem" },
           { name: "Sales Entry2", to: "/salesentry2" },
+          { name: "B2B Sales", to: "/b2bsales" },
+          
           { name: "Sales Return & Report", to: "/salesReturnList" },
         ],
       },
@@ -183,6 +209,26 @@ export const menuItems: MenuCategory[] = [
         title: "Stock Report",
         icon: <MdOutlineInventory2 size={20} />,
         to: "/stock-report",
+        submenu: [],
+      },
+    ],
+  },
+    {
+    items: [
+      {
+        title: "Scheme Offers",
+        icon: <FaRibbon size={20} />,
+        to: "/SchemeOffer",
+        submenu: [],
+      },
+    ],
+  },
+  {
+    items: [
+      {
+        title: "Scheme Offer Register",
+        icon: <FaRibbon size={20} />,
+        to: "/SchemeOfferRegister",
         submenu: [],
       },
     ],
@@ -332,22 +378,37 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
                              user?.role === 'branch_both' || user?.role === 'branch_customer' ||
                              user?.role === 'branch_agent' || user?.role === 'branch_single';
     
-    if (isSuperAdmin) {
-      // ✅ SUPER ADMIN:
-      // Show: Stock Transfer, Stock Return Verification
-      // Hide: Stock Verification, Order Items, Stock Return
-      return menuItems
-        .map(category => ({
-          ...category,
-          items: category.items.filter(item => 
-            item.title !== "Stock Verification" && 
-            item.title !== "Order Items" &&
-            item.title !== "Stock Return"  &&
-            item.title !== "B2B Stock Transfer"
-          )
-        }))
-        .filter(category => category.items.length > 0);
-    }
+if (isSuperAdmin) {
+  return menuItems
+    .map(category => ({
+      ...category,
+      items: category.items
+
+        // 👇 YE NAYA BLOCK ADD KARO
+        .map(item => {
+          if (item.title === "purchase" && item.submenu) {
+            return {
+              ...item,
+              submenu: item.submenu.filter(
+                sub => sub.name !== "B2B Purchase Verify"
+              )
+            };
+          }
+          return item;
+        })
+
+        // 👇 YE AAPKA EXISTING CODE HAI, ISME KUCH CHANGE MAT KARNA
+        .filter(item =>
+          item.title !== "Stock Verification" &&
+          item.title !== "Order Items" &&
+          item.title !== "Stock Return" &&
+          item.title !== "B2B Stock Return" &&
+          item.title !== "B2B Stock Transfer" &&
+          item.title !== "Scheme Offer Register"
+        )
+    }))
+    .filter(category => category.items.length > 0);
+}
     
 if (isBranchOrVendor) {
   return menuItems
@@ -362,11 +423,22 @@ if (isBranchOrVendor) {
               submenu: item.submenu.filter(sub => sub.name !== "Branch Master")
             };
           }
+
+          if (item.title === "sales" && item.submenu) {
+  return {
+    ...item,
+    submenu: item.submenu.filter(
+      sub => sub.name !== "B2B Sales"
+    )
+  };
+}
           return item;
         })
         .filter(item => 
           item.title !== "Stock Transfer" && 
-          item.title !== "Stock Return Verification"
+          item.title !== "Stock Return Verification" &&
+          item.title !== "B2B Stock Returns" &&
+          item.title !== "Scheme Offers" 
         )
     }))
     .filter(category => category.items.length > 0);
@@ -383,7 +455,8 @@ if (isBranchOrVendor) {
             item.title !== "Stock Verification" && 
             item.title !== "Stock Return" &&
             item.title !== "Stock Return Verification" &&
-            item.title !== "Order Items"
+            item.title !== "Order Items"&&
+            item.title !== "Scheme Offer Register"
         )
       }))
       .filter(category => category.items.length > 0);

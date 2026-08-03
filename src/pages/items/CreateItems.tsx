@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Formik, Form, useField, useFormikContext } from "formik";
 import * as Yup from "yup";
 import { motion } from "framer-motion";
-import { FaCheckCircle, FaPlus } from "react-icons/fa";
+import { FaCheckCircle, FaEdit, FaPlus } from "react-icons/fa";
 import { MdDelete } from "react-icons/md";
 import { useNavigate, useParams } from "react-router-dom";
 import { MdArrowBack } from "react-icons/md";
@@ -49,10 +49,10 @@ const validationSchema = Yup.object({
         ),
       opStock: Yup.number().typeError("Must be a number").min(0, "Non-negative"),
       // ✅ Barcode validation - only required for Super Admin with company entry
-      // Frontend validation handle karega, Yup schema me optional rakhenge
       barcode: Yup.string()
         .matches(/^[a-zA-Z0-9]*$/, "Barcode can only contain letters and numbers")
-        .nullable(),
+        .nullable()
+        .optional(), // ✅ Add optional()
     })
   ),
 });
@@ -141,6 +141,7 @@ interface DataTableProps<T extends { id: number }> {
   data: T[];
   columns: Column<T>[];
   onDelete?: (item: T) => void;
+  onEdit?: (item: T) => void;
   totals: {
     totalQty: number;
     totalBasic: string;
@@ -150,7 +151,7 @@ interface DataTableProps<T extends { id: number }> {
   };
 }
 
-const DataTable = <T extends { id: number }>({ data, columns, onDelete, totals }: DataTableProps<T>) => (
+const DataTable = <T extends { id: number }>({ data, columns, onDelete, onEdit, totals }: DataTableProps<T>) => (
   <div className="bg-white/90 rounded-lg shadow border border-gray-100">
     <div className="overflow-x-auto" style={{ maxHeight: "260px" }}>
       <table className="text-xs sm:text-sm text-gray-700 w-full">
@@ -160,7 +161,9 @@ const DataTable = <T extends { id: number }>({ data, columns, onDelete, totals }
             {columns.map((col) => (
               <th key={String(col.key)} className="px-2 py-1 sm:py-2 text-left font-semibold text-gray-600 truncate">{col.label}</th>
             ))}
-            {onDelete && <th className="px-2 py-1 sm:py-2 text-center font-semibold text-gray-600 w-16">Action</th>}
+            {(onDelete || onEdit) && (
+              <th className="px-2 py-1 sm:py-2 text-center font-semibold text-gray-600 w-20">Action</th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -173,25 +176,44 @@ const DataTable = <T extends { id: number }>({ data, columns, onDelete, totals }
                   const displayValue = value && typeof value === 'object' ? value.name || value.label || '-' : value ?? '-';
                   return <td key={String(col.key)} className="px-2 py-1 sm:py-2 truncate">{displayValue}</td>;
                 })}
-                {onDelete && (
+                {(onDelete || onEdit) && (
                   <td className="px-2 py-1 sm:py-2">
-                    <motion.button
-                      whileHover={{ scale: 1.12 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => onDelete(item)}
-                      type="button"
-                      title="Delete"
-                      className="flex items-center justify-center w-8 h-8 border border-red-400 rounded-full text-red-600 hover:bg-red-600 hover:text-white hover:border-red-600 transition-all duration-200 shadow-sm hover:shadow-md"
-                    >
-                      <MdDelete size={16} />
-                    </motion.button>
+                    <div className="flex gap-1 justify-center">
+                      {onEdit && (
+                        <motion.button
+                          whileHover={{ scale: 1.12 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => onEdit(item)}
+                          type="button"
+                          title="Edit"
+                          className="flex items-center justify-center w-8 h-8 border border-blue-400 rounded-full text-blue-600 hover:bg-blue-600 hover:text-white transition-all duration-200"
+                        >
+                          <FaEdit size={14} />
+                        </motion.button>
+                      )}
+                      {onDelete && (
+                        <motion.button
+                          whileHover={{ scale: 1.12 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => onDelete(item)}
+                          type="button"
+                          title="Delete"
+                          className="flex items-center justify-center w-8 h-8 border border-red-400 rounded-full text-red-600 hover:bg-red-600 hover:text-white hover:border-red-600 transition-all duration-200 shadow-sm hover:shadow-md"
+                        >
+                          <MdDelete size={16} />
+                        </motion.button>
+                      )}
+                    </div>
                   </td>
                 )}
               </motion.tr>
             ))
           ) : (
             <tr>
-              <td colSpan={columns.length + (onDelete ? 2 : 1)} className="text-center text-gray-500 italic h-10 border-b border-gray-100">
+              <td
+                colSpan={columns.length + ((onDelete || onEdit) ? 2 : 1)}
+                className="text-center text-gray-500 italic h-10 border-b border-gray-100"
+              >
                 No items added.
               </td>
             </tr>
@@ -199,7 +221,7 @@ const DataTable = <T extends { id: number }>({ data, columns, onDelete, totals }
         </tbody>
         <tfoot>
           <tr className="bg-gray-100 border-t border-gray-200 font-semibold sticky bottom-0">
-            <td className="px-2 py-1 sm:py-2" colSpan={onDelete ? 2 : 1}>Total</td>
+            <td className="px-2 py-1 sm:py-2" colSpan={(onDelete || onEdit) ? 2 : 1}>Total</td>
             {columns.map((col) => (
               <td key={String(col.key)} className="px-2 py-1 sm:py-2 truncate">
                 {col.key === "opStock" ? totals.totalQty :
@@ -215,7 +237,6 @@ const DataTable = <T extends { id: number }>({ data, columns, onDelete, totals }
     </div>
   </div>
 );
-
 // ------------------ Utility Functions ------------------
 const createItemRow = (fields: any[] = []) => {
   const base: any = {
@@ -419,6 +440,7 @@ const CreateItems: React.FC = () => {
   const [checkingBarcode, setCheckingBarcode] = useState<boolean>(false);
   const [currentBarcode, setCurrentBarcode] = useState<string>("");
   const [groupsAndUnitsLoaded, setGroupsAndUnitsLoaded] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
 
   const { user } = useAuthStore();
   const isSuperAdmin = user?.role === 'superadmin';
@@ -431,11 +453,6 @@ const CreateItems: React.FC = () => {
   } | null>(null);
 
 const checkBarcodeUniqueness = async (barcode: string, variantId?: number) => {
-  // ✅ Skip check if not Super Admin
-  if (!isSuperAdmin) {
-    setBarcodeError("");
-    return true;
-  }
 
   if (!barcode || barcode.length < 3) {
     setBarcodeError("");
@@ -468,6 +485,30 @@ const checkBarcodeUniqueness = async (barcode: string, variantId?: number) => {
   } finally {
     setCheckingBarcode(false);
   }
+};
+
+
+const handleEditVariant = (row: VariantItem, setFieldValue: any) => {
+  setFieldValue("items[0]", {
+    purchasePrice: row.purchasePrice,
+    salesPrice: row.salesPrice,
+    mrp: row.mrp,
+    barcode: row.barcode,
+    opStock: row.opStock,
+    branchPrice: row.branchPrice,
+    basicAmount: row.basicAmount,
+    discountAmount: row.discountAmount,
+    taxAmount: row.taxAmount,
+    netValue: row.netValue,
+    ...branchFields.reduce((acc: any, f: any) => ({ ...acc, [f.key]: row[f.key] || "" }), {}),
+  }, false);
+  setEditingId(row.id);
+  setBarcodeError("");
+};
+
+const handleCancelEdit = (setFieldValue: any) => {
+  setFieldValue("items[0]", createItemRow(branchFields), false);
+  setEditingId(null);
 };
 
 
@@ -592,6 +633,12 @@ useEffect(() => {
             const itemData = response.data.item;
             const variantsData = response.data.variants;
             const entryTypeVal = itemData.entry_type || "company";
+
+              if (!isSuperAdmin && itemData.created_by_superadmin) {
+    toast.error("You can only edit manually created items.");
+    navigate("/AddItems");
+    return;
+  }
 
             setEntryType(entryTypeVal);
 
@@ -822,31 +869,22 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
     toast.error("Please fill in variant details first");
     return;
   }
-
   const cur = values.items[0];
-
   if (!cur.purchasePrice || !cur.salesPrice || !cur.mrp) {
     toast.error("Please fill in Purchase Price, Sales Price, and MRP");
     return;
   }
-  
-  // ✅ Validate barcode - ONLY for Super Admin with company items
-  if (isSuperAdmin && entryType === 'company' && (!cur.barcode || cur.barcode.trim() === "")) {
-    toast.error("Barcode is required for company items");
-    return;
-  }
 
-  // ✅ Check barcode uniqueness - ONLY for Super Admin
   if (isSuperAdmin && cur.barcode && cur.barcode.trim() !== "") {
-    const isUnique = await checkBarcodeUniqueness(cur.barcode);
+    // ✅ apna hi barcode dobara check na kare jab edit kar rahe ho
+    const isUnique = await checkBarcodeUniqueness(cur.barcode, editingId ?? undefined);
     if (!isUnique) {
       toast.error(`Barcode "${cur.barcode}" already exists in this branch. Please use a different barcode.`);
       return;
     }
   }
 
-  const newVariant = {
-    id: -Date.now(),
+  const variantPayload = {
     purchasePrice: Number(cur.purchasePrice),
     salesPrice: Number(cur.salesPrice),
     mrp: Number(cur.mrp),
@@ -860,10 +898,19 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
     ...branchFields.reduce((acc, f) => ({ ...acc, [f.key]: cur[f.key] || "" }), {}),
   };
 
-  setAddedItems(prev => [...prev, newVariant]);
+  if (editingId !== null) {
+    // ✅ UPDATE existing row (id preserved so backend knows it's an existing variant)
+    setAddedItems(prev => prev.map(v => v.id === editingId ? { ...v, ...variantPayload, id: editingId } : v));
+    toast.success("Variant updated successfully");
+    setEditingId(null);
+  } else {
+    const newVariant = { id: -Date.now(), ...variantPayload };
+    setAddedItems(prev => [...prev, newVariant]);
+    toast.success("Variant added successfully");
+  }
+
   setFieldValue("items[0]", createItemRow(branchFields), false);
   setBarcodeError("");
-  toast.success("Variant added successfully");
 };
 
   const deleteVariant = async (row: VariantItem) => {
@@ -875,9 +922,10 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
           headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` },
         });
         toast.success("Variant deleted successfully");
-      } catch (err: any) {
+} catch (err: any) {
         console.error("Delete failed:", err);
-        toast.error("Failed to delete variant");
+        const msg = err.response?.data?.error || "Failed to delete variant";
+        toast.error(msg);
         return;
       }
     }
@@ -1152,136 +1200,113 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
                 <FormSelect label="Tax Slab" name="taxSlab" options={["5%", "12%", "18%", "28%", "Tax Free"].map(t => ({ label: t, value: t }))} />
               </div>
 
-              {/* ✅ Size/Price Details Section - ONLY ONE GRID */}
-              <div className="col-span-full mt-3 rounded-b-lg shadow grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 pb-10">
-                <div className="col-span-full border-b pb-1">
-                  <h2 className="text-sm font-semibold text-blue-700">Size / Price Details</h2>
-                </div>
-                  {/* ✅ Branch-specific fields - Dynamically rendered */}
+{/* ✅ Size/Price Details Section - Variant fields pehle, prices baad mein */}
+<div className="col-span-full mt-3 rounded-b-lg shadow grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 pb-10">
+  <div className="col-span-full border-b pb-1">
+    <h2 className="text-sm font-semibold text-blue-700">Size / Price Details</h2>
+  </div>
 
+  {/* ✅ MAIN GRID - Variant fields PEHLE, prices BAAD mein */}
+  <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-2 bg-gray-50 p-2 rounded">
 
-                {/* ✅ MAIN GRID - ONLY ONE, REMOVE DUPLICATE */}
-                <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-2 bg-gray-50 p-2 rounded">
-  {isSuperAdmin && (
-    <FormInput label="Branch Price" name="items[0].branchPrice" type="number" />
-  )}
-                    {branchFields.length > 0 && (
-    <>
-      {branchFields.map((field) => (
-        <FormInput
-          key={field.key}
-          label={field.label}
-          name={`items[0].${field.key}`}
-          type={field.type === "date" ? "date" : "text"}
-        />
-      ))}
-    </>
-  )}
-                  {/* Source Price (Super Admin's price) */}
-                  <FormInput label="P.Price (Source)" name="items[0].purchasePrice" type="number" />
+    {/* ✅ STEP 1: VARIANT FIELDS PEHLE (size, color, srno, warrantydate) */}
+    {branchFields.length > 0 && (
+      <>
+        {branchFields.map((field) => (
+          <FormInput
+            key={field.key}
+            label={field.label}
+            name={`items[0].${field.key}`}
+            type={field.type === "date" ? "date" : "text"}
+          />
+        ))}
+      </>
+    )}
 
-                  <FormInput label="S.Price" name="items[0].salesPrice" type="number" />
-                  <FormInput label="M.R.P" name="items[0].mrp" type="number" />
+    {/* ✅ STEP 2: PRICES - P.Price (Source) */}
+    <FormInput label="P.Price (Source)" name="items[0].purchasePrice" type="number" />
 
-                  {/* Barcode */}
-{/* Barcode - Required only for Super Admin */}
+    {/* ✅ STEP 3: Branch Price (only for Super Admin) */}
+    {isSuperAdmin && (
+      <FormInput label="Branch Price" name="items[0].branchPrice" type="number" />
+    )}
+
+    {/* ✅ STEP 4: Sales Price */}
+    <FormInput label="S.Price" name="items[0].salesPrice" type="number" />
+
+    {/* ✅ STEP 5: MRP */}
+    <FormInput label="M.R.P" name="items[0].mrp" type="number" />
+
+{/* STEP 6: Barcode - Now completely optional for everyone */}
 <div className="text-xs sm:text-sm">
   <label className="block font-medium text-gray-600">
     Barcode
-    {isSuperAdmin && entryType === 'company' && <span className="text-red-500 ml-1">*</span>}
-    {checkingBarcode && <span className="ml-2 text-blue-500 text-[10px]">Checking...</span>}
+    
   </label>
-  <div className="flex gap-1">
-    <input
-      type="text"
-      name="items[0].barcode"
-      value={values.items?.[0]?.barcode || ""}
-      onChange={async (e) => {
-        const newValue = e.target.value.replace(/[^a-zA-Z0-9]/g, "");
-        setFieldValue("items[0].barcode", newValue);
-        setCurrentBarcode(newValue);
-        if (newValue.length >= 3) {
-          setTimeout(async () => {
-            if (currentBarcode === newValue) {
-              await checkBarcodeUniqueness(newValue);
-            }
-          }, 500);
-        } else {
-          setBarcodeError("");
-        }
-      }}
-      onBlur={async () => {
-        const val = values.items?.[0]?.barcode;
-        if (val && val.length >= 3) {
-          await checkBarcodeUniqueness(val);
-        }
-      }}
-      placeholder={isSuperAdmin && entryType === 'company' ? "Barcode required" : "Optional"}
-      className={`w-full p-1 sm:p-2 border ${
-        barcodeError ? "border-red-500" : "border-gray-300"
-      } rounded text-xs sm:text-sm bg-white ${
-        isSuperAdmin && entryType === 'company' && !values.items?.[0]?.barcode ? "border-amber-300 bg-amber-50" : ""
-      }`}
-    />
- 
- 
-      <button
-        type="button"
-        title="Auto-generate barcode"
-        onClick={async () => {
-          let isUnique = false;
-          let attempts = 0;
-          let newBarcode = "";
-          while (!isUnique && attempts < 5) {
-            newBarcode = generateBarcodeNumber();
-            try {
-              const token = sessionStorage.getItem("token");
-              const res = await api.get(
-                `barcodes/check-branch-barcode/?barcode=${encodeURIComponent(newBarcode)}`,
-                { headers: { Authorization: `Bearer ${token}` } }
-              );
-              if (!res.data.exists) isUnique = true;
-            } catch (error) {
-              console.error("Error checking barcode:", error);
-              isUnique = true;
-            }
-            attempts++;
+  <input
+    type="text"
+    name="items[0].barcode"
+    value={values.items?.[0]?.barcode || ""}
+    onChange={(e) => {
+      const newValue = e.target.value.replace(/[^a-zA-Z0-9]/g, "");
+      setFieldValue("items[0].barcode", newValue);
+      setCurrentBarcode(newValue);
+      
+      // Still check uniqueness if user enters a barcode, but don't require it
+      if (newValue.length >= 3) {
+        setTimeout(async () => {
+          if (currentBarcode === newValue) {
+            await checkBarcodeUniqueness(newValue, editingId ?? undefined);
           }
-          setFieldValue("items[0].barcode", newBarcode);
-          setCurrentBarcode(newBarcode);
-          setBarcodeError("");
-          toast.success(`Auto-generated unique barcode: ${newBarcode}`);
-        }}
-        className="bg-blue-500 hover:bg-blue-600 text-white px-2 rounded text-xs whitespace-nowrap flex items-center gap-1 transition-colors"
-      >
-        🔲 Auto
-      </button>
+        }, 500);
+      } else {
+        setBarcodeError("");
+      }
+    }}
+    onBlur={async () => {
+      const val = values.items?.[0]?.barcode;
+      if (val && val.length >= 3) {
+        await checkBarcodeUniqueness(val, editingId ?? undefined);
+      }
+    }}
 
-
-  </div>
+    className={`w-full p-1 sm:p-2 border ${
+      barcodeError ? "border-red-500" : "border-gray-300"
+    } rounded text-xs sm:text-sm bg-white`}
+  />
   {barcodeError && (
     <div className="text-red-500 text-[10px] sm:text-xs mt-1">{barcodeError}</div>
   )}
-  {!isSuperAdmin && entryType === 'company' && !values.items?.[0]?.barcode && !barcodeError && (
-    <div className="text-gray-400 text-[10px] sm:text-xs mt-1">
-      Optional - You can leave it empty
-    </div>
-  )}
+  
 </div>
 
-                  <FormInput label="Op.Stock" name="items[0].opStock" />
-                  <DisplayField label="Net" value={values.items?.[0]?.netValue || "0.00"} />
+    {/* ✅ STEP 7: Opening Stock */}
+    <FormInput label="Op.Stock" name="items[0].opStock" type="number" />
 
-                  <div className="flex items-end">
-                    <button
-                      type="button"
-                      onClick={() => handleAddVariant(values, setFieldValue)}
-                      className="bg-green-600 text-white w-full p-1 sm:p-2 rounded hover:bg-green-700 flex items-center justify-center text-xs h-8 sm:h-9"
-                    >
-                      <FaCheckCircle className="mr-1" /> Add
-                    </button>
-                  </div>
-                </div>
+    {/* ✅ STEP 8: Net Value (Display only) */}
+    <DisplayField label="Net" value={values.items?.[0]?.netValue || "0.00"} />
+
+{/* ✅ STEP 9: Add / Update Button */}
+    <div className="flex items-end gap-1">
+      <button
+        type="button"
+        onClick={() => handleAddVariant(values, setFieldValue)}
+        className="bg-green-600 text-white flex-1 p-1 sm:p-2 rounded hover:bg-green-700 flex items-center justify-center text-xs h-8 sm:h-9"
+      >
+        <FaCheckCircle className="mr-1" /> {editingId !== null ? "Update" : "Add"}
+      </button>
+      {editingId !== null && (
+        <button
+          type="button"
+          onClick={() => handleCancelEdit(setFieldValue)}
+          className="bg-gray-400 text-white px-2 rounded hover:bg-gray-500 text-xs h-8 sm:h-9"
+        >
+          Cancel
+        </button>
+      )}
+    </div>
+  </div>
+
 
                 {/* Fractional unit info display */}
                 {selectedUnit?.supports_fractional && (
@@ -1313,6 +1338,7 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
                       { key: "opStock", label: "Op.Stock" },
                     ]}
                     totals={totals}
+                    onEdit={(row) => handleEditVariant(row, setFieldValue)}
                     onDelete={deleteVariant}
                   />
                 </div>

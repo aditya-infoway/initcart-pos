@@ -616,8 +616,8 @@ const PendingBarcodes: React.FC = () => {
 
 // ─── CAN EDIT CHECK ─────────────────────────────────────────
 const canEditBarcode = (entryType: string | undefined): boolean => {
-    // ✅ SUPERADMIN: Kabhi edit nahi kar sakta (sab par lock)
-    if (userRole === 'superadmin') return false;
+    // ✅ SUPERADMIN: company aur manual dono items ka barcode edit kar sakta hai
+    if (userRole === 'superadmin') return true;
     
     // ✅ NORMAL BRANCH: Sirf manual items edit kar sakta hai
     const type = entryType || 'manual';
@@ -978,8 +978,7 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
         </span>
         
 {/* ─── EDIT BUTTON - SIRF NORMAL BRANCH + MANUAL ITEMS ── */}
-
-{(userRole !== 'superadmin' && (v.entry_type || 'manual') === 'manual') && (
+{canEditBarcode(v.entry_type) && (
     <button
         onClick={() => {
             setEditBarcodeValues(prev => 
@@ -987,19 +986,14 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
             );
         }}
         className="ml-1 text-blue-500 hover:text-blue-700 text-xs"
-        title="Edit barcode (Manual items only)"
+        title="Edit barcode"
     >
         <FaEdit size={12} />
     </button>
 )}
 
-{/* ─── LOCK ICON ───────────────────────────────────────────── */}
-{(userRole === 'superadmin' || (v.entry_type || 'manual') === 'company') && (
-    <span className="text-gray-400 text-xs ml-1" title={
-        userRole === 'superadmin' 
-            ? "Barcode editing is disabled for superadmin" 
-            : "Company items cannot be edited by normal users"
-    }>
+{!canEditBarcode(v.entry_type) && (
+    <span className="text-gray-400 text-xs ml-1" title="Company items cannot be edited by normal users">
         <FaLock size={10} />
     </span>
 )}

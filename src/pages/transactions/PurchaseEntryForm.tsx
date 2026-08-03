@@ -9,11 +9,12 @@ import {
   FaTruck, FaMoneyBill, FaUniversity, FaPlus,
   FaArrowLeft, FaPercent, FaBox, FaCalendarAlt,
   FaFileInvoice, FaShoppingBag, FaEdit, FaPrint,
-  FaPaperclip
+  FaPaperclip, FaBarcode, FaQrcode
 } from "react-icons/fa";
 import { MdClose } from "react-icons/md";
 import api from "../../api/api";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+import Barcode from "react-barcode";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -101,6 +102,7 @@ interface Item {
   igst: number;
   netValue: number;
   taxSlab: string;
+  barcode?: string;
 }
 
 interface Supplier {
@@ -117,6 +119,35 @@ interface Account {
   id: number;
   account_name: string;
   group: string;
+}
+
+// Form item type with barcode fields
+interface FormItem {
+  itemId: string;
+  variantId: number | null;
+  itemName: string;
+  hsnCode: string;
+  quantity: string;
+  altQuantity: string;
+  price: string;
+  unit: string;
+  discountPercent: string;
+  basicAmount: string;
+  discountAmount: string;
+  taxAmount: string;
+  cgst: string;
+  sgst: string;
+  igst: string;
+  netValue: string;
+  taxSlab: string;
+  unit_supports_fractional: boolean;
+  opStock: number;
+  existingBarcode: string;
+  barcodeMode: "manual" | "autogenerate";
+  barcodeValue: string;
+  barcodeVariantId: number | null;
+  barcodeGenerated: boolean;
+  barcodeSaved: boolean;
 }
 
 // ─── Formik-connected Form Components ────────────────────────────────────────
@@ -194,7 +225,7 @@ const DisplayField: React.FC<{ label: string; value: string | number; icon?: any
   </div>
 );
 
-// ─── Account Select (moved to module level — fixes dropdown remount bug) ──────
+// ─── Account Select ──────────────────────────────────────────────────────────
 
 const AccountSelect: React.FC<Props> = ({ name, terms: termsProp }) => {
   const [field, meta] = useField(name);
@@ -237,7 +268,7 @@ const AccountSelect: React.FC<Props> = ({ name, terms: termsProp }) => {
   );
 };
 
-// ─── Party Select (moved to module level — fixes dropdown remount bug) ───────
+// ─── Party Select ────────────────────────────────────────────────────────────
 
 const PartySelect = ({ name }: { name: any }) => {
   const [field, meta, helpers] = useField(name);
@@ -357,11 +388,187 @@ const FractionalUnitDisplay = ({ price, per, quantity, supportsFractional }: any
         </div>
         {Number(quantity) > 0 && (
           <div className="text-xs text-blue-600 mt-1">
-            {quantity} {per} × ₹{Number(price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}{" "}
-            = <span className="font-bold">₹{totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            {quantity} {per} × ₹{Number(price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ={" "}
+            <span className="font-bold">₹{totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+// ─── Barcode Input Component ──────────────────────────────────────────────
+
+interface BarcodeInputProps {
+  mode: 'manual' | 'autogenerate';
+  barcodeValue: string;
+  onBarcodeChange: (value: string) => void;
+  onModeChange: (mode: 'manual' | 'autogenerate') => void;
+  onGenerateBarcode: () => void;
+  onSaveBarcode: () => void;
+  variantId: number | null;
+  itemName: string;
+  isSuperAdmin: boolean;
+  existingBarcode: string;
+  isGenerating: boolean;
+  isSaving: boolean;
+  barcodeGenerated: boolean;
+  barcodeSaved: boolean;
+  disabled?: boolean;
+}
+
+const BarcodeInput: React.FC<BarcodeInputProps> = ({
+  mode,
+  barcodeValue,
+  onBarcodeChange,
+  onModeChange,
+  onGenerateBarcode,
+  onSaveBarcode,
+  variantId,
+  itemName,
+  isSuperAdmin,
+  existingBarcode,
+  isGenerating,
+  isSaving,
+  barcodeGenerated,
+  barcodeSaved,
+  disabled = false,
+}) => {
+  // ─── ONLY SHOW IF: Superadmin AND no existing barcode AND a variant is selected ───
+  const shouldShow = isSuperAdmin && !existingBarcode && variantId;
+
+  if (!shouldShow) return null;
+
+  return (
+    <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+      <div className="flex items-center gap-4 mb-3">
+        <span className="text-sm font-semibold text-blue-700 flex items-center gap-2">
+          <FaBarcode className="text-blue-600" /> Generate Barcode
+        </span>
+        
+        {/* Radio Buttons - Manual selected by default */}
+        <div className="flex items-center gap-4 ml-4">
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="radio"
+              name="barcodeMode"
+              value="manual"
+              checked={mode === 'manual'}
+              onChange={() => onModeChange('manual')}
+              disabled={disabled || barcodeSaved}
+              className="accent-blue-600"
+            />
+            Manual
+          </label>
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="radio"
+              name="barcodeMode"
+              value="autogenerate"
+              checked={mode === 'autogenerate'}
+              onChange={() => onModeChange('autogenerate')}
+              disabled={disabled || barcodeSaved}
+              className="accent-blue-600"
+            />
+            Auto Generate
+          </label>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="flex-1">
+          <input
+            type="text"
+            placeholder={mode === 'autogenerate' ? "Click 'Generate' to create barcode" : "Scan or type barcode"}
+            value={mode === 'autogenerate' ? '' : barcodeValue}
+            onChange={(e) => {
+              if (mode === 'manual') {
+                onBarcodeChange(e.target.value);
+              }
+            }}
+            disabled={mode === 'autogenerate' || disabled || isGenerating || barcodeSaved}
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-mono
+              ${mode === 'autogenerate' || barcodeSaved ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white border-gray-300'}
+              ${disabled || isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}
+          />
+        </div>
+        
+        {/* Generate Button - Auto Generate mode */}
+        {mode === 'autogenerate' && !barcodeSaved && (
+          <button
+            type="button"
+            onClick={onGenerateBarcode}
+            disabled={disabled || isGenerating || !variantId || barcodeSaved}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+          >
+            {isGenerating ? (
+              <>
+                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Generating...
+              </>
+            ) : (
+              <>
+                <FaQrcode /> Generate
+              </>
+            )}
+          </button>
+        )}
+
+        {/* Save Barcode Button - Both modes */}
+        {!barcodeSaved && barcodeValue && (
+          <button
+            type="button"
+            onClick={onSaveBarcode}
+            disabled={disabled || isSaving || !variantId || !barcodeValue}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+          >
+            {isSaving ? (
+              <>
+                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Saving...
+              </>
+            ) : (
+              <>
+                <FaSave /> Save Barcode
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Barcode Display - Show barcode PRINT only for auto generate mode when generated */}
+      {mode === 'autogenerate' && barcodeValue && barcodeGenerated && !barcodeSaved && (
+        <div className="mt-3 p-3 bg-white rounded-lg border border-gray-200 flex justify-center">
+          <Barcode value={barcodeValue} format="CODE128" width={1.5} height={50} displayValue={true} />
+        </div>
+      )}
+      
+      {/* Show message for manual mode */}
+      {mode === 'manual' && barcodeValue && !barcodeSaved && (
+        <div className="mt-2 text-xs text-blue-600">
+          ✓ Barcode entered. Click "Save Barcode" to save.
+        </div>
+      )}
+      
+      {/* Show message for auto generate mode without barcode */}
+      {mode === 'autogenerate' && !barcodeValue && !isGenerating && !barcodeSaved && (
+        <div className="mt-2 text-xs text-gray-500">
+          Click "Generate" to create a barcode
+        </div>
+      )}
+
+      {/* Show success message when barcode is saved */}
+      {barcodeSaved && (
+        <div className="mt-2 text-xs text-green-600 font-semibold">
+          ✓ Barcode saved successfully! Now click "Add" to add item.
+        </div>
+      )}
     </div>
   );
 };
@@ -373,6 +580,23 @@ const today = new Date().toISOString().split("T")[0];
 const PurchaseEntryForm: React.FC = () => {
   const navigate = useNavigate();
   const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
+
+  // ─── Check if user is Superadmin ──────────────────────────────────────────
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+  const [isGeneratingBarcode, setIsGeneratingBarcode] = useState<boolean>(false);
+  const [isSavingBarcode, setIsSavingBarcode] = useState<boolean>(false);
+
+  useEffect(() => {
+    const userStr = sessionStorage.getItem("user");
+    if (userStr) {
+      try {
+        const user = JSON.parse(userStr);
+        setIsSuperAdmin(user?.role === "superadmin");
+      } catch (e) {
+        console.error("Failed to parse user:", e);
+      }
+    }
+  }, []);
 
   const initialValues = {
     date: today,
@@ -391,7 +615,7 @@ const PurchaseEntryForm: React.FC = () => {
     items: [
       {
         itemId: "",
-        variantId: null,
+        variantId: null as number | null,
         itemName: "",
         hsnCode: "",
         quantity: "",
@@ -409,11 +633,17 @@ const PurchaseEntryForm: React.FC = () => {
         taxSlab: "",
         unit_supports_fractional: false,
         opStock: 0,
+        existingBarcode: "",
+        barcodeMode: "manual" as "manual" | "autogenerate",
+        barcodeValue: "",
+        barcodeVariantId: null as number | null,
+        barcodeGenerated: false,
+        barcodeSaved: false,
       },
     ],
   };
 
-  // ── API helpers (unchanged) ──
+  // ── API helpers ──
   const fetchItemTax = async (item: any, partyId: number) => {
     const payload = {
       item_id: Number(item.itemId),
@@ -465,7 +695,7 @@ const PurchaseEntryForm: React.FC = () => {
     };
   };
 
-  // ── Fetch branch type (unchanged) ──
+  // ── Fetch branch type ──
   useEffect(() => {
     const fetchBranchType = async () => {
       try {
@@ -482,7 +712,7 @@ const PurchaseEntryForm: React.FC = () => {
     fetchBranchType();
   }, []);
 
-  // ── Fetch items for modal (unchanged) ──
+  // ── Fetch items for modal ──
   useEffect(() => {
     if (openModal) {
       const fetchAllItems = async () => {
@@ -524,7 +754,26 @@ const PurchaseEntryForm: React.FC = () => {
     setOpenModal(true);
   };
 
-  // ── Submit (location check added, rest unchanged) ──
+  // ── Generate Barcode API call (only generates, does NOT save) ──
+  const generateBarcodeForVariant = async (variantId: number): Promise<string> => {
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      const response = await api.post(
+        `barcodes/generate/${variantId}/`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.data.success) {
+        return response.data.barcode;
+      }
+      throw new Error("Failed to generate barcode");
+    } catch (err) {
+      console.error("Error generating barcode:", err);
+      throw err;
+    }
+  };
+
+  // ── Submit ──
   const handleSubmit = async (values: any) => {
     const locationOk = await checkLocation();
     if (!locationOk) return;
@@ -601,8 +850,8 @@ const PurchaseEntryForm: React.FC = () => {
   const variantFields = VARIANT_BY_BRANCH[branchType || ""] || [];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-6 pb-24">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-6 pb-24 px-0">
+      <div className="w-full px-4 sm:px-6 lg:px-8">
 
         {/* ── Header ── */}
         <div className="flex justify-between items-center mb-6">
@@ -632,7 +881,7 @@ const PurchaseEntryForm: React.FC = () => {
         >
           {({ values, setFieldValue }) => {
 
-            // ── Basic amount calculation (unchanged) ──
+            // ── Basic amount calculation ──
             useEffect(() => {
               const cur = values.items[0];
               const quantity = Number(cur.quantity) || 0;
@@ -646,7 +895,7 @@ const PurchaseEntryForm: React.FC = () => {
               setFieldValue("items[0].netValue", netValue.toFixed(2));
             }, [values.items[0].quantity, values.items[0].price, values.items[0].discountPercent]);
 
-            // ── Tax slab fetch (unchanged) ──
+            // ── Tax slab fetch ──
             useEffect(() => {
               const fetchTaxSlabForItem = async () => {
                 const itemId = values.items[0].itemId;
@@ -664,14 +913,94 @@ const PurchaseEntryForm: React.FC = () => {
               fetchTaxSlabForItem();
             }, [values.items[0].itemId, setFieldValue]);
 
-            // ── Add item handler (unchanged) ──
+            // ── Handle Generate Barcode (only generates, does NOT save) ──
+            const handleGenerateBarcode = async () => {
+              const cur = values.items[0] as FormItem;
+              if (!cur.variantId) {
+                toast.error("Please select an item first");
+                return;
+              }
+              if (cur.existingBarcode) {
+                toast.info("This item already has a barcode");
+                return;
+              }
+
+              setIsGeneratingBarcode(true);
+              try {
+                const barcode = await generateBarcodeForVariant(cur.variantId);
+                setFieldValue("items[0].barcodeValue", barcode);
+                setFieldValue("items[0].barcodeVariantId", cur.variantId);
+                setFieldValue("items[0].barcodeGenerated", true);
+                toast.success(`Barcode generated successfully. Click "Save Barcode" to save.`);
+              } catch (err) {
+                console.error("Auto-generate barcode failed:", err);
+                toast.error("Failed to generate barcode");
+              } finally {
+                setIsGeneratingBarcode(false);
+              }
+            };
+
+            // ── Handle Save Barcode (saves to backend) ──
+            const handleSaveBarcode = async () => {
+              const cur = values.items[0] as FormItem;
+              if (!cur.variantId) {
+                toast.error("Please select an item first");
+                return;
+              }
+              if (!cur.barcodeValue) {
+                toast.error("Please generate or enter a barcode first");
+                return;
+              }
+              if (cur.existingBarcode) {
+                toast.info("This item already has a barcode");
+                return;
+              }
+
+              setIsSavingBarcode(true);
+              try {
+                const token = sessionStorage.getItem("accessToken");
+                await api.put(
+                  `barcodes/update/${cur.variantId}/`,
+                  { barcode: cur.barcodeValue },
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                setFieldValue("items[0].barcodeSaved", true);
+                setFieldValue("items[0].existingBarcode", cur.barcodeValue);
+                toast.success("Barcode saved successfully! Now click 'Add' to add item.");
+              } catch (err: any) {
+                console.error("Failed to save barcode:", err);
+                if (err.response?.data?.message) {
+                  toast.error(err.response.data.message);
+                } else {
+                  toast.error("Failed to save barcode");
+                }
+              } finally {
+                setIsSavingBarcode(false);
+              }
+            };
+
+            // ── Add item handler ──
             const handleAddItem = async () => {
-              const cur = values.items[0];
+              const cur = values.items[0] as FormItem;
               if (!values.partyName) { toast.error("Select Party first"); return; }
-              if (!cur.itemId)        { toast.error("Select Item"); return; }
+              if (!cur.itemId) { toast.error("Select Item"); return; }
               if (!cur.quantity || Number(cur.quantity) <= 0) { toast.error("Enter valid quantity"); return; }
-              if (!cur.price || Number(cur.price) <= 0)       { toast.error("Enter valid price"); return; }
-              if (!cur.unit)          { toast.error("Select unit"); return; }
+              if (!cur.price || Number(cur.price) <= 0) { toast.error("Enter valid price"); return; }
+              if (!cur.unit) { toast.error("Select unit"); return; }
+
+              // ── Barcode validation for superadmin ──
+              if (isSuperAdmin && !cur.existingBarcode) {
+                if (!cur.barcodeValue) {
+                  toast.error("Please generate or enter a barcode first");
+                  return;
+                }
+                if (!cur.barcodeSaved) {
+                  toast.error("Please save the barcode first by clicking 'Save Barcode'");
+                  return;
+                }
+              }
+
+              let finalBarcode = cur.barcodeValue || cur.existingBarcode || "";
 
               let taxData;
               try {
@@ -701,22 +1030,41 @@ const PurchaseEntryForm: React.FC = () => {
                   sgst: Number(taxData.sgst),
                   igst: Number(taxData.igst),
                   netValue: Number(taxData.net_amount),
-                  taxSlab: taxData.tax_percent.toString(),
+                  taxSlab: taxData.tax_percent?.toString() || "0",
+                  barcode: finalBarcode || "",
                 },
               ]);
               setIdCounter((p) => p + 1);
               setFieldValue("items[0]", {
-                itemId: "", variantId: null, itemName: "", hsnCode: "",
-                quantity: "", altQuantity: "", price: "", unit: "",
+                itemId: "",
+                variantId: null,
+                itemName: "",
+                hsnCode: "",
+                quantity: "",
+                altQuantity: "",
+                price: "",
+                unit: "",
                 discountPercent: "",
-                basicAmount: "0.00", discountAmount: "0.00",
-                taxAmount: "0.00", cgst: "0.00", sgst: "0.00", igst: "0.00",
-                netValue: "0.00", taxSlab: "",
-                unit_supports_fractional: false, opStock: 0,
+                basicAmount: "0.00",
+                discountAmount: "0.00",
+                taxAmount: "0.00",
+                cgst: "0.00",
+                sgst: "0.00",
+                igst: "0.00",
+                netValue: "0.00",
+                taxSlab: "",
+                unit_supports_fractional: false,
+                opStock: 0,
+                existingBarcode: "",
+                barcodeMode: "manual",
+                barcodeValue: "",
+                barcodeVariantId: null,
+                barcodeGenerated: false,
+                barcodeSaved: false,
               });
             };
 
-            // ── Voucher number fetch (unchanged) ──
+            // ── Voucher number fetch ──
             useEffect(() => {
               api.get(`voucher/generate/?type=PI`)
                 .then((res) => setFieldValue("billNo", res.data.voucher_no))
@@ -788,15 +1136,44 @@ const PurchaseEntryForm: React.FC = () => {
                           <button
                             type="button"
                             onClick={handleAddItem}
-                            className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-1 text-sm h-[38px]"
+                            className={`px-3 py-2 rounded-lg transition flex items-center justify-center gap-1 text-sm h-[38px]
+                              ${!values.items[0].barcodeSaved && isSuperAdmin && !values.items[0].existingBarcode 
+                                ? 'bg-gray-400 cursor-not-allowed' 
+                                : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                            disabled={!values.items[0].barcodeSaved && isSuperAdmin && !values.items[0].existingBarcode}
                           >
-                            <FaCheckCircle size={12} /> Add
+                            <FaPlus size={17} /> 
                           </button>
                         </div>
                       </div>
                     </div>
 
-                    {/* Fractional unit helper (unchanged) */}
+                    {/* ─── Barcode Input for Superadmin ─── */}
+                    <BarcodeInput
+                      isSuperAdmin={isSuperAdmin}
+                      mode={values.items[0].barcodeMode || 'manual'}
+                      barcodeValue={values.items[0].barcodeValue || ''}
+                      onBarcodeChange={(value) => setFieldValue("items[0].barcodeValue", value)}
+                      onModeChange={(mode) => {
+                        setFieldValue("items[0].barcodeMode", mode);
+                        setFieldValue("items[0].barcodeValue", "");
+                        setFieldValue("items[0].barcodeVariantId", null);
+                        setFieldValue("items[0].barcodeGenerated", false);
+                        setFieldValue("items[0].barcodeSaved", false);
+                      }}
+                      onGenerateBarcode={handleGenerateBarcode}
+                      onSaveBarcode={handleSaveBarcode}
+                      variantId={values.items[0].variantId}
+                      itemName={values.items[0].itemName}
+                      existingBarcode={values.items[0].existingBarcode || ''}
+                      isGenerating={isGeneratingBarcode}
+                      isSaving={isSavingBarcode}
+                      barcodeGenerated={values.items[0].barcodeGenerated || false}
+                      barcodeSaved={values.items[0].barcodeSaved || false}
+                      disabled={!values.items[0].variantId}
+                    />
+
+                    {/* Fractional unit helper */}
                     {values.items[0].unit_supports_fractional && Number(values.items[0].price) > 0 && (
                       <div className="mt-3">
                         <FractionalUnitDisplay
@@ -874,14 +1251,14 @@ const PurchaseEntryForm: React.FC = () => {
                         ))}
 
                         <div className="flex justify-between pt-2 text-base font-bold">
-                          <span>Grand Total</span>
+                          <span></span>
                           <span className="text-blue-700">₹ {grandTotal.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* ── Action Buttons (sticky bottom) ── */}
+                  {/* ── Action Buttons ── */}
                   <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t p-3 flex gap-3 justify-center z-10">
                     <button
                       type="button"
@@ -1006,46 +1383,61 @@ const PurchaseEntryForm: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody>
-                                {(searchTerm ? filteredItems : itemsModalData).map((row) => (
-                                  <tr key={`${row.itemId}-${row.id}`} className="border-b hover:bg-gray-50 transition">
-                                    <td className="px-3 py-2 text-center">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          // ── Item select logic (unchanged) ──
-                                          const finalPrice = row.purchasePrice;
-                                          const displayUnit = row.unit;
-                                          const supportsFractional = row.unit_supports_fractional || false;
+                                {(searchTerm ? filteredItems : itemsModalData).map((row) => {
+                                  const hasBarcode = row.barcode && row.barcode.trim() !== '';
+                                  return (
+                                    <tr key={`${row.itemId}-${row.id}`} className="border-b hover:bg-gray-50 transition">
+                                      <td className="px-3 py-2 text-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            // ── Item select logic ──
+                                            const finalPrice = row.purchasePrice;
+                                            const displayUnit = row.unit;
+                                            const supportsFractional = row.unit_supports_fractional || false;
 
-                                          setFieldValue("items[0].itemId", row.itemId);
-                                          setFieldValue("items[0].variantId", row.id);
-                                          setFieldValue("items[0].itemName", row.itemName);
-                                          setFieldValue("items[0].hsnCode", row.hsnCode);
-                                          setFieldValue("items[0].price", finalPrice);
-                                          setFieldValue("items[0].unit", displayUnit);
-                                          setFieldValue("items[0].unit_supports_fractional", supportsFractional);
-                                          setFieldValue("items[0].taxSlab", row.taxSlab || "0");
-                                          setFieldValue("items[0].opStock", row.opStock);
-                                          variantFields.forEach((field) => {
-                                            setFieldValue(`items[0].${field}`, row[field] || "");
-                                          });
-                                          setOpenModal(false);
-                                        }}
-                                        className="px-3 py-1 rounded-lg text-xs bg-green-500 text-white hover:bg-green-600 transition flex items-center gap-1 mx-auto"
-                                      >
-                                        <FaCheckCircle size={10} /> Select
-                                      </button>
-                                    </td>
-                                    <td className="px-3 py-2 font-medium">{row.itemName}</td>
-                                    <td className="px-3 py-2 font-mono text-xs">{row.hsnCode}</td>
-                                    {variantFields.map((field, i) => (
-                                      <td key={`${row.itemId}-${field}-${i}`} className="px-3 py-2 capitalize">{row[field] ?? "-"}</td>
-                                    ))}
-                                    <td className="px-3 py-2 text-right">₹{row.purchasePrice}</td>
-                                    <td className="px-3 py-2 text-center">{row.unit}</td>
-                                    <td className="px-3 py-2 text-center">{row.taxSlab}</td>
-                                  </tr>
-                                ))}
+                                            setFieldValue("items[0].itemId", row.itemId);
+                                            setFieldValue("items[0].variantId", row.id);
+                                            setFieldValue("items[0].itemName", row.itemName);
+                                            setFieldValue("items[0].hsnCode", row.hsnCode);
+                                            setFieldValue("items[0].price", finalPrice);
+                                            setFieldValue("items[0].unit", displayUnit);
+                                            setFieldValue("items[0].unit_supports_fractional", supportsFractional);
+                                            setFieldValue("items[0].taxSlab", row.taxSlab || "0");
+                                            setFieldValue("items[0].opStock", row.opStock);
+                                            
+                                            // ── Store existing barcode if present ──
+                                            setFieldValue("items[0].existingBarcode", hasBarcode ? row.barcode : "");
+                                            setFieldValue("items[0].barcodeValue", hasBarcode ? row.barcode : "");
+                                            setFieldValue("items[0].barcodeVariantId", hasBarcode ? row.id : null);
+                                            setFieldValue("items[0].barcodeGenerated", false);
+                                            setFieldValue("items[0].barcodeSaved", false);
+                                            
+                                            // ── Set mode: manual by default ──
+                                            setFieldValue("items[0].barcodeMode", "manual");
+                                            
+                                            variantFields.forEach((field) => {
+                                              setFieldValue(`items[0].${field}`, row[field] || "");
+                                            });
+                                            setOpenModal(false);
+                                          }}
+                                          className="px-3 py-1 rounded-lg text-xs bg-green-500 text-white hover:bg-green-600 transition flex items-center gap-1 mx-auto"
+                                        >
+                                          <FaCheckCircle size={10} /> Select
+                                          {hasBarcode && <span className="ml-1 text-[10px] opacity-80">✓</span>}
+                                        </button>
+                                      </td>
+                                      <td className="px-3 py-2 font-medium">{row.itemName}</td>
+                                      <td className="px-3 py-2 font-mono text-xs">{row.hsnCode}</td>
+                                      {variantFields.map((field, i) => (
+                                        <td key={`${row.itemId}-${field}-${i}`} className="px-3 py-2 capitalize">{row[field] ?? "-"}</td>
+                                      ))}
+                                      <td className="px-3 py-2 text-right">₹{row.purchasePrice}</td>
+                                      <td className="px-3 py-2 text-center">{row.unit}</td>
+                                      <td className="px-3 py-2 text-center">{row.taxSlab}</td>
+                                    </tr>
+                                  );
+                                })}
                                 {(searchTerm ? filteredItems : itemsModalData).length === 0 && (
                                   <tr>
                                     <td colSpan={6 + variantFields.length} className="text-center py-10 text-gray-500">
@@ -1059,7 +1451,7 @@ const PurchaseEntryForm: React.FC = () => {
                         </div>
 
                         <div className="flex justify-center py-4 border-t bg-white flex-shrink-0">
-                          <button
+                          <button 
                             onClick={() => setOpenModal(false)}
                             className="px-8 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
                           >

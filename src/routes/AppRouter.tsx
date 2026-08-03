@@ -56,6 +56,17 @@ import BranchOrderRequest from "../pages/transactions/BranchOrderRequest";
 import StockReturnManagement from "../pages/transactions/stockmanagement";
 import StockReturn from "../pages/transactions/stockreturn";
 import BranchMaster from "../pages/accounts/BranchMaster";
+import B2BOrderRequest from "../pages/transactions/B2BorderRequest";
+import B2BStockTransfer from "../pages/transactions/B2BStockTransfer";
+import SchemeOfferManagement from "../pages/scheme/SuperadminScheme";
+import SchemeReportPage from "../pages/scheme/SchemeReport";
+import MySchemeReportPage from "../pages/scheme/MyschemereportPage";
+import MySchemeOffers from "../pages/scheme/MySchemeOffers";
+import B2BStockReturn from "../pages/transactions/B2BStockReturn";
+import B2BStockReturnManagement from "../pages/transactions/B2BStockReturnManagement";
+import B2BSales from "../pages/transactions/B2BSales";
+import B2BSalesVerify from "../pages/transactions/B2BSalesVerify";
+import B2BSalesList from "../pages/transactions/B2BSalesList";
 // import AccountCreationForm from "../pages/accounts/AccountCreationForm";
 
 const AppRouter = () => (
@@ -124,6 +135,19 @@ const AppRouter = () => (
         <Route path="/stockReturnverification" element={<StockReturnManagement/>}/>
         <Route path="/stockReturn" element={<StockReturn/>}/>
         <Route path="/branchMaster" element={<BranchMaster/>}/>
+        <Route path="/B2BOrderRequest" element={<B2BOrderRequest/>}/>
+        <Route path="/B2BStockTransfer" element={<B2BStockTransfer/>}/>
+        <Route path="/SchemeOffer" element={<SchemeOfferManagement/>}/>
+        <Route path="/SchemeOffers/:id/report" element={<SchemeReportPage />} />
+        <Route path="/SchemeOfferRegister" element={<MySchemeOffers/>}/>
+        <Route path="/SchemeOfferRegister/:id/report" element={<MySchemeReportPage />} />
+
+        <Route path="/b2bstockReturnverification" element={<B2BStockReturnManagement/>}/>
+        <Route path="/b2bstockReturn" element={<B2BStockReturn/>}/>
+        <Route path="/b2bsales" element={<B2BSalesList/>}/>
+        <Route path="/b2bsalescreate" element={<B2BSales/>}/>
+        <Route path="/b2bpurchaseverify" element={<B2BSalesVerify/>}/>
+        
         {/* <Route path="/productcategory" element={<ProductCategory />} />
         <Route path="/servicecategory" element={<ServiceCategory />} />
         <Route path="/productvendor" element={<ProductVendor />} />
