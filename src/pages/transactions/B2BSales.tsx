@@ -186,7 +186,7 @@ const BarcodeScannerInput: React.FC<{
     setTimeout(() => inputRef.current?.focus(), 300);
   }, []);
 
-  const handleBarcodeSearch = (barcode: string) => {
+  const handleBarcodeSearch = async (barcode: string) => {
     const trimmed = barcode.trim();
     if (!trimmed) return;
 
@@ -198,22 +198,70 @@ const BarcodeScannerInput: React.FC<{
     }
 
     setScanning(true);
-    const match = flatItems.find(
-      (item) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
-    );
+    try {
+      // ===== STEP 1: local (already-fetched) list mein dhundo =====
+      const localMatch = flatItems.find(
+        (item) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
+      );
 
-    if (!match) {
-      toast.error(`No item found with barcode "${trimmed}"`);
-    } else if ((match.current_stock || 0) <= 0) {
-      toast.error(`Item "${match.itemName}" is out of stock`);
-    } else {
-      onItemSelected(match);
-      toast.success(`✓ Item selected: ${match.itemName}`);
+      if (localMatch) {
+        if ((localMatch.current_stock || 0) <= 0) {
+          toast.error(`Item "${localMatch.itemName}" is out of stock`);
+        } else {
+          onItemSelected(localMatch);
+          toast.success(`✓ Item selected: ${localMatch.itemName}`);
+        }
+        setBarcodeValue("");
+        setScanning(false);
+        inputRef.current?.focus();
+        return;
+      }
+
+      // ===== STEP 2: local mein nahi mila -> backend se dhundo =====
+      const res = await api.get(  
+        `b2b-sales/my-branch-items/?query=${encodeURIComponent(trimmed)}`
+      );
+      const nested = res.data.data || [];
+      const flatFromApi: any[] = [];
+      nested.forEach((it: any) => {
+        (it.variants || []).forEach((v: any) => {
+          flatFromApi.push({
+            variantId: v.variant_id,
+            itemName: it.item_name,
+            hsnCode: it.hsnCode,
+            taxSlab: v.taxSlab || it.taxSlab || "0",
+            barcode: v.barcode || "",
+            display: v.display,
+            size: v.size,
+            color: v.color,
+            unit: it.unit || "pc",
+            unit_name: it.unit_name || "",
+            current_stock: v.current_stock || 0,
+            branch_price: v.branch_price || 0,
+          });
+        });
+      });
+
+      const apiMatch = flatFromApi.find(
+        (item) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
+      );
+
+      if (!apiMatch) {
+        toast.error(`No item found with barcode "${trimmed}"`);
+      } else if ((apiMatch.current_stock || 0) <= 0) {
+        toast.error(`Item "${apiMatch.itemName}" is out of stock`);
+      } else {
+        onItemSelected(apiMatch);
+        toast.success(`✓ Item selected: ${apiMatch.itemName}`);
+      }
+    } catch (err) {
+      console.error("Barcode search error:", err);
+      toast.error("Barcode search failed. Please try again.");
+    } finally {
+      setBarcodeValue("");
+      setScanning(false);
+      inputRef.current?.focus();
     }
-
-    setBarcodeValue("");
-    setScanning(false);
-    inputRef.current?.focus();
   };
 
   return (
@@ -607,10 +655,17 @@ useEffect(() => {
 )}
 
                   {/* ── Barcode Scanner ── */}
+{/* ── Barcode Scanner ── */}
                   <BarcodeScannerInput
                     flatItems={flatItems}
                     toBranchId={selectedToBranchId}
-                    onItemSelected={(row: any) => applyItemToForm(row)}
+                    onItemSelected={(row: any) => {
+                      applyItemToForm(row);
+                      setTimeout(() => {
+                        const qtyInput = document.querySelector<HTMLInputElement>('[data-qty-input="true"]');
+                        if (qtyInput) qtyInput.focus();
+                      }, 150);
+                    }}
                   />
 
                   {/* ── Item Entry ── */}
