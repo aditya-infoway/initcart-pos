@@ -797,7 +797,7 @@ function DetailView({
             {allVerified && (
               <div className="flex items-center gap-2 bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl text-sm font-semibold">
                 <MdVerified size={16} />
-                B2B Sale Fully Verified!
+                B2B Purchase Fully Verified!
               </div>
             )}
           </div>
