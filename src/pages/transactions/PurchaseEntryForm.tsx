@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Formik, Form, useField } from "formik";
 import { toast } from "react-toastify";
@@ -16,9 +16,186 @@ import api from "../../api/api";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 import Barcode from "react-barcode";
 
+
+// ─── Barcode Scanner ──────────────────────────────────────────────────────────
+
+interface BarcodeScannerProps {
+  itemsModalData: any[];
+  onItemSelected: (row: any) => void;
+  partyName: number | string; 
+}
+
+const PurchaseBarcodeScanner: React.FC<BarcodeScannerProps> = ({ 
+  itemsModalData, 
+  onItemSelected, 
+  partyName 
+}) => {
+  const [barcodeValue, setBarcodeValue] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus on mount
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 300);
+  }, []);
+
+  const handleBarcodeSearch = async (barcode: string) => {
+    const trimmed = barcode.trim();
+    if (!trimmed) return;
+
+    if (!partyName) {
+      toast.error("Please select a party/supplier first");
+      setBarcodeValue("");
+      inputRef.current?.focus();
+      return;
+    }
+
+    setScanning(true);
+    try {
+      // 🔍 First check in local data
+      const localMatch = itemsModalData.find(
+        (item: any) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
+      );
+
+      if (localMatch) {
+        onItemSelected(localMatch);
+        toast.success(`✓ Item selected: ${localMatch.itemName}`);
+        setBarcodeValue("");
+        setScanning(false);
+        inputRef.current?.focus();
+        return;
+      }
+
+      // 🔍 If not found locally, search via API
+      const token = sessionStorage.getItem("accessToken");
+      const res = await api.get(`purchse-item-search/?query=${encodeURIComponent(trimmed)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.data && res.data.length > 0) {
+        const apiMatch = res.data.find(
+          (item: any) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
+        );
+
+        if (!apiMatch) {
+          toast.error(`No item found with barcode "${trimmed}"`);
+          setBarcodeValue("");
+          setScanning(false);
+          inputRef.current?.focus();
+          return;
+        }
+
+        const mappedItem = {
+          id: apiMatch.id,
+          itemId: apiMatch.itemId,
+          itemName: apiMatch.itemName,
+          hsnCode: apiMatch.hsnCode || "",
+          purchasePrice: apiMatch.purchasePrice || 0,
+          per_unit_price: apiMatch.per_unit_price || apiMatch.purchasePrice || 0,
+          unit: apiMatch.unit || "",
+          unit_supports_fractional: apiMatch.unit_supports_fractional || false,
+          unit_name: apiMatch.unit_name || apiMatch.unit,
+          taxSlab: apiMatch.taxSlab || "0",
+          opStock: apiMatch.opStock || 0,
+          size: apiMatch.size || "-",
+          color: apiMatch.color || "-",
+          srno: apiMatch.srno || "-",
+          warrantydate: apiMatch.warrantydate || "-",
+          barcode: apiMatch.barcode || "",
+        };
+
+        onItemSelected(mappedItem);
+        toast.success(`✓ Item selected: ${mappedItem.itemName}`);
+      } else {
+        toast.error(`No item found with barcode "${trimmed}"`);
+      }
+    } catch (err) {
+      console.error("Barcode search error:", err);
+      toast.error("Barcode search failed. Please try again.");
+    } finally {
+      setBarcodeValue("");
+      setScanning(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  return (
+    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+      <label className="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-2">
+        <FaBarcode className="text-blue-600" /> Barcode Scanner
+        {scanning && (
+          <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
+        )}
+      </label>
+      <div className="flex gap-2">
+        <input
+          ref={inputRef}
+          type="text"
+          value={barcodeValue}
+          onChange={(e) => setBarcodeValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleBarcodeSearch(barcodeValue);
+            }
+          }}
+          placeholder="Scan barcode here — cursor must be here to scan"
+          className="flex-1 px-4 py-2 border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-mono"
+          autoComplete="off"
+          disabled={scanning}
+        />
+        <button
+          type="button"
+          onClick={() => handleBarcodeSearch(barcodeValue)}
+          disabled={scanning || !barcodeValue.trim()}
+          className="bg-blue-600 text-white px-6 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50"
+        >
+          {scanning ? (
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <FaBarcode />
+          )}
+        </button>
+      </div>
+      <p className="text-xs text-gray-500 mt-2">
+        ✓ Keep cursor in this field and scan — item will be selected automatically
+      </p>
+    </div>
+  );
+};
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const terms = ["Credit", "Cash", "Bank"];
+
+// Har tarah ka decimal input (string/number/undefined) safe 2-decimal number me convert karta hai
+const round2 = (val: any): number => {
+  const n = Number(val);
+  if (isNaN(n)) return 0;
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+};
+
+
+
+// Backend se aane wala koi bhi error shape ho (string / array / DRF field errors / detail / error),
+// usme se readable English message nikal ke deta hai — "Something went wrong" ka use sirf last resort me
+const extractErrorMessage = (data: any): string => {
+  if (!data) return "Something went wrong. Please try again.";
+  if (typeof data === "string") return data;
+  if (Array.isArray(data) && data.length > 0) return String(data[0]);
+  if (data.non_field_errors?.length) return String(data.non_field_errors[0]);
+  if (data.detail) return String(data.detail);
+  if (data.error) return String(data.error);
+  if (data.alert_message) return String(data.alert_message);
+
+  // DRF field-level errors: { "field_name": ["message"] }
+  const firstKey = Object.keys(data)[0];
+  if (firstKey) {
+    const val = data[firstKey];
+    if (Array.isArray(val) && val.length > 0) return `${firstKey}: ${val[0]}`;
+    if (typeof val === "string") return `${firstKey}: ${val}`;
+  }
+  return "Something went wrong. Please try again.";
+};
 
 const VARIANT_BY_BRANCH: Record<string, string[]> = {
   fashion: ["size", "color"],
@@ -417,6 +594,8 @@ interface BarcodeInputProps {
   disabled?: boolean;
 }
 
+
+
 const BarcodeInput: React.FC<BarcodeInputProps> = ({
   mode,
   barcodeValue,
@@ -426,7 +605,7 @@ const BarcodeInput: React.FC<BarcodeInputProps> = ({
   onSaveBarcode,
   variantId,
   itemName,
-  isSuperAdmin,
+  isSuperAdmin, 
   existingBarcode,
   isGenerating,
   isSaving,
@@ -434,8 +613,19 @@ const BarcodeInput: React.FC<BarcodeInputProps> = ({
   barcodeSaved,
   disabled = false,
 }) => {
+  // ─── Manual barcode input ka ref — scanner gun isi input me type karega ───
+  const manualInputRef = useRef<HTMLInputElement>(null);
+
   // ─── ONLY SHOW IF: Superadmin AND no existing barcode AND a variant is selected ───
   const shouldShow = isSuperAdmin && !existingBarcode && variantId;
+
+  // ─── Auto-focus manual input jab bhi ye box dikhe (item select hote hi) ───
+  useEffect(() => {
+    if (shouldShow && mode === "manual" && !barcodeSaved && !disabled) {
+      const t = setTimeout(() => manualInputRef.current?.focus(), 150);
+      return () => clearTimeout(t);
+    }
+  }, [shouldShow, mode, barcodeSaved, disabled, variantId]);
 
   if (!shouldShow) return null;
 
@@ -476,14 +666,25 @@ const BarcodeInput: React.FC<BarcodeInputProps> = ({
       </div>
 
       <div className="flex items-center gap-3">
-        <div className="flex-1">
+<div className="flex-1">
           <input
+            ref={manualInputRef}
             type="text"
             placeholder={mode === 'autogenerate' ? "Click 'Generate' to create barcode" : "Scan or type barcode"}
             value={mode === 'autogenerate' ? '' : barcodeValue}
             onChange={(e) => {
               if (mode === 'manual') {
                 onBarcodeChange(e.target.value);
+              }
+            }}
+            onKeyDown={(e) => {
+              // Barcode gun scan ke baad "Enter" bhejta hai — usse form submit hone se roko
+              // aur barcode ko turant save kar do (agar manual mode me ho)
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (mode === "manual" && barcodeValue && !barcodeSaved) {
+                  onSaveBarcode();
+                }
               }
             }}
             disabled={mode === 'autogenerate' || disabled || isGenerating || barcodeSaved}
@@ -787,11 +988,17 @@ const PurchaseEntryForm: React.FC = () => {
       const roundAmount = Number(values.roundAmount || 0);
       const grandTotal = Number(totals.totalNet) + freightCharge + otherExpense + roundAmount;
 
-      const accountId = Number(values.account);
+const accountId = Number(values.account);
       if (accountId) {
-        const accRes = await api.get(`account-check/${accountId}/`, { headers: { Authorization: `Bearer ${token}` } });
+        const accRes = await api.get(
+          `account-check/${accountId}/?required_amount=${grandTotal}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
         const selectedAccount = accRes.data;
-        if (selectedAccount?.show_alert) { toast.error(selectedAccount.alert_message); return; }
+        if (selectedAccount?.show_alert) {
+          toast.error(selectedAccount.alert_message);
+          return;
+        }
       }
 
       const payload: any = {
@@ -804,29 +1011,29 @@ const PurchaseEntryForm: React.FC = () => {
         case_account: values.case_account,
         bank_account: values.bank_account,
         purchasebill_no: values.purchasebillno,
-        total_basic: Number(totals.totalBasic),
-        total_tax: Number(totals.totalTax),
-        total_net: Number(totals.totalNet),
-        grand_total: Number(grandTotal),
-        frightcharge: Number(values.freightCharge),
-        otherexpnse: Number(values.otherExpense),
-        roundamount: Number(values.roundAmount),
+        total_basic: round2(totals.totalBasic),
+        total_tax: round2(totals.totalTax),
+        total_net: round2(totals.totalNet),
+        grand_total: round2(grandTotal),
+        frightcharge: freightCharge,
+        otherexpnse: otherExpense,
+        roundamount: roundAmount,
         items: addedItems.map((it: any) => ({
           itemName: it.itemId,
           variant: it.variantId,
           hsnCode: it.hsnCode,
-          quantity: Number(it.quantity),
-          altQuantity: Number(it.altQuantity || 0),
-          price: Number(it.price),
+          quantity: round2(it.quantity),
+          altQuantity: round2(it.altQuantity || 0),
+          price: round2(it.price),
           per: it.unit,
-          discountPercent: Number(it.discountPercent),
-          basicAmount: Number(it.basicAmount),
-          discountAmount: Number(it.discountAmount),
-          taxAmount: Number(it.taxAmount),
-          netValue: Number(it.netValue),
-          cgst: it.cgst,
-          sgst: it.sgst,
-          igst: it.igst,
+          discountPercent: round2(it.discountPercent),
+          basicAmount: round2(it.basicAmount),
+          discountAmount: round2(it.discountAmount),
+          taxAmount: round2(it.taxAmount),
+          netValue: round2(it.netValue),
+          cgst: round2(it.cgst),
+          sgst: round2(it.sgst),
+          igst: round2(it.igst),
         })),
       };
 
@@ -837,18 +1044,20 @@ const PurchaseEntryForm: React.FC = () => {
       await api.post("purchase-create/", payload, { headers: { Authorization: `Bearer ${token}` } });
       toast.success("Purchase saved successfully");
       navigate("/Addpurchaseitem");
-    } catch (error: any) {
+} catch (error: any) {
       if (error.response) {
-        const data = error.response.data;
-        if (Array.isArray(data)) toast.error(data[0]);
-        else if (data.non_field_errors) toast.error(data.non_field_errors[0]);
-        else toast.error("Something went wrong");
+        toast.error(extractErrorMessage(error.response.data));
+      } else if (error.request) {
+        toast.error("Network error. Please check your connection and try again.");
+      } else {
+        toast.error("Something went wrong. Please try again.");
       }
     }
   };
 
   const variantFields = VARIANT_BY_BRANCH[branchType || ""] || [];
 
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-6 pb-24 px-0">
       <div className="w-full px-4 sm:px-6 lg:px-8">
@@ -880,6 +1089,47 @@ const PurchaseEntryForm: React.FC = () => {
           }}
         >
           {({ values, setFieldValue }) => {
+
+            // ── Barcode scanner function ──
+const handleBarcodeItemSelect = (row: any) => {
+  // Item select logic - same as modal select
+const finalPrice = round2(row.purchasePrice || row.per_unit_price || 0);
+  const displayUnit = row.unit;
+  const supportsFractional = row.unit_supports_fractional || false;
+  const hasBarcode = row.barcode && row.barcode.trim() !== '';
+
+  setFieldValue("items[0].itemId", row.itemId);
+  setFieldValue("items[0].variantId", row.id);
+  setFieldValue("items[0].itemName", row.itemName);
+  setFieldValue("items[0].hsnCode", row.hsnCode);
+  setFieldValue("items[0].price", finalPrice);
+  setFieldValue("items[0].unit", displayUnit);
+  setFieldValue("items[0].unit_supports_fractional", supportsFractional);
+  setFieldValue("items[0].taxSlab", row.taxSlab || "0");
+  setFieldValue("items[0].opStock", row.opStock);
+  
+  // Barcode handling
+  setFieldValue("items[0].existingBarcode", hasBarcode ? row.barcode : "");
+  setFieldValue("items[0].barcodeValue", hasBarcode ? row.barcode : "");
+  setFieldValue("items[0].barcodeVariantId", hasBarcode ? row.id : null);
+  setFieldValue("items[0].barcodeGenerated", false);
+  setFieldValue("items[0].barcodeSaved", false);
+  setFieldValue("items[0].barcodeMode", "manual");
+  
+  variantFields.forEach((field) => {
+    setFieldValue(`items[0].${field}`, row[field] || "");
+  });
+  
+  // Auto-focus quantity input after selection
+  setTimeout(() => {
+    if (!hasBarcode && isSuperAdmin) {
+      const barcodeInput = document.querySelector<HTMLInputElement>('input[placeholder="Scan or type barcode"]');
+      if (barcodeInput) { barcodeInput.focus(); return; }
+    }
+    const qtyInput = document.querySelector<HTMLInputElement>('[data-qty-input="true"]');
+    if (qtyInput) qtyInput.focus();
+  }, 150);
+};
 
             // ── Basic amount calculation ──
             useEffect(() => {
@@ -978,6 +1228,7 @@ const PurchaseEntryForm: React.FC = () => {
                 setIsSavingBarcode(false);
               }
             };
+            const idCounterRef = useRef(1);
 
             // ── Add item handler ──
             const handleAddItem = async () => {
@@ -1002,39 +1253,38 @@ const PurchaseEntryForm: React.FC = () => {
 
               let finalBarcode = cur.barcodeValue || cur.existingBarcode || "";
 
-              let taxData;
-              try {
-                taxData = await fetchItemTax(cur, Number(values.partyName));
-              } catch (err) {
-                toast.error("Tax calculation failed");
-                return;
-              }
+  const newId = idCounterRef.current++;   // turant, synchronously unique
 
-              setAddedItems((prev: any) => [
+  let taxData;
+  try {
+    taxData = await fetchItemTax(cur, Number(values.partyName));
+  } catch (err) { toast.error("Tax calculation failed"); return; }
+
+setAddedItems((prev: any) => [
                 ...prev,
                 {
-                  id: idCounter,
+                  id: newId,
                   itemId: Number(cur.itemId),
                   variantId: cur.variantId ?? null,
                   itemName: cur.itemName,
                   hsnCode: cur.hsnCode,
-                  quantity: Number(cur.quantity),
-                  altQuantity: Number(cur.altQuantity || 0),
-                  price: Number(cur.price),
+                  quantity: round2(cur.quantity),
+                  altQuantity: round2(cur.altQuantity || 0),
+                  price: round2(cur.price),
                   unit: cur.unit,
-                  discountPercent: Number(cur.discountPercent || 0),
-                  basicAmount: Number(taxData.basic_amount),
-                  discountAmount: Number(taxData.discount_amount),
-                  taxAmount: Number(taxData.total_tax),
-                  cgst: Number(taxData.cgst),
-                  sgst: Number(taxData.sgst),
-                  igst: Number(taxData.igst),
-                  netValue: Number(taxData.net_amount),
+                  discountPercent: round2(cur.discountPercent || 0),
+                  basicAmount: round2(taxData.basic_amount),
+                  discountAmount: round2(taxData.discount_amount),
+                  taxAmount: round2(taxData.total_tax),
+                  cgst: round2(taxData.cgst),
+                  sgst: round2(taxData.sgst),
+                  igst: round2(taxData.igst),
+                  netValue: round2(taxData.net_amount),
                   taxSlab: taxData.tax_percent?.toString() || "0",
                   barcode: finalBarcode || "",
                 },
               ]);
-              setIdCounter((p) => p + 1);
+              
               setFieldValue("items[0]", {
                 itemId: "",
                 variantId: null,
@@ -1071,11 +1321,11 @@ const PurchaseEntryForm: React.FC = () => {
                 .catch(() => toast.error("Failed to fetch latest voucher number"));
             }, [setFieldValue]);
 
-            const totals = calculateTotals(addedItems);
-            const freightCharge = Number(values.freightCharge || 0);
-            const otherExpense = Number(values.otherExpense || 0);
-            const roundAmount = Number(values.roundAmount || 0);
-            const grandTotal = Number(totals.totalNet) + freightCharge + otherExpense + roundAmount;
+const totals = calculateTotals(addedItems);
+      const freightCharge = round2(values.freightCharge || 0);
+      const otherExpense = round2(values.otherExpense || 0);
+      const roundAmount = round2(values.roundAmount || 0);
+      const grandTotal = round2(Number(totals.totalNet) + freightCharge + otherExpense + roundAmount);
 
             return (
               <Form>
@@ -1100,6 +1350,13 @@ const PurchaseEntryForm: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* ── Barcode Scanner ── */}  {/* ✅ YEH NAYA SECTION ADD KARO */}
+<PurchaseBarcodeScanner
+  itemsModalData={itemsModalData}
+  partyName={values.partyName}
+  onItemSelected={handleBarcodeItemSelect}
+/>
+
                   {/* ── Item Entry ── */}
                   <div className="bg-white rounded-xl shadow-lg p-6">
                     <h3 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-4 flex items-center gap-2">
@@ -1118,7 +1375,7 @@ const PurchaseEntryForm: React.FC = () => {
                       </div>
 
                       <FormInput label="HSN Code" name="items[0].hsnCode" placeholder="HSN" />
-                      <FormInput label="Qty" name="items[0].quantity" type="number" placeholder="0" />
+                      <FormInput label="Qty" name="items[0].quantity" type="number" inputProps={{ 'data-qty-input': 'true' }}  placeholder="0" />
                       <FormInput label="Price" name="items[0].price" type="number" placeholder="0" />
                       <DisplayField label="Unit" value={values.items[0].unit || "-"} />
                       <DisplayField label="Basic Amt" value={values.items[0].basicAmount} />
@@ -1260,13 +1517,7 @@ const PurchaseEntryForm: React.FC = () => {
 
                   {/* ── Action Buttons ── */}
                   <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t p-3 flex gap-3 justify-center z-10">
-                    <button
-                      type="button"
-                      onClick={() => { setAddedItems([]); setIdCounter(1); }}
-                      className="px-5 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition flex items-center gap-2 text-sm"
-                    >
-                      <FaTrash /> Delete
-                    </button>
+
                     <button
                       type="submit"
                       disabled={locationLoading}
@@ -1275,25 +1526,7 @@ const PurchaseEntryForm: React.FC = () => {
                       <FaSave /> Save
                     </button>
                     <button
-                      type="button"
-                      className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm"
-                    >
-                      <FaPrint /> Print
-                    </button>
-                    <button
-                      type="button"
-                      className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm"
-                    >
-                      <FaPaperclip /> Attach
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => navigate("/Addpurchaseitem")}
-                      className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm"
-                    >
-                      List
-                    </button>
-                    <button
+                    onClick={() => navigate("/Addpurchaseitem")}
                       type="button"
                       className="px-5 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition flex items-center gap-2 text-sm"
                     >
@@ -1316,7 +1549,7 @@ const PurchaseEntryForm: React.FC = () => {
                           <h3 className="text-xl font-semibold flex items-center gap-2">
                             <FaBox /> Item Variants
                           </h3>
-                          <button onClick={() => setOpenModal(false)} className="hover:bg-white/20 rounded-lg p-1 transition">
+                          <button type="button" onClick={() => setOpenModal(false)} className="hover:bg-white/20 rounded-lg p-1 transition">
                             <MdClose size={24} />
                           </button>
                         </div>
@@ -1392,7 +1625,7 @@ const PurchaseEntryForm: React.FC = () => {
                                           type="button"
                                           onClick={() => {
                                             // ── Item select logic ──
-                                            const finalPrice = row.purchasePrice;
+                                           const finalPrice = round2(row.purchasePrice || row.per_unit_price || 0);
                                             const displayUnit = row.unit;
                                             const supportsFractional = row.unit_supports_fractional || false;
 
@@ -1452,6 +1685,7 @@ const PurchaseEntryForm: React.FC = () => {
 
                         <div className="flex justify-center py-4 border-t bg-white flex-shrink-0">
                           <button 
+                          type="button"
                             onClick={() => setOpenModal(false)}
                             className="px-8 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
                           >
