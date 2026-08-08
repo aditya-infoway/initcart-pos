@@ -989,7 +989,12 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
         context={{ entryType }}
         onSubmit={handleFinalSave}
       >
-        {({ values, setFieldValue }) => {
+        {({
+    values,
+    setFieldValue,
+    validateForm,
+    setTouched,
+}) => {
           const totals = calculateTotals(addedItems);
 
           // ✅ YAHAN PAR handleGroupCreated FUNCTION DEFINE KAREIN
@@ -1290,7 +1295,28 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
     <div className="flex items-end gap-1">
       <button
         type="button"
-        onClick={() => handleAddVariant(values, setFieldValue)}
+        onClick={async () => {
+
+    const errors = await validateForm();
+
+    setTouched({
+        items: [
+            {
+                purchasePrice: true,
+                salesPrice: true,
+                mrp: true,
+                opStock: true,
+                barcode: true,
+            },
+        ],
+    });
+
+    if (errors.items) {
+        return;
+    }
+
+    handleAddVariant(values, setFieldValue);
+}}
         className="bg-green-600 text-white flex-1 p-1 sm:p-2 rounded hover:bg-green-700 flex items-center justify-center text-xs h-8 sm:h-9"
       >
         <FaCheckCircle className="mr-1" /> {editingId !== null ? "Update" : "Add"}

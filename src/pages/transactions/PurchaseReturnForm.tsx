@@ -895,21 +895,7 @@ const PurchaseReturnForm: React.FC = () => {
 
               {/* ── Bottom Action Bar ─────────────────────────────────── */}
               <div className="col-span-full flex fixed bottom-0 left-0 right-0 bg-white p-3 shadow-lg gap-3 flex-wrap justify-center z-10 border-t">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBillItems([]); setSelectedBill(null); setSelectedAll(false);
-                    setPartyDetails(null); setCreditSummary(null); setOriginalBillData(null);
-                    setSelectedReturnType("Partial");
-                    setFieldValue("originalBillNo", "");
-                    setFieldValue("partyName", 0);
-                    setFieldValue("returnType", "Partial");
-                    toast.info("Form cleared");
-                  }}
-                  className="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600"
-                >
-                  Clear All
-                </button>
+
                 <button
                   type="submit"
                   disabled={!selectedBill || !hasSelectedItems}
@@ -923,13 +909,6 @@ const PurchaseReturnForm: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => navigate("/purchaseReturnList")}
-                  className="bg-gray-600 text-white px-4 py-2 rounded text-sm hover:bg-gray-700"
-                >
-                  List
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate("/dashboard")}
                   className="bg-gray-500 text-white px-4 py-2 rounded text-sm hover:bg-gray-600"
                 >
                   Close

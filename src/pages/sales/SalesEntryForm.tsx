@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Formik, Form, useField } from "formik";
 import * as Yup from "yup";
 import { motion, AnimatePresence } from "framer-motion";
+import Barcode from "react-barcode";
 import {
   FaCheckCircle, FaUserPlus, FaBarcode, FaSearch,
   FaTrash, FaSave, FaTimes, FaPrint, FaShoppingCart,
@@ -714,7 +715,7 @@ const ItemsTable = ({ items, onDelete, totals }: any) => (
               <td className="px-3 py-2 text-center">{item.quantity}</td>
               <td className="px-3 py-2 text-right">₹{Number(item.price).toFixed(2)}</td>
               <td className="px-3 py-2 text-center">{item.per}</td>
-              <td className="px-3 py-2 text-center">{item.taxSlab}%</td>
+              <td className="px-3 py-2 text-center">{item.taxSlab}</td>
               <td className="px-3 py-2 text-center">{item.discountPercent}%</td>
               <td className="px-3 py-2 text-right">₹{Number(item.basicAmount).toFixed(2)}</td>
               <td className="px-3 py-2 text-right">₹{Number(item.discountAmount).toFixed(2)}</td>
@@ -1394,14 +1395,7 @@ const SalesEntryForm: React.FC = () => {
 
                   {/* ── Action Buttons (sticky bottom) ── */}
                   <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t p-3 flex gap-3 justify-center z-10 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={handleDeleteAll}
-                      disabled={isSubmitting}
-                      className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <FaTrash /> Clear All
-                    </button>
+
                     <button
                       type="submit"
                       disabled={isSubmitting}
@@ -1420,16 +1414,10 @@ const SalesEntryForm: React.FC = () => {
                         </>
                       )}
                     </button>
+
                     <button
                       type="button"
                       onClick={() => navigate("/Addsalesitem")}
-                      disabled={isSubmitting}
-                      className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      List
-                    </button>
-                    <button
-                      type="button"
                       disabled={isSubmitting}
                       className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -1450,9 +1438,7 @@ const SalesEntryForm: React.FC = () => {
                       >
                         <div className="flex justify-between items-center px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
                           <h3 className="text-lg font-semibold flex items-center gap-2"><FaBox /> Select Item Variant</h3>
-                          <button onClick={() => setOpenModal(false)} className="hover:bg-white/20 rounded-lg p-1 transition">
-                            <MdClose size={24} />
-                          </button>
+
                         </div>
                         <div className="p-4">
                           <div className="flex flex-wrap justify-between items-center mb-3 gap-2">

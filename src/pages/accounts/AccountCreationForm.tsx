@@ -167,6 +167,25 @@ const AccountCreationForm = () => {
     panCard: "",
   });
 
+  // ─── isoCode ↔ full-name conversion helpers ──────────────────────────
+  // Dropdown ke andar hum isoCode use karte hain (cascading ke liye zaroori hai),
+  // lekin backend me Branch ke format se match karne ke liye full name save karna hai.
+  const countryNameToCode = (name: string): string => {
+    if (!name) return "";
+    const found = Country.getAllCountries().find(
+      (c) => c.name.toLowerCase() === name.toLowerCase()
+    );
+    return found?.isoCode || "";
+  };
+
+  const stateNameToCode = (countryCode: string, name: string): string => {
+    if (!countryCode || !name) return "";
+    const found = State.getStatesOfCountry(countryCode).find(
+      (s) => s.name.toLowerCase() === name.toLowerCase()
+    );
+    return found?.isoCode || "";
+  };
+
   // Load countries on component mount
   useEffect(() => {
     const allCountries = Country.getAllCountries();
@@ -181,15 +200,20 @@ const AccountCreationForm = () => {
     const editData = location.state?.accountData;
     if (id || editData) {
       setIsEditMode(true);
-      if (editData) {
+if (editData) {
+        // Backend se full names aate hain (jaise "India", "Gujarat") —
+        // dropdown ke liye unhe isoCode me convert karo
+        const countryCode = countryNameToCode(editData.country);
+        const stateCode = stateNameToCode(countryCode, editData.state);
+
         setInitialValues({
           accountName: editData.account_name || "",
           group: editData.group || "",
           openingBalance: editData.opening_balance?.toString() || "",
           drcr: editData.drcr || "Dr",
           address: editData.address || "",
-          country: editData.country || "",
-          state: editData.state || "",
+          country: countryCode,
+          state: stateCode,
           city: editData.city || "",
           email: editData.email || "",   
           pincode: editData.pincode || "",
@@ -199,16 +223,16 @@ const AccountCreationForm = () => {
           panCard: editData.pan_card || "",
         });
         
-        if (editData.country) {
-          const countryStates = State.getStatesOfCountry(editData.country);
+        if (countryCode) {
+          const countryStates = State.getStatesOfCountry(countryCode);
           setStates(countryStates.map(state => ({
             value: state.isoCode,
             label: state.name
           })));
         }
         
-        if (editData.country && editData.state) {
-          const stateCities = City.getCitiesOfState(editData.country, editData.state);
+        if (countryCode && stateCode) {
+          const stateCities = City.getCitiesOfState(countryCode, stateCode);
           setCities(stateCities.map(city => ({
             value: city.name,
             label: city.name
@@ -235,15 +259,20 @@ const AccountCreationForm = () => {
       const res = await api.get(`account/${accountId}/`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = res.data;
+const data = res.data;
+
+      // Backend se full names aate hain — dropdown ke liye isoCode me convert karo
+      const countryCode = countryNameToCode(data.country);
+      const stateCode = stateNameToCode(countryCode, data.state);
+
       setInitialValues({
         accountName: data.account_name || "",
         group: data.group || "",
         openingBalance: data.opening_balance?.toString() || "",
         drcr: data.drcr || "Dr",
         address: data.address || "",
-        country: data.country || "",
-        state: data.state || "",
+        country: countryCode,
+        state: stateCode,
         city: data.city || "",
         email: data.email || "",  
         pincode: data.pincode || "",
@@ -253,14 +282,14 @@ const AccountCreationForm = () => {
         panCard: data.pan_card || "",
       });
       
-      if (data.country) {
-        const countryStates = State.getStatesOfCountry(data.country);
+      if (countryCode) {
+        const countryStates = State.getStatesOfCountry(countryCode);
         setStates(countryStates.map(state => ({
           value: state.isoCode,
           label: state.name
         })));
-        if (data.state) {
-          const stateCities = City.getCitiesOfState(data.country, data.state);
+        if (stateCode) {
+          const stateCities = City.getCitiesOfState(countryCode, stateCode);
           setCities(stateCities.map(city => ({
             value: city.name,
             label: city.name
@@ -306,12 +335,17 @@ const AccountCreationForm = () => {
       setCities([]);
     }
   };
-
-  const handleSubmit = async (
+const handleSubmit = async (
     values: typeof initialValues,
     { setSubmitting }: any
   ) => {
     try {
+      // Dropdown me isoCode use hota hai, lekin backend me Branch ke format
+      // (full name, jaise "Gujarat") se match karne ke liye convert karo —
+      // taaki GST CGST/SGST/IGST split sahi calculate ho
+      const countryFullName = Country.getCountryByCode(values.country)?.name || values.country;
+      const stateFullName = State.getStateByCodeAndCountry(values.state, values.country)?.name || values.state;
+
       const payload = {
         account_name: values.accountName,
         group: values.group,
@@ -320,8 +354,8 @@ const AccountCreationForm = () => {
         gst_no: values.gstNo,
         pan_card: values.panCard,
         address: values.address,
-        country: values.country,
-        state: values.state,
+        country: countryFullName,
+        state: stateFullName,
         city: values.city,
         email: values.email,
         pincode: values.pincode,

@@ -119,39 +119,41 @@ const Addpurchaseitem: React.FC = () => {
   };
 
   // ------------------ Fetch All Purchases (without pagination from API) ------------------
-  const fetchItems = async () => {
-    setLoading(true);
-    try {
-      const token = sessionStorage.getItem("token");
-      const response = await api.get(`purchse-items/`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+const fetchItems = async () => {
+  setLoading(true);
+  try {
+    const token = sessionStorage.getItem("token");
+    const response = await api.get(`purchse-items/`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-      let itemsArray: any[] = [];
+    let itemsArray: any[] = [];
 
-      // ✅ Handle DRF paginated response - fetch all pages
-      if (response.data.results) {
-        itemsArray = response.data.results;
-        
-        // ✅ If there are more pages, fetch them all
-        let nextUrl = response.data.next;
-        while (nextUrl) {
-          const nextResponse = await api.get(nextUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          itemsArray = [...itemsArray, ...nextResponse.data.results];
-          nextUrl = nextResponse.data.next;
-        }
+    // Handle DRF paginated response
+    if (response.data.results) {
+      itemsArray = response.data.results;
+      
+      // Fetch all pages
+      let nextUrl = response.data.next;
+      while (nextUrl) {
+        const nextResponse = await api.get(nextUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        itemsArray = [...itemsArray, ...nextResponse.data.results];
+        nextUrl = nextResponse.data.next;
       }
-      // ✅ Fallback for non-paginated response
-      else if (Array.isArray(response.data)) {
-        itemsArray = response.data;
-      }
+    } else if (Array.isArray(response.data)) {
+      itemsArray = response.data;
+    }
 
-      // ✅ Map the items
-      const mappedItems = itemsArray.map((item: any, index: number) => ({
+    // Map items with proper IDs
+    const mappedItems = itemsArray.map((item: any, index: number) => {
+      // Debug: Log each item to see its structure
+      console.log(`📦 Item ${index}:`, item);
+      
+      return {
         uid: index,
-        id: item.id,
+        id: item.id, // ✅ This should exist in Django REST Framework responses
         billNo: item.billNo,
         date: item.date,
         due_date: item.dueDate,
@@ -163,19 +165,33 @@ const Addpurchaseitem: React.FC = () => {
         party_name_name: item.party_name_name,
         purchasebill_no: item.purchasebill_no,
         F_O_R: (Number(item.frightcharge) || 0) + (Number(item.otherexpnse) || 0) + (Number(item.roundamount) || 0),
-        variants: Array.isArray(item.items) ? [...item.items] : [],
-      }));
+        variants: Array.isArray(item.items) ? item.items.map((v: any) => ({
+          itemName_name: v.itemName_name || v.itemName?.itemName || "",
+          hsnCode: v.hsnCode || "",
+          quantity: v.quantity || 0,
+          altQuantity: v.altQuantity || 0,
+          price: v.price || 0,
+          per: v.per || "",
+          discountPercent: v.discountPercent || 0,
+          basicAmount: v.basicAmount || 0,
+          discountAmount: v.discountAmount || 0,
+          taxAmount: v.taxAmount || 0,
+          netValue: v.netValue || 0,
+        })) : [],
+      };
+    });
 
-      setAllItems(mappedItems);
-      setFilteredItems(mappedItems);
-    } catch (err) {
-      console.error("Error fetching purchases:", err);
-      setAllItems([]);
-      setFilteredItems([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    setAllItems(mappedItems);
+    setFilteredItems(mappedItems);
+  } catch (err) {
+    console.error("Error fetching purchases:", err);
+    toast.error("Failed to load purchase records");
+    setAllItems([]);
+    setFilteredItems([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
 
   // ✅ Initial fetch - runs only once on mount
