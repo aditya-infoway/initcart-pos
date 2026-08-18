@@ -7,6 +7,7 @@ import { MdArrowBack, MdSave } from "react-icons/md";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import DataTable from "../../components/common/DataTable";
+import { usePermission } from "../../hooks/usePermissions";
 
 // Validation Schema
 const groupValidationSchema = Yup.object({
@@ -22,10 +23,12 @@ interface Group {
   name: string;
   description: string;
   created_at: string;
+  created_by_name?: string;
 }
 
 const CreateGroup: React.FC = () => {
   const navigate = useNavigate();
+  const {canAdd, canEdit, canDelete} = usePermission("/createGroup");
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
@@ -161,7 +164,12 @@ useEffect(() => {
       key: "created_at", 
       label: "Created At",
       render: (item: Group) => new Date(item.created_at).toLocaleDateString()
-    }
+    },
+      { 
+    key: "created_by_name", 
+    label: "Created By",
+    render: (item: Group) => item.created_by_name || "-"
+  }  
   ];
 
   // Paginate groups locally since backend doesn't support pagination
@@ -183,17 +191,17 @@ useEffect(() => {
               </button>
               <h1 className="text-2xl font-bold text-gray-900">Manage Groups</h1>
             </div>
-            {!showForm && (
-              <button
-                onClick={() => {
-                  setEditingGroup(null);
-                  setShowForm(true);
-                }}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                + Create New Group
-              </button>
-            )}
+{canAdd && !showForm && (
+  <button
+    onClick={() => {
+      setEditingGroup(null);
+      setShowForm(true);
+    }}
+    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+  >
+    + Create New Group
+  </button>
+)}
           </div>
         </div>
       </div>
@@ -271,22 +279,23 @@ useEffect(() => {
         )}
 
         {/* Groups List using DataTable */}
-        <DataTable
-          data={groups}           // ✅ Direct groups array
-          columns={columns}
-          title="All Groups"
-          onEdit={handleEdit}
-          onDelete={handleDelete}
-          loading={loading}
-          totalItems={totalItems}  // ✅ Server se aaya total count
-          currentPage={currentPage}
-          pageSize={pageSize}
-          onPageChange={setCurrentPage}
-          onPageSizeChange={(size) => {
-            setPageSize(size);
-            setCurrentPage(1);
-          }}
-        />
+{/* Groups List using DataTable */}
+<DataTable
+  data={groups}
+  columns={columns}
+  title="All Groups"
+  loading={loading}
+  totalItems={totalItems}
+  currentPage={currentPage}
+  pageSize={pageSize}
+  onPageChange={setCurrentPage}
+  onPageSizeChange={(size) => {
+    setPageSize(size);
+    setCurrentPage(1);
+  }}
+  {...(canEdit ? { onEdit: handleEdit } : {})}
+  {...(canDelete ? { onDelete: handleDelete } : {})}
+/>
       </div>
     </div>
   );

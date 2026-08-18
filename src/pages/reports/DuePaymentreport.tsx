@@ -1,11 +1,12 @@
 // src/pages/DuePaymentReport.tsx
 
 import React, { useEffect, useState, useCallback } from "react";
-import { FaFileExcel, FaSearch, FaFilter, FaTimes, FaArrowLeft } from "react-icons/fa";
+import { FaFileExcel, FaSearch, FaFilter, FaTimes, FaArrowLeft, FaBuilding } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
 import { toast } from "react-toastify";
+import { useAuthStore } from "../../store/authStore";
 
 interface DueBill {
   id: number;
@@ -40,6 +41,11 @@ interface FilterOptions {
   party: string;
 }
 
+interface Branch {
+  id: number;
+  branch_name: string;
+}
+
 const fmt = (n: number) =>
   Number(n || 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
@@ -71,10 +77,21 @@ const typeIcon: Record<string, string> = {
 
 const DuePaymentReport: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
+  const canViewAllBranches = isSuperAdmin || isEmployee;
 
   const [allBills, setAllBills]     = useState<DueBill[]>([]);
   const [summary, setSummary]       = useState<Summary | null>(null);
   const [loading, setLoading]       = useState(false);
+  
+  // ✅ Branch state
+  const [branches, setBranches]     = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
 
   // filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -92,23 +109,64 @@ const DuePaymentReport: React.FC = () => {
   const [sortKey, setSortKey]   = useState<string>("due_date");
   const [sortDir, setSortDir]   = useState<"asc" | "desc">("asc");
 
+  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  useEffect(() => {
+    if (canViewAllBranches) {
+      api.get("branches/")
+        .then(res => {
+          let branchData = [];
+          if (res.data?.data && Array.isArray(res.data.data)) {
+            branchData = res.data.data;
+          } else if (Array.isArray(res.data)) {
+            branchData = res.data;
+          } else {
+            branchData = [];
+          }
+          setBranches(branchData);
+        })
+        .catch(err => console.error("Branches fetch failed:", err));
+    }
+  }, [canViewAllBranches]);
+
   // ── Fetch ──────────────────────────────────────────────────────
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (branchId?: string) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (overdueOnly) params.append("overdue_only", "true");
-      const res = await api.get(`due-payment-report/?${params}`);
+      // ✅ branch_id add karo agar selected hai
+      const effectiveBranchId = branchId !== undefined ? branchId : selectedBranchId;
+      if (effectiveBranchId) params.append("branch_id", effectiveBranchId);
+      
+      const url = `due-payment-report/?${params}`;
+      console.log("🔄 Fetching due payment report with URL:", url);
+      
+      const res = await api.get(url);
       setAllBills(res.data.bills || []);
       setSummary(res.data.summary);
-    } catch {
+      
+      console.log(`✅ Loaded ${res.data.bills?.length || 0} due bills`);
+    } catch (err) {
+      console.error("Fetch error:", err);
       toast.error("Failed to load due payment report");
     } finally {
       setLoading(false);
     }
-  }, [overdueOnly]);
+  }, [overdueOnly, selectedBranchId]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // ✅ Initial fetch
+  useEffect(() => { 
+    fetchData(); 
+  }, [fetchData]);
+
+  // ✅ Branch change handler
+  const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
+    setSelectedBranchId(val);
+    setSelectedBranchName(name);
+    fetchData(val);
+  };
 
   // ── Client-side filter + sort ──────────────────────────────────
   const filtered = React.useMemo(() => {
@@ -232,10 +290,34 @@ const DuePaymentReport: React.FC = () => {
               <h1 className="text-lg font-bold text-gray-800 leading-tight">
                 Due Payment Report
               </h1>
-              <p className="text-xs text-gray-400">{filtered.length} records</p>
+              <p className="text-xs text-gray-400">
+                {/* ✅ Branch name show karo */}
+                {canViewAllBranches && selectedBranchId && (
+                  <span className="font-semibold text-gray-600">{selectedBranchName} · </span>
+                )}
+                {filtered.length} records
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* ✅ Branch Filter - Superadmin + Employee */}
+            {canViewAllBranches && (
+              <div className="flex items-center gap-2 mr-2">
+                <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+                  <FaBuilding size={12} /> Branch:
+                </label>
+                <select
+                  value={selectedBranchId}
+                  onChange={handleBranchChange}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[160px]"
+                >
+                  <option value="">My Branch (Main)</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={String(b.id)}>{b.branch_name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <button
               onClick={exportToExcel}
               className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"

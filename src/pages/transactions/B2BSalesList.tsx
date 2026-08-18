@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
+import { usePermission } from "../../hooks/usePermissions";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface B2BSaleItem {
@@ -59,6 +60,7 @@ interface FilterOptions {
 // ─── Main Component ──────────────────────────────────────────────────────
 const B2BSalesList: React.FC = () => {
   const navigate = useNavigate();
+  const {canAdd} = usePermission("/b2bsales");
 
   const [allSales, setAllSales] = useState<B2BSale[]>([]);
   const [filteredSales, setFilteredSales] = useState<B2BSale[]>([]);
@@ -501,6 +503,7 @@ const B2BSalesList: React.FC = () => {
             <FaFileExcel size={16} />
             Export Excel
           </button>
+          {canAdd && (
           <button
             onClick={() => navigate("/b2bsalescreate")}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow transition"
@@ -508,6 +511,7 @@ const B2BSalesList: React.FC = () => {
             <FaPlus size={14} />
             New B2B Sale
           </button>
+          )}
         </div>
       </div>
 
@@ -603,8 +607,8 @@ const B2BSalesList: React.FC = () => {
         <table className="w-full text-sm">
           <thead className="bg-gradient-to-r from-blue-600 to-blue-500 text-white">
             <tr>
-              {["SR", "Sale No", "From Branch", "To Branch", "Date", "Items", "Invoice Approval", "Action"]
-                .map((h) => <th key={h} className="p-3 border border-gray-200 whitespace-nowrap text-left font-medium">{h}</th>)}
+              {["SR", "Sale No", "From Branch", "To Branch", "Date", "Items", "Invoice Approval", "Created By", "Action"]
+  .map((h) => <th key={h} className="p-3 border border-gray-200 whitespace-nowrap text-left font-medium">{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -633,18 +637,17 @@ const B2BSalesList: React.FC = () => {
                       {sale.item_count}
                     </span>
                   </td>
-                  <td className="p-3 border border-gray-200 whitespace-nowrap">
-                    {getStatusBadge(sale.status)}
-                  </td>
-                  <td className="p-3 border border-gray-200 whitespace-nowrap text-center">
-                    <button
-                      onClick={() => handleViewDetail(sale.id)}
-                      className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition"
-                      title="View Details"
-                    >
-                      <FaEye />
-                    </button>
-                  </td>
+<td className="p-3 border border-gray-200 whitespace-nowrap">
+  {getStatusBadge(sale.status)}
+</td>
+<td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
+  {sale.created_by_name || "-"}   {/* ✅ ADD */}
+</td>
+<td className="p-3 border border-gray-200 whitespace-nowrap text-center">
+  <button onClick={() => handleViewDetail(sale.id)} className="...">
+    <FaEye />
+  </button>
+</td>
                 </tr>
               ))
             )}

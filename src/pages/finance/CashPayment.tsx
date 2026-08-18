@@ -3,8 +3,9 @@ import { Formik, Form, useField } from "formik";
 import * as Yup from "yup";
 import api from "../../api/api";
 import { toast } from "react-toastify";
-import { FaFileExcel, FaSearch, FaTimes } from "react-icons/fa";
+import { FaFileExcel, FaSearch, FaTimes, FaPlus } from "react-icons/fa";
 import * as XLSX from "xlsx";
+import { usePermission } from "../../hooks/usePermissions";
 
 /* ---------------- VALIDATION ---------------- */
 const today = new Date().toISOString().split("T")[0];
@@ -186,8 +187,7 @@ const AccountSelect = ({ label, name }: { label: string; name: string }) => {
   );
 };
 
-// Stock Received dropdown — party is always this branch's own single
-// "Sundry Creditor(Main)" account, no per-bill linking needed.
+// Stock Received dropdown
 const StockReceivedDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -263,9 +263,7 @@ const StockReceivedDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bi
   );
 };
 
-// Stock Return REFUND dropdown — superadmin only. Party is the
-// branch-linked Sundry Debitor/Creditor account (Branch Master link),
-// same account used for outgoing Stock Transfer settlements.
+// Stock Return REFUND dropdown
 const StockReturnRefundDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -349,7 +347,7 @@ const StockReturnRefundDropdown = ({ onSelectBill, refreshKey }: { onSelectBill:
   );
 };
 
-// Bill Search Modal Component (Sales Return / Purchase Entry only)
+// Bill Search Modal Component
 const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [bills, setBills] = useState<any[]>([]);
@@ -471,6 +469,10 @@ const CashPayment: React.FC = () => {
   const [showBillModal, setShowBillModal] = useState(false);
   const [billType, setBillType] = useState<string>('');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  // ✅ PERMISSIONS
+  const { canAdd } = usePermission("/Cash-Payment");
+  // Note: Edit/Delete nahi hai isme, isliye canEdit/canDelete use nahi kiya
 
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState("");
@@ -675,7 +677,7 @@ const CashPayment: React.FC = () => {
         return;
       }
 
-      // Stock Received — party auto = branch's own Sundry Creditor(Main)
+      // Stock Received
       if (values.selectedBill && values.paymentType === 'stockReceived') {
         const stockPayload = {
           stock_transfer_bill_id: values.selectedBill.id,
@@ -692,7 +694,7 @@ const CashPayment: React.FC = () => {
         return;
       }
 
-      // Stock Return refund — party auto = branch-linked Sundry account
+      // Stock Return refund
       if (values.selectedBill && values.paymentType === 'stockReturn') {
         const stockReturnPayload = {
           stock_return_bill_id: values.selectedBill.id,
@@ -783,12 +785,16 @@ const CashPayment: React.FC = () => {
             Export Excel
           </button>
           
-          <button
-            onClick={handleOpenModal}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-          >
-            + Add Cash Payment
-          </button>
+          {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
+          {canAdd && (
+            <button
+              onClick={handleOpenModal}
+              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center gap-2"
+            >
+              <FaPlus size={14} />
+              Add Cash Payment
+            </button>
+          )}
         </div>
       </div>
 
@@ -852,6 +858,7 @@ const CashPayment: React.FC = () => {
               <th className="p-3 border border-gray-200 whitespace-nowrap">Party Name</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Amount</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Narration</th>
+              <th className="p-3 border border-gray-200 whitespace-nowrap">Created By</th>
             </tr>
           </thead>
           <tbody className="text-center">
@@ -881,11 +888,14 @@ const CashPayment: React.FC = () => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.party_name || r.op_account || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap font-semibold">₹{Number(r.amount || 0).toLocaleString()}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.narration || "-"}</td>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
+  {r.created_by_name || "-"}   {/* ✅ ADD */}
+</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-gray-500">
+                <td colSpan={9} className="p-6 text-center text-gray-500">
                   No cash payments found
                 </td>
               </tr>
@@ -1132,7 +1142,7 @@ const CashPayment: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Stock Received section — dropdown, party auto = Sundry Creditor(Main) */}
+                      {/* Stock Received section */}
                       {values.paymentType === "stockReceived" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <StockReceivedDropdown
@@ -1155,7 +1165,7 @@ const CashPayment: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Stock Return refund section — superadmin only, party = branch-linked account */}
+                      {/* Stock Return refund section */}
                       {values.paymentType === "stockReturn" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <StockReturnRefundDropdown

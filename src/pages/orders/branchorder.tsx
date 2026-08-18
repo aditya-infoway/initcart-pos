@@ -1,10 +1,12 @@
 // pos/frontend/src/pages/branch/orders/BranchOrders.tsx
+
 import React, { useState, useEffect, useRef } from "react";
 import Swal from "sweetalert2";
 import DataTable from "../../components/common/DataTable";
-import { FaEye, FaSearch, FaTruck, FaBox, FaClock } from "react-icons/fa";
+import { FaEye, FaSearch, FaTruck, FaBox, FaClock, FaBuilding } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
+import { useAuthStore } from "../../store/authStore";
 
 interface Order {
   id: number;
@@ -33,7 +35,20 @@ interface OrderStats {
   failed_to_deliver: number;
 }
 
+interface Branch {
+  id: number;
+  branch_name: string;
+}
+
 const BranchOrders: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
+  const canViewAllBranches = isSuperAdmin || isEmployee;
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderStats, setOrderStats] = useState<OrderStats>({
     total: 0, pending: 0, confirmed: 0, packaging: 0,
@@ -47,17 +62,51 @@ const BranchOrders: React.FC = () => {
     page: 1, page_size: 10, total: 0, total_pages: 0
   });
 
+  // ✅ Branch state
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
+
   // Use ref to track debounce timeout
   const searchTimeoutRef = useRef<number | null>(null);
   const isInitialMount = useRef(true);
 
-  const navigate = useNavigate();
+  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  useEffect(() => {
+    if (canViewAllBranches) {
+      api.get("branches/")
+        .then(res => {
+          let branchData = [];
+          if (res.data?.data && Array.isArray(res.data.data)) {
+            branchData = res.data.data;
+          } else if (Array.isArray(res.data)) {
+            branchData = res.data;
+          } else {
+            branchData = [];
+          }
+          setBranches(branchData);
+        })
+        .catch(err => console.error("Branches fetch failed:", err));
+    }
+  }, [canViewAllBranches]);
 
   // Initial data fetch - runs only once on mount
   useEffect(() => {
     fetchOrderStats();
     fetchOrders();
   }, []); // Empty dependency array - only runs once
+
+  // ✅ Branch change handler
+  const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
+    setSelectedBranchId(val);
+    setSelectedBranchName(name);
+    // Reset page when branch changes
+    setPagination(prev => ({ ...prev, page: 1 }));
+    fetchOrderStats();
+    fetchOrders();
+  };
 
   // Handle filter changes (except search term)
   useEffect(() => {
@@ -105,7 +154,8 @@ const BranchOrders: React.FC = () => {
 
   const fetchOrderStats = async () => {
     try {
-      const response = await api.get('/branch/orders/stats/');
+      const branchParam = selectedBranchId ? `?branch_id=${selectedBranchId}` : '';
+      const response = await api.get(`/branch/orders/stats/${branchParam}`);
       if (response.data.success) {
         setOrderStats(response.data.data);
       }
@@ -136,6 +186,7 @@ const BranchOrders: React.FC = () => {
       };
       
       if (searchTerm) params.search = searchTerm;
+      if (selectedBranchId) params.branch_id = selectedBranchId;
       
       const response = await api.get('/branch/orders/', { params });
       
@@ -210,9 +261,35 @@ const BranchOrders: React.FC = () => {
   return (
     <div className="p-4 bg-gray-50 min-h-screen">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">Branch Orders</h1>
-        <p className="text-gray-500 text-sm">Manage and track all orders from your branch</p>
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800">Branch Orders</h1>
+          <p className="text-gray-500 text-sm">
+            {canViewAllBranches && selectedBranchId && (
+              <span className="font-semibold">{selectedBranchName} · </span>
+            )}
+            Manage and track all orders from your branch
+          </p>
+        </div>
+        
+        {/* ✅ Branch Filter - Superadmin + Employee */}
+        {canViewAllBranches && (
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+              <FaBuilding size={12} /> Branch:
+            </label>
+            <select
+              value={selectedBranchId}
+              onChange={handleBranchChange}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[160px]"
+            >
+              <option value="">My Branch (Main)</option>
+              {branches.map(b => (
+                <option key={b.id} value={String(b.id)}>{b.branch_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Order Summary Section */}

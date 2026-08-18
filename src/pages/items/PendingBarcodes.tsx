@@ -9,6 +9,7 @@ import { MdOutlineQrCode2, MdClose, MdCheckCircle, MdPrint } from "react-icons/m
 import api from "../../api/api";
 import { FaLock } from "react-icons/fa6";
 import { useAuthStore } from "../../store/authStore"; 
+import { usePermission } from "../../hooks/usePermissions";
 
 // ─── TSC TE244 label presets ────────────────────────────────────
 const LABEL_PRESETS = [
@@ -339,7 +340,8 @@ const printInNewWindow = (items: PrintItem[], preset: typeof LABEL_PRESETS[numbe
 // ════════════════════════════════════════════════════════════════
 const PendingBarcodes: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuthStore();  // ← GET USER FROM AUTH STORE
+  const {canAdd, canEdit} = usePermission("/PendingBarcodes");
+  const { user } = useAuthStore();
   const userRole = user?.role || ''; 
   const [activeTab, setActiveTab] = useState<"pending" | "generated">("pending");
 
@@ -455,7 +457,7 @@ const PendingBarcodes: React.FC = () => {
           const next = new Map(prev);
           variants.forEach(v => {
             if (!next.has(v.variant_id)) {
-              const stockQty = Math.min(100, Math.max(1, Math.round(v.current_stock || 1)));
+              const stockQty = Math.max(1, Math.round(v.current_stock || 1));
               next.set(v.variant_id, stockQty);
             }
           });
@@ -466,14 +468,22 @@ const PendingBarcodes: React.FC = () => {
     finally { setGenLoading(false); }
   }, [headers]);
 
-  // Fetch when dependencies change
-  useEffect(() => {
-    if (activeTab === "pending") {
-      fetchPending(pendingPagination.current_page, pendingPagination.page_size, debouncedPendingSearch);
-    } else {
-      fetchGenerated(generatedPagination.current_page, generatedPagination.page_size, debouncedGeneratedSearch);
-    }
-  }, [activeTab, debouncedPendingSearch, debouncedGeneratedSearch]);
+useEffect(() => {
+  // Initial page load par dono APIs call karo
+  // Isse Pending aur Generated dono ke counts immediately available rahenge.
+
+  fetchPending(
+    pendingPagination.current_page,
+    pendingPagination.page_size,
+    debouncedPendingSearch
+  );
+
+  fetchGenerated(
+    generatedPagination.current_page,
+    generatedPagination.page_size,
+    debouncedGeneratedSearch
+  );
+}, [debouncedPendingSearch, debouncedGeneratedSearch]);
 
 
 
@@ -729,8 +739,8 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
         {/* Tabs */}
         <div className="flex border-b border-gray-200 mb-4">
           {([
-            { id: "pending",   label: ` Pending (${pendingPagination.count})`,                     active: "border-blue-600 text-blue-600"       },
-            { id: "generated", label: ` Generated (${generatedPagination.count})`,          active: "border-emerald-600 text-emerald-600" },
+            { id: "pending",   label: ` Pending (${pendingPagination.count})`, active: "border-blue-600 text-blue-600"       },
+            { id: "generated", label: ` Generated (${generatedPagination.count})`, active: "border-emerald-600 text-emerald-600" },
           ] as const).map(t => (
             <button key={t.id} onClick={() => handleTabChange(t.id)}
               className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === t.id ? t.active : "border-transparent text-gray-500 hover:text-gray-700"}`}>
@@ -852,23 +862,29 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
                                 </div>
                               ) : <span className="text-orange-400 text-xs italic">Not generated</span>}
                             </td>
-                            <td className="p-3 text-center">
-                              {!gened ? (
-                                <button onClick={() => handleGenerateSingle(v)}
-                                  className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs hover:bg-blue-700 flex items-center gap-1 mx-auto whitespace-nowrap">
-                                  <MdOutlineQrCode2 size={13} />
-                                  {manualVal ? "Save" : "Auto"}
-                                </button>
-                              ) : (
-                                <div className="flex flex-col gap-1 items-center">
-                                  <span className="text-green-600 text-xs flex items-center gap-1"><MdCheckCircle size={13} />Done</span>
-                                  <button onClick={() => setGeneratedMap(prev => { const m = new Map(prev); m.delete(v.variant_id); return m; })}
-                                    className="text-red-400 text-xs hover:text-red-600 flex items-center gap-0.5">
-                                    <FaTimes size={9} />Reset
-                                  </button>
-                                </div>
-                              )}
-                            </td>
+<td className="p-3 text-center">
+    {!gened ? (
+        canAdd ? (
+            <button onClick={() => handleGenerateSingle(v)}
+                className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs hover:bg-blue-700 flex items-center gap-1 mx-auto whitespace-nowrap">
+                <MdOutlineQrCode2 size={13} />
+                {manualVal ? "Save" : "Auto"}
+            </button>
+        ) : (
+            <span className="text-gray-400 text-xs">—</span>
+        )
+    ) : (
+        <div className="flex flex-col gap-1 items-center">
+            <span className="text-green-600 text-xs flex items-center gap-1"><MdCheckCircle size={13} />Done</span>
+            {canAdd && (
+                <button onClick={() => setGeneratedMap(prev => { const m = new Map(prev); m.delete(v.variant_id); return m; })}
+                    className="text-red-400 text-xs hover:text-red-600 flex items-center gap-0.5">
+                    <FaTimes size={9} />Reset
+                </button>
+            )}
+        </div>
+    )}
+</td>
                           </tr>
                         );
                       })}
@@ -977,26 +993,25 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
             {v.barcode}
         </span>
         
-{/* ─── EDIT BUTTON - SIRF NORMAL BRANCH + MANUAL ITEMS ── */}
-{canEditBarcode(v.entry_type) && (
-    <button
-        onClick={() => {
-            setEditBarcodeValues(prev => 
-                new Map(prev).set(v.variant_id, v.barcode)
-            );
-        }}
-        className="ml-1 text-blue-500 hover:text-blue-700 text-xs"
-        title="Edit barcode"
-    >
-        <FaEdit size={12} />
-    </button>
-)}
-
-{!canEditBarcode(v.entry_type) && (
-    <span className="text-gray-400 text-xs ml-1" title="Company items cannot be edited by normal users">
-        <FaLock size={10} />
-    </span>
-)}
+        {/* ─── EDIT BUTTON - SIRF PERMISSION CHECK ── */}
+        
+        {canEdit ? (
+            <button
+                onClick={() => {
+                    setEditBarcodeValues(prev => 
+                        new Map(prev).set(v.variant_id, v.barcode)
+                    );
+                }}
+                className="ml-1 text-blue-500 hover:text-blue-700 text-xs"
+                title="Edit barcode"
+            >
+                <FaEdit size={12} />
+            </button>
+        ) : (
+            <span className="text-gray-400 text-xs ml-1" title="You don't have edit permission for this page">
+                <FaLock size={10} />
+            </span>
+        )}
     </div>
     
     {/* Edit input - shown when edit mode is active */}

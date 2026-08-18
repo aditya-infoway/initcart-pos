@@ -5,6 +5,7 @@ import { FaFileExcel, FaSearch, FaFilter, FaTimes, FaEye, FaArrowLeft, FaBuildin
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
+import { useAuthStore } from "../../store/authStore";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,11 @@ interface FilterOptions {
   dateTo: string;
 }
 
+interface Branch {
+  id: number;
+  branch_name: string;
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 const getProfitColor = (p: number) =>
@@ -74,6 +80,12 @@ const termsColor = (t: string) => {
 
 const SalesProfitReport: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
+  const canViewAllBranches = isSuperAdmin || isEmployee;
 
   const [allItems, setAllItems] = useState<ProfitRecord[]>([]);
   const [filteredItems, setFilteredItems] = useState<ProfitRecord[]>([]);
@@ -85,64 +97,81 @@ const SalesProfitReport: React.FC = () => {
   const [pageSize, setPageSize] = useState(15);
   const [selectedBill, setSelectedBill] = useState<ProfitRecord | null>(null);
 
-  // Superadmin
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [branches, setBranches] = useState<{ id: number; branch_name: string }[]>([]);
-  const [selectedBranchId, setSelectedBranchId] = useState("");
+  // ✅ Branch state
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [selectedBranchName, setSelectedBranchName] = useState<string>("All Branches");
 
-  // ── detect role ──
+  // ✅ Fetch branches - agar canViewAllBranches true hai toh
   useEffect(() => {
-    const userStr = sessionStorage.getItem("user");
-    if (userStr) {
-      try {
-        const u = JSON.parse(userStr);
-        if (u.role === "superadmin") {
-          setIsSuperAdmin(true);
-          api.get("branches/").then(res => setBranches(res.data.data || [])).catch(console.error);
-        }
-      } catch {}
+    if (canViewAllBranches) {
+      api.get("branches/")
+        .then(res => {
+          let branchData = [];
+          if (res.data?.data && Array.isArray(res.data.data)) {
+            branchData = res.data.data;
+          } else if (Array.isArray(res.data)) {
+            branchData = res.data;
+          } else {
+            branchData = [];
+          }
+          setBranches(branchData);
+        })
+        .catch(err => console.error("Branches fetch failed:", err));
     }
-  }, []);
+  }, [canViewAllBranches]);
 
-// Fix fetchData function - response structure issue
+  // ✅ FIX: fetchData function with branch parameter
+  const fetchData = async (branchId?: string) => {
+    setLoading(true);
+    try {
+      // ✅ Use provided branchId or current selectedBranchId
+      const effectiveBranchId = branchId !== undefined ? branchId : selectedBranchId;
+      const branchParam = effectiveBranchId ? `&branch_id=${effectiveBranchId}` : "";
+      const dateFromParam = filters.dateFrom ? `&date_from=${filters.dateFrom}` : "";
+      const dateToParam = filters.dateTo ? `&date_to=${filters.dateTo}` : "";
 
-const fetchData = async (branchId = "") => {
-  setLoading(true);
-  try {
-    const branchParam = branchId ? `&branch_id=${branchId}` : "";
-    const dateFromParam = filters.dateFrom ? `&date_from=${filters.dateFrom}` : "";
-    const dateToParam = filters.dateTo ? `&date_to=${filters.dateTo}` : "";
+      const url = `sales-bill-wise-profit/?page=1&page_size=1000${branchParam}${dateFromParam}${dateToParam}`;
+      console.log("🔄 Fetching profit report with URL:", url);
 
-    const res = await api.get(
-      `sales-bill-wise-profit/?page=1&page_size=1000${branchParam}${dateFromParam}${dateToParam}`
-    );
+      const res = await api.get(url);
 
-    console.log("API Full Response:", res.data); // Debug
+      console.log("API Full Response:", res.data);
 
-    // 🔥 FIX: Check response structure - data might be in res.data.results.data
-    const responseData = res.data?.results?.data || res.data?.data || [];
-    
-    if (responseData.length > 0) {
-      setAllItems(responseData);
-      setFilteredItems(responseData);
-      console.log("✅ Records loaded:", responseData.length);
-    } else {
-      console.warn("⚠️ No data found in response");
+      // ✅ FIX: Check response structure
+      const responseData = res.data?.results?.data || res.data?.data || [];
+      
+      if (responseData.length > 0) {
+        setAllItems(responseData);
+        setFilteredItems(responseData);
+        console.log("✅ Records loaded:", responseData.length);
+      } else {
+        console.warn("⚠️ No data found in response");
+        setAllItems([]);
+        setFilteredItems([]);
+      }
+    } catch (err) {
+      console.error("❌ API Error:", err);
       setAllItems([]);
       setFilteredItems([]);
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.error("❌ API Error:", err);
-    setAllItems([]);
-    setFilteredItems([]);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
+  // ✅ Initial fetch
   useEffect(() => {
-    fetchData(selectedBranchId);
-  }, [selectedBranchId]);
+    fetchData();
+  }, []);
+
+  // ✅ Branch change handler
+  const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    const name = branches.find(b => String(b.id) === val)?.branch_name || "All Branches";
+    setSelectedBranchId(val);
+    setSelectedBranchName(name);
+    fetchData(val);
+  };
 
   // ── client-side filter ──
   useEffect(() => {
@@ -252,23 +281,26 @@ const fetchData = async (branchId = "") => {
               <h1 className="text-lg font-bold text-gray-800 leading-tight">
                 Sales Bill Wise Profit Report
               </h1>
-              <p className="text-xs text-gray-400">{filteredItems.length} bills</p>
+              <p className="text-xs text-gray-400">
+                {/* ✅ Branch name show karo */}
+                {canViewAllBranches && selectedBranchId && (
+                  <span className="font-semibold text-gray-600">{selectedBranchName} · </span>
+                )}
+                {filteredItems.length} bills
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
-            {/* Superadmin branch selector */}
-            {isSuperAdmin && (
+            {/* ✅ Branch Filter - Superadmin + Employee */}
+            {canViewAllBranches && (
               <div className="flex items-center gap-2">
                 <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
                   <FaBuilding size={11} /> Branch:
                 </label>
                 <select
                   value={selectedBranchId}
-                  onChange={e => {
-                    setSelectedBranchId(e.target.value);
-                    fetchData(e.target.value);
-                  }}
+                  onChange={handleBranchChange}
                   className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[160px]"
                 >
                   <option value="">All Branches</option>
@@ -534,20 +566,20 @@ const fetchData = async (branchId = "") => {
                             </span>
                           </td>
                           <td className="px-3 py-2.5 whitespace-nowrap">
-  {item.gst_toggle_status === null ? (
-    <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
-      Unknown
-    </span>
-  ) : item.gst_toggle_status ? (
-    <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-300">
-      Exclusive
-    </span>
-  ) : (
-    <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 border border-purple-300">
-      Inclusive
-    </span>
-  )}
-</td>
+                            {item.gst_toggle_status === null ? (
+                              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
+                                Unknown
+                              </span>
+                            ) : item.gst_toggle_status ? (
+                              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-300">
+                                Exclusive
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 border border-purple-300">
+                                Inclusive
+                              </span>
+                            )}
+                          </td>
                           <td className="px-3 py-2.5 text-center no-print">
                             <button
                               onClick={() => setSelectedBill(item)}

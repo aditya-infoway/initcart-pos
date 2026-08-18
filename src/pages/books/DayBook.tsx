@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { FaFileExcel, FaSearch, FaFilter, FaTimes, FaArrowLeft, FaCalendarAlt } from "react-icons/fa";
+import { FaFileExcel, FaSearch, FaFilter, FaTimes, FaArrowLeft, FaCalendarAlt, FaBuilding } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
+import { useAuthStore } from "../../store/authStore";
 
 interface DayBookEntry {
   id: number;
@@ -27,8 +28,19 @@ interface FilterOptions {
   type: string;
 }
 
+interface Branch {
+  id: number;
+  branch_name: string;
+}
+
 const DayBook: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
+  const canViewAllBranches = isSuperAdmin || isEmployee;
   
   // Get today's date in YYYY-MM-DD format
   const getTodayDate = () => {
@@ -49,15 +61,42 @@ const DayBook: React.FC = () => {
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [branches, setBranches] = useState<{id: number, branch_name: string}[]>([]);
+  
+  // ✅ Branch state
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
 
-  const fetchEntries = async (branchId = selectedBranchId) => {
+  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  useEffect(() => {
+    if (canViewAllBranches) {
+      api.get("branches/")
+        .then(res => {
+          let branchData = [];
+          if (res.data?.data && Array.isArray(res.data.data)) {
+            branchData = res.data.data;
+          } else if (Array.isArray(res.data)) {
+            branchData = res.data;
+          } else {
+            branchData = [];
+          }
+          setBranches(branchData);
+        })
+        .catch(err => console.error("Branches fetch failed:", err));
+    }
+  }, [canViewAllBranches]);
+
+  // ✅ FIX: fetchEntries with branch parameter
+  const fetchEntries = async (branchId?: string) => {
     setLoading(true);
     try {
       const token = sessionStorage.getItem("token") || sessionStorage.getItem("accessToken");
-      const branchParam = branchId ? `&branch_id=${branchId}` : '';
+      
+      // ✅ Use provided branchId or current selectedBranchId
+      const effectiveBranchId = branchId !== undefined ? branchId : selectedBranchId;
+      const branchParam = effectiveBranchId ? `&branch_id=${effectiveBranchId}` : '';
+      
+      console.log("🔄 Fetching day book with branch:", effectiveBranchId || 'default');
       
       // Fetch all cash and bank transactions
       const [cashPaymentsRes, cashReceiptsRes, bankPaymentsRes, bankReceiptsRes] = await Promise.all([
@@ -203,6 +242,8 @@ const DayBook: React.FC = () => {
         return b.created_at.localeCompare(a.created_at);
       });
 
+      console.log(`✅ Loaded ${all.length} day book entries`);
+      
       setAllEntries(all);
       
       // Apply initial filter for today's date
@@ -217,20 +258,19 @@ const DayBook: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    const userStr = sessionStorage.getItem("user");
-    if (userStr) {
-      const u = JSON.parse(userStr);
-      if (u.role === 'superadmin') {
-        setIsSuperAdmin(true);
-        api.get("branches/").then(res => setBranches(res.data.data || []));
-      }
-    }
-  }, []);
-
+  // ✅ Initial fetch
   useEffect(() => {
     fetchEntries();
   }, []);
+
+  // ✅ Branch change handler
+  const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
+    setSelectedBranchId(val);
+    setSelectedBranchName(name);
+    fetchEntries(val);
+  };
 
   useEffect(() => {
     let f = [...allEntries];
@@ -400,20 +440,24 @@ const DayBook: React.FC = () => {
             <div>
               <h1 className="text-lg font-bold text-gray-800 leading-tight">Day Book</h1>
               <p className="text-xs text-gray-400">
+                {/* ✅ Branch name show karo */}
+                {canViewAllBranches && selectedBranchId && (
+                  <span className="font-semibold text-gray-600">{selectedBranchName} · </span>
+                )}
                 {isShowingToday ? "Today's Transactions" : formatDateRange()} • {filteredEntries.length} records
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isSuperAdmin && (
+            {/* ✅ Branch Filter - Superadmin + Employee */}
+            {canViewAllBranches && (
               <div className="flex items-center gap-2 mr-2">
-                <label className="text-xs font-medium text-gray-500 whitespace-nowrap">Branch:</label>
+                <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+                  <FaBuilding size={12} /> Branch:
+                </label>
                 <select
                   value={selectedBranchId}
-                  onChange={(e) => {
-                    setSelectedBranchId(e.target.value);
-                    fetchEntries(e.target.value);
-                  }}
+                  onChange={handleBranchChange}
                   className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[160px]"
                 >
                   <option value="">My Branch (Main)</option>

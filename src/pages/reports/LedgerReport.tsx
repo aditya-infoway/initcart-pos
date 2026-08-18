@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { FaEye, FaSearch, FaFilter, FaFileExcel } from "react-icons/fa";
 import * as XLSX from "xlsx";
+import { useAuthStore } from "../../store/authStore";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,13 @@ interface PaginatedResponse<T> {
 
 const LedgerReport: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  
+
+  const canViewAllBranches = isSuperAdmin || isEmployee;
 
   const [rows, setRows] = useState<AccountRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +60,6 @@ const LedgerReport: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
   const [total, setTotal] = useState(0);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [branches, setBranches] = useState<{id: number, branch_name: string}[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   const [selectedBranchName, setSelectedBranchName] = useState<string>("");
@@ -60,46 +67,55 @@ const LedgerReport: React.FC = () => {
   const totalPages = Math.ceil(total / pageSize);
 
   // ── fetch account list ────────────────────────────────────────────────────
-const fetchAccounts = useCallback(
-  async (p = 1) => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: String(p),
-        page_size: String(pageSize),
-      });
-      if (search) params.set("search", search);
-      if (groupFilter) params.set("group", groupFilter);
-      if (selectedBranchId) params.set("branch_id", selectedBranchId); // ← ADD
+  const fetchAccounts = useCallback(
+    async (p = 1) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(p),
+          page_size: String(pageSize),
+        });
+        if (search) params.set("search", search);
+        if (groupFilter) params.set("group", groupFilter);
+        if (selectedBranchId) params.set("branch_id", selectedBranchId);
 
-      const res = await api.get<PaginatedResponse<AccountRow>>(
-        `ledger-report/?${params}`,
-        { headers: authHeader() }
-      );
-      setRows(res.data.results ?? []);
-      setTotal(res.data.count ?? 0);
-      setPage(p);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  },
-  [pageSize, search, groupFilter, selectedBranchId] 
-);
+        const res = await api.get<PaginatedResponse<AccountRow>>(
+          `ledger-report/?${params}`,
+          { headers: authHeader() }
+        );
+        setRows(res.data.results ?? []);
+        setTotal(res.data.count ?? 0);
+        setPage(p);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [pageSize, search, groupFilter, selectedBranchId]
+  );
 
-useEffect(() => { fetchAccounts(1); }, [pageSize, groupFilter, selectedBranchId]);
+  useEffect(() => { fetchAccounts(1); }, [pageSize, groupFilter, selectedBranchId]);
+
   useEffect(() => {
-  const userStr = sessionStorage.getItem("user");
-  if (userStr) {
-    const u = JSON.parse(userStr);
-    if (u.role === 'superadmin') {
-      setIsSuperAdmin(true);
+    if (canViewAllBranches) {
       api.get("branches/", { headers: authHeader() })
-        .then(res => setBranches(res.data.data || []));
+        .then(res => {
+
+          let branchData = [];
+          if (res.data?.data && Array.isArray(res.data.data)) {
+            branchData = res.data.data;
+          } else if (Array.isArray(res.data)) {
+            branchData = res.data;
+          } else {
+            branchData = [];
+          }
+          setBranches(branchData);
+        })
+        .catch(err => console.error("Branches fetch failed:", err));
     }
-  }
-}, []);
+  }, [canViewAllBranches]);
+
   useEffect(() => {
     const t = setTimeout(() => fetchAccounts(1), 400);
     return () => clearTimeout(t);
@@ -109,10 +125,10 @@ useEffect(() => { fetchAccounts(1); }, [pageSize, groupFilter, selectedBranchId]
   const handleExportExcel = async () => {
     setExporting(true);
     try {
-      // Fetch all records (no pagination limit)
       const params = new URLSearchParams({ page: "1", page_size: "100000" });
       if (search) params.set("search", search);
       if (groupFilter) params.set("group", groupFilter);
+      if (selectedBranchId) params.set("branch_id", selectedBranchId);
 
       const res = await api.get<PaginatedResponse<AccountRow>>(
         `ledger-report/?${params}`,
@@ -121,7 +137,6 @@ useEffect(() => { fetchAccounts(1); }, [pageSize, groupFilter, selectedBranchId]
 
       const allRows: AccountRow[] = res.data.results ?? [];
 
-      // Build worksheet data
       const wsData = [
         ["#", "Account Name", "Group", "City", "State", "Opening Balance", "Opening Dr/Cr", "Current Balance", "Current Dr/Cr"],
         ...allRows.map((acc, idx) => [
@@ -138,23 +153,13 @@ useEffect(() => { fetchAccounts(1); }, [pageSize, groupFilter, selectedBranchId]
       ];
 
       const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-      // Column widths
       ws["!cols"] = [
-        { wch: 5 },
-        { wch: 30 },
-        { wch: 18 },
-        { wch: 18 },
-        { wch: 18 },
-        { wch: 18 },
-        { wch: 12 },
-        { wch: 18 },
-        { wch: 12 },
+        { wch: 5 }, { wch: 30 }, { wch: 18 }, { wch: 18 },
+        { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 18 }, { wch: 12 },
       ];
 
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Ledger Report");
-
       const today = new Date().toISOString().slice(0, 10);
       XLSX.writeFile(wb, `Ledger_Report_${today}.xlsx`);
     } catch (e) {
@@ -170,46 +175,47 @@ useEffect(() => { fetchAccounts(1); }, [pageSize, groupFilter, selectedBranchId]
     <div className="bg-gray-50 min-h-screen p-4 font-sans">
 
       {/* Header */}
-<div className="bg-gradient-to-r from-blue-700 to-blue-500 text-white p-4 rounded-xl shadow-lg mb-4 flex items-center justify-between flex-wrap gap-3">
-  <div>
-    <h1 className="text-2xl font-bold">Ledger / Accounts Report</h1>
-    {isSuperAdmin && selectedBranchName && (
-      <p className="text-blue-100 text-sm mt-0.5">{selectedBranchName}</p>
-    )}
-  </div>
-  <div className="flex items-center gap-3 flex-wrap">
-    {isSuperAdmin && (
-      <div className="flex items-center gap-2">
-        <label className="text-blue-100 text-sm whitespace-nowrap">Branch:</label>
-        <select
-          value={selectedBranchId}
-          onChange={(e) => {
-            const val = e.target.value;
-            const name = branches.find(b => String(b.id) === val)?.branch_name || "";
-            setSelectedBranchId(val);
-            setSelectedBranchName(name);
-          }}
-          className="bg-white/20 text-white border border-white/30 rounded-lg px-3 py-1.5 text-sm focus:outline-none min-w-[160px]"
-        >
-          <option value="" className="text-gray-800 bg-white">My Branch (Main)</option>
-          {branches.map(b => (
-            <option key={b.id} value={String(b.id)} className="text-gray-800 bg-white">
-              {b.branch_name}
-            </option>
-          ))}
-        </select>
+      <div className="bg-gradient-to-r from-blue-700 to-blue-500 text-white p-4 rounded-xl shadow-lg mb-4 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Ledger / Accounts Report</h1>
+          {canViewAllBranches && selectedBranchName && (
+            <p className="text-blue-100 text-sm mt-0.5">{selectedBranchName}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* ✅ Branch Filter - Sirf canViewAllBranches wale ko dikhe */}
+          {canViewAllBranches && (
+            <div className="flex items-center gap-2">
+              <label className="text-blue-100 text-sm whitespace-nowrap">Branch:</label>
+              <select
+                value={selectedBranchId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const name = branches.find(b => String(b.id) === val)?.branch_name || "";
+                  setSelectedBranchId(val);
+                  setSelectedBranchName(name);
+                }}
+                className="bg-white/20 text-white border border-white/30 rounded-lg px-3 py-1.5 text-sm focus:outline-none min-w-[160px]"
+              >
+                <option value="" className="text-gray-800 bg-white">My Branch (Main)</option>
+                {branches.map(b => (
+                  <option key={b.id} value={String(b.id)} className="text-gray-800 bg-white">
+                    {b.branch_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <button
+            onClick={handleExportExcel}
+            disabled={exporting || loading}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow"
+          >
+            <FaFileExcel />
+            {exporting ? "Exporting…" : "Export Excel"}
+          </button>
+        </div>
       </div>
-    )}
-    <button
-      onClick={handleExportExcel}
-      disabled={exporting || loading}
-      className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow"
-    >
-      <FaFileExcel />
-      {exporting ? "Exporting…" : "Export Excel"}
-    </button>
-  </div>
-</div>
 
       {/* Filters */}
       <div className="bg-white rounded-xl shadow p-4 mb-4 flex flex-wrap gap-3 items-center">

@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef } from "react";
-import { FaEye, FaPrint, FaSearch, FaFilter, FaTimes, FaFileExcel } from "react-icons/fa"
+import { FaEye, FaPrint, FaSearch, FaFilter, FaTimes, FaFileExcel, FaPlus } from "react-icons/fa"
 import { useNavigate } from "react-router-dom";
-import { toast } from "react-toastify"; // ✅ Add for notifications
-import * as XLSX from "xlsx"; // ✅ Add for Excel export
+import { toast } from "react-toastify";
+import * as XLSX from "xlsx";
 import api from "../../api/api";
+import { usePermission } from "../../hooks/usePermissions";
 
 const VARIANTS_PER_PAGE = 10;
 
@@ -19,7 +20,6 @@ const COMMON_VARIANT_COLUMNS = [
   "net_amount",
 ];
 
-// ✅ Paginated Response Type
 interface PaginatedResponse {
   count: number;
   next: string | null;
@@ -27,7 +27,6 @@ interface PaginatedResponse {
   results: any[];
 }
 
-// ✅ Filter options interface
 interface FilterOptions {
   terms: string;
   startDate: string;
@@ -36,6 +35,10 @@ interface FilterOptions {
 
 const Addsalesitem: React.FC = () => {
   const navigate = useNavigate();
+  
+  // ✅ PERMISSIONS
+  const { canAdd } = usePermission("/Addsalesitem");
+  // Note: Isme edit/delete nahi hai, sirf view + add
 
   const [allItems, setAllItems] = useState<any[]>([]);
   const [filteredItems, setFilteredItems] = useState<any[]>([]);
@@ -44,7 +47,6 @@ const Addsalesitem: React.FC = () => {
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // ✅ Search and Filter state
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [showFilters, setShowFilters] = useState<boolean>(false);
   const [filters, setFilters] = useState<FilterOptions>({
@@ -53,7 +55,6 @@ const Addsalesitem: React.FC = () => {
     endDate: "",
   });
 
-  // ✅ Pagination state (for filtered items)
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
   const [totalItems, setTotalItems] = useState(0);
@@ -61,7 +62,6 @@ const Addsalesitem: React.FC = () => {
 
   const [variantPage, setVariantPage] = useState(1);
 
-  // ✅ Fetch all sales (without pagination from API)
   const fetchItems = async () => {
     setLoading(true);
     try {
@@ -72,11 +72,8 @@ const Addsalesitem: React.FC = () => {
 
       let allResults: any[] = [];
 
-      // ✅ Handle DRF paginated response - fetch all pages
       if (response.data.results) {
         allResults = response.data.results;
-
-        // ✅ If there are more pages, fetch them all
         let nextUrl = response.data.next;
         while (nextUrl) {
           const nextResponse = await api.get(nextUrl);
@@ -101,6 +98,8 @@ const Addsalesitem: React.FC = () => {
           (Number(item.otherexpnse) || 0) +
           (Number(item.roundamount) || 0),
         variants: item.items || [],
+          created_by: item.created_by,           // ✅ ADD
+      created_by_name: item.created_by_name,
       }));
 
       setAllItems(mappedItems);
@@ -115,14 +114,13 @@ const Addsalesitem: React.FC = () => {
       setLoading(false);
     }
   };
-  // ✅ Fixed exportToExcel function
+
   const exportToExcel = () => {
     if (filteredItems.length === 0) {
       toast.warning("No data to export");
       return;
     }
 
-    // ✅ Define a type for the export data
     type ExportRow = {
       "SR No": number | string;
       "Date": any;
@@ -137,9 +135,8 @@ const Addsalesitem: React.FC = () => {
       "Grand Total (₹)": string;
     };
 
-    // Prepare data for export
     const exportData: ExportRow[] = filteredItems.map((item, index) => ({
-      "SR No": index + 1,  // ✅ number type
+      "SR No": index + 1,
       "Date": item.date || "-",
       "Terms": item.terms || "-",
       "Customer Name": item.customer_name || "-",
@@ -152,10 +149,9 @@ const Addsalesitem: React.FC = () => {
       "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
     }));
 
-    // Add grand total row
     const grandTotal = filteredItems.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
     exportData.push({
-      "SR No": "",  // ✅ now string is allowed because type is number | string
+      "SR No": "",
       "Date": "",
       "Terms": "",
       "Customer Name": "TOTAL",
@@ -168,44 +164,27 @@ const Addsalesitem: React.FC = () => {
       "Grand Total (₹)": grandTotal.toFixed(2),
     });
 
-    // Create worksheet
     const ws = XLSX.utils.json_to_sheet(exportData);
-
-    // Set column widths
     ws["!cols"] = [
-      { wch: 6 },   // SR No
-      { wch: 12 },  // Date
-      { wch: 10 },  // Terms
-      { wch: 25 },  // Customer Name
-      { wch: 15 },  // Bill No
-      { wch: 12 },  // Due Date
-      { wch: 30 },  // Narration
-      { wch: 15 },  // Total Basic
-      { wch: 15 },  // Total Tax
-      { wch: 12 },  // F+O+R
-      { wch: 15 },  // Grand Total
+      { wch: 6 }, { wch: 12 }, { wch: 10 }, { wch: 25 },
+      { wch: 15 }, { wch: 12 }, { wch: 30 }, { wch: 15 },
+      { wch: 15 }, { wch: 12 }, { wch: 15 },
     ];
 
-    // Create workbook and download
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Sales Register");
-
-    // Generate filename with current date
     const fileName = `Sales_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, fileName);
-
     toast.success(`Exported ${filteredItems.length} records successfully`);
   };
-  // ✅ Initial fetch - runs only once on mount
+
   useEffect(() => {
     fetchItems();
   }, []);
 
-  // ✅ Client-side filtering
   useEffect(() => {
     let filtered = [...allItems];
 
-    // ✅ Filter by search term (bill_no, customer_name)
     if (searchTerm.trim() !== "") {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(
@@ -216,14 +195,12 @@ const Addsalesitem: React.FC = () => {
       );
     }
 
-    // ✅ Filter by terms
     if (filters.terms) {
       filtered = filtered.filter(
         (item) => item.terms?.toLowerCase() === filters.terms.toLowerCase()
       );
     }
 
-    // ✅ Filter by date range
     if (filters.startDate) {
       filtered = filtered.filter((item) => item.date >= filters.startDate);
     }
@@ -234,10 +211,9 @@ const Addsalesitem: React.FC = () => {
     setFilteredItems(filtered);
     setTotalItems(filtered.length);
     setTotalPages(Math.ceil(filtered.length / pageSize));
-    setCurrentPage(1); // Reset to first page when filters change
+    setCurrentPage(1);
   }, [searchTerm, filters, allItems]);
 
-  // ✅ Pagination handlers
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) {
       setCurrentPage(page);
@@ -250,7 +226,6 @@ const Addsalesitem: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // ✅ Search Handlers
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);
   };
@@ -259,7 +234,6 @@ const Addsalesitem: React.FC = () => {
     setSearchTerm("");
   };
 
-  // ✅ Filter Handlers
   const handleFilterChange = (key: keyof FilterOptions, value: string) => {
     setFilters(prev => ({ ...prev, [key]: value }));
   };
@@ -290,7 +264,6 @@ const Addsalesitem: React.FC = () => {
 
   const modalColumns = COMMON_VARIANT_COLUMNS;
 
-  // View variants modal
   const handleViewVariants = (itemId: number) => {
     const item = filteredItems.find(i => i.id === itemId);
     if (!item) return;
@@ -299,7 +272,6 @@ const Addsalesitem: React.FC = () => {
     setSelectedItem(itemId);
   };
 
-  // Fetch full receipt from API for selected item
   const handleViewReceipt = async (itemId: number) => {
     try {
       const res = await api.get(`sale-receipt/${itemId}/`, {
@@ -323,36 +295,12 @@ const Addsalesitem: React.FC = () => {
         <head>
           <title>Receipt</title>
           <style>
-            @page {
-              size: 80mm auto;
-              margin: 2mm;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-              display: flex;
-              justify-content: center;
-              font-family: Arial, sans-serif;
-            }
-            .receipt-container {
-              width: 80mm;
-              padding: 6px;
-              font-size: 11px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-            }
-            th, td {
-              border: 1px solid #000;
-              padding: 2px;
-              font-size: 11px;
-            }
-            hr {
-              border: none;
-              border-top: 1px dashed #000;
-              margin: 6px 0;
-            }
+            @page { size: 80mm auto; margin: 2mm; }
+            body { margin: 0; padding: 0; display: flex; justify-content: center; font-family: Arial, sans-serif; }
+            .receipt-container { width: 80mm; padding: 6px; font-size: 11px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #000; padding: 2px; font-size: 11px; }
+            hr { border: none; border-top: 1px dashed #000; margin: 6px 0; }
             .text-center { text-align: center; }
             .text-right { text-align: right; }
           </style>
@@ -374,7 +322,6 @@ const Addsalesitem: React.FC = () => {
     }, 500);
   };
 
-  // ✅ Loading State
   if (loading && allItems.length === 0) {
     return (
       <div className="p-6 bg-white min-h-screen flex justify-center items-center">
@@ -390,11 +337,10 @@ const Addsalesitem: React.FC = () => {
   return (
     <div className="p-6 bg-white min-h-screen">
 
-      {/* Header - Update this section */}
+      {/* Header */}
       <div className="flex justify-between items-center mb-5">
         <h1 className="text-xl font-bold text-gray-800">Sales Register</h1>
         <div className="flex gap-2">
-          {/* ✅ Add Export Excel Button */}
           <button
             onClick={exportToExcel}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition"
@@ -403,19 +349,23 @@ const Addsalesitem: React.FC = () => {
             Export Excel
           </button>
 
-          <button
-            onClick={() => navigate("/sales")}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
-          >
-            + Add Sales
-          </button>
+          {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
+          {canAdd && (
+            <button
+              onClick={() => navigate("/sales")}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow flex items-center gap-2"
+            >
+              <FaPlus size={14} />
+              Add Sales
+            </button>
+          )}
         </div>
       </div>
-      {/* ✅ Search and Filter Bar */}
+
+      {/* Search and Filter Bar */}
       <div className="bg-gray-50 rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
         <div className="flex flex-wrap gap-3 items-center justify-between">
           <div className="flex gap-2 flex-1">
-            {/* Search Input */}
             <div className="relative flex-1 max-w-md">
               <div className="absolute inset-y-0 left-0 flex items-center pl-3">
                 <FaSearch className="text-gray-400" />
@@ -438,7 +388,6 @@ const Addsalesitem: React.FC = () => {
               )}
             </div>
 
-            {/* Filter Toggle Button */}
             <button
               onClick={() => setShowFilters(!showFilters)}
               className={`px-4 py-2 rounded-lg flex items-center gap-2 transition ${showFilters || hasActiveFilters()
@@ -455,7 +404,6 @@ const Addsalesitem: React.FC = () => {
               )}
             </button>
 
-            {/* Clear All Filters Button */}
             {hasActiveFilters() && (
               <button
                 onClick={clearFilters}
@@ -468,11 +416,9 @@ const Addsalesitem: React.FC = () => {
           </div>
         </div>
 
-        {/* Filter Panel */}
         {showFilters && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Terms Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment Terms</label>
                 <select
@@ -491,7 +437,7 @@ const Addsalesitem: React.FC = () => {
         )}
       </div>
 
-      {/* ✅ Results Count */}
+      {/* Results Count */}
       <div className="mb-4 text-sm text-gray-600">
         Showing {paginatedItems.length} of {filteredItems.length} sales records
         {searchTerm && ` matching "${searchTerm}"`}
@@ -504,14 +450,14 @@ const Addsalesitem: React.FC = () => {
         <table className="w-full text-sm">
           <thead className="bg-gradient-to-r from-blue-600 to-blue-500 text-white">
             <tr>
-              {["SR", "Date", "Terms", "Party", "Bill No", "dueDate", "Narration", "Total Basic", "Total Tax", "F+O+R", "Grand Total", "Action"]
-                .map((h) => <th key={h} className="p-3 border border-gray-200 whitespace-nowrap text-left font-medium">{h}</th>)}
+{["SR", "Date", "Terms", "Party", "Bill No", "dueDate", "Narration", "Total Basic", "Total Tax", "F+O+R", "Grand Total", "Created By", "Action"]
+  .map((h) => <th key={h} className="p-3 border border-gray-200 whitespace-nowrap text-left font-medium">{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {paginatedItems.length === 0 ? (
               <tr>
-                <td colSpan={12} className="text-center p-8 text-gray-500">
+                <td colSpan={13} className="text-center p-8 text-gray-500">
                   {searchTerm || hasActiveFilters()
                     ? "No sales records match your search/filters"
                     : "No sales records found"}
@@ -544,6 +490,9 @@ const Addsalesitem: React.FC = () => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap">₹{Number(item.total_tax || 0).toFixed(2)}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">₹{Number(item.F_O_R || 0).toFixed(2)}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap font-semibold">₹{Number(item.grand_total || 0).toFixed(2)}</td>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
+  {item.created_by_name || "-"}  {/* ✅ ADD */}
+</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap text-center">
                     <button
                       onClick={() => handleViewVariants(item.id)}
@@ -566,13 +515,13 @@ const Addsalesitem: React.FC = () => {
           </tbody>
           <tfoot className="bg-gray-50">
             <tr>
-              <td colSpan={10} className="p-3 border border-gray-200 text-right font-semibold">Total (Current Page):</td>
+              <td colSpan={11} className="p-3 border border-gray-200 text-right font-semibold">Total (Current Page):</td>
               <td className="p-3 border border-gray-200 font-bold text-blue-600">₹{displayedTotal.toFixed(2)}</td>
               <td className="p-3 border border-gray-200"></td>
             </tr>
             {filteredItems.length > pageSize && (
               <tr>
-                <td colSpan={10} className="p-3 border border-gray-200 text-right font-semibold text-gray-500">Grand Total (All {filteredItems.length} records):</td>
+                <td colSpan={11} className="p-3 border border-gray-200 text-right font-semibold text-gray-500">Grand Total (All {filteredItems.length} records):</td>
                 <td className="p-3 border border-gray-200 font-bold text-green-600">₹{overallTotal.toFixed(2)}</td>
                 <td className="p-3 border border-gray-200"></td>
               </tr>
@@ -581,7 +530,7 @@ const Addsalesitem: React.FC = () => {
         </table>
       </div>
 
-      {/* ✅ Enhanced Pagination Controls */}
+      {/* Pagination Controls */}
       {totalPages > 0 && filteredItems.length > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
@@ -657,7 +606,7 @@ const Addsalesitem: React.FC = () => {
         </div>
       )}
 
-      {/* ================= RECEIPT MODAL ================= */}
+      {/* Receipt Modal */}
       {selectedReceipt && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex justify-center items-start pt-20 z-50">
           <div className="bg-white w-11/12 md:w-3/4 lg:w-1/2 rounded-xl shadow-2xl p-5">
@@ -708,41 +657,41 @@ const Addsalesitem: React.FC = () => {
 
               <hr className="my-2 border-t" />
 
-<div className="text-sm space-y-1">
-  <div className="flex justify-between">
-    <span><strong>Taxable Amount:</strong></span>
-    <span>{(selectedReceipt.total_basic ?? 0).toFixed(2)}</span>
-  </div>
-  <div className="flex justify-between">
-    <span><strong>Discount:</strong></span>
-    <span>-{(selectedReceipt.total_discount ?? 0).toFixed(2)}</span>
-  </div>
-  <div className="flex justify-between">
-    <span><strong>Tax (GST):</strong></span>
-    <span>{(selectedReceipt.tax_amount ?? 0).toFixed(2)}</span>
-  </div>
-  {(selectedReceipt.freight ?? 0) > 0 && (
-    <div className="flex justify-between">
-      <span><strong>Freight:</strong></span>
-      <span>{(selectedReceipt.freight ?? 0).toFixed(2)}</span>
-    </div>
-  )}
-  {(selectedReceipt.other_expense ?? 0) > 0 && (
-    <div className="flex justify-between">
-      <span><strong>Other Expense:</strong></span>
-      <span>{(selectedReceipt.other_expense ?? 0).toFixed(2)}</span>
-    </div>
-  )}
-  <div className="flex justify-between">
-    <span><strong>Round Off:</strong></span>
-    <span>{(selectedReceipt.round_off ?? 0).toFixed(2)}</span>
-  </div>
-  <hr className="border-dashed my-1" />
-  <div className="flex justify-between text-base font-bold">
-    <span>NET PAYABLE:</span>
-    <span>₹{(selectedReceipt.grand_total ?? 0).toFixed(2)}</span>
-  </div>
-</div>
+              <div className="text-sm space-y-1">
+                <div className="flex justify-between">
+                  <span><strong>Taxable Amount:</strong></span>
+                  <span>{(selectedReceipt.total_basic ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span><strong>Discount:</strong></span>
+                  <span>-{(selectedReceipt.total_discount ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span><strong>Tax (GST):</strong></span>
+                  <span>{(selectedReceipt.tax_amount ?? 0).toFixed(2)}</span>
+                </div>
+                {(selectedReceipt.freight ?? 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span><strong>Freight:</strong></span>
+                    <span>{(selectedReceipt.freight ?? 0).toFixed(2)}</span>
+                  </div>
+                )}
+                {(selectedReceipt.other_expense ?? 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span><strong>Other Expense:</strong></span>
+                    <span>{(selectedReceipt.other_expense ?? 0).toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span><strong>Round Off:</strong></span>
+                  <span>{(selectedReceipt.round_off ?? 0).toFixed(2)}</span>
+                </div>
+                <hr className="border-dashed my-1" />
+                <div className="flex justify-between text-base font-bold">
+                  <span>NET PAYABLE:</span>
+                  <span>₹{(selectedReceipt.grand_total ?? 0).toFixed(2)}</span>
+                </div>
+              </div>
 
               <hr className="my-2 border-t" />
 
@@ -769,7 +718,7 @@ const Addsalesitem: React.FC = () => {
         </div>
       )}
 
-      {/* ================= VARIANTS MODAL ================= */}
+      {/* Variants Modal */}
       {selectedItem !== null && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex justify-center items-start pt-20 z-50">
           <div className="bg-white w-11/12 md:w-3/4 lg:w-1/2 rounded-xl shadow-2xl p-5">

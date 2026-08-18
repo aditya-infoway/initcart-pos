@@ -3,6 +3,7 @@ import { FaFileExcel, FaSearch, FaFilter, FaTimes, FaEye, FaArrowLeft, FaBuildin
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
+import { useAuthStore } from "../../store/authStore";
 
 interface FilterOptions {
   terms: string;
@@ -13,6 +14,12 @@ interface FilterOptions {
 
 const SalesEntryReport: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  const canViewAllBranches = isSuperAdmin || isEmployee;
+  
   const [allItems, setAllItems] = useState<any[]>([]);
   const [filteredItems, setFilteredItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,17 +30,44 @@ const SalesEntryReport: React.FC = () => {
   const [pageSize, setPageSize] = useState(15);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [variants, setVariants] = useState<any[]>([]);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [branches, setBranches] = useState<{id: number, branch_name: string}[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
 
-const fetchItems = async (branchId = selectedBranchId) => { {
+  // ✅ Fetch branches
+  useEffect(() => {
+    if (canViewAllBranches) {
+      fetchBranches();
+    }
+  }, [canViewAllBranches]);
+
+  async function fetchBranches() {
+    try {
+      const res = await api.get("branches/");
+      setBranches(res.data.data || []);
+    } catch (err) {
+      console.error("Branches fetch failed:", err);
+    }
+  }
+
+  // ✅ SIMPLE fetch function - without useCallback
+  const fetchItems = async (branchId?: string) => {
     setLoading(true);
     try {
       const token = sessionStorage.getItem("token");
-    const branchParam = branchId ? `&branch_id=${branchId}` : '';
-    const response = await api.get(`salesentry-list/?page=1&page_size=1000${branchParam}`);
+      
+      // ✅ Use provided branchId or current selectedBranchId
+      const effectiveBranchId = branchId !== undefined ? branchId : selectedBranchId;
+      
+      let url = `salesentry-list/?page=1&page_size=1000`;
+      if (effectiveBranchId) {
+        url += `&branch_id=${effectiveBranchId}`;
+      }
+      
+      console.log("🔄 Fetching sales with URL:", url);
+      
+      const response = await api.get(url);
       let itemsArray: any[] = [];
+      
       if (response.data.results) {
         itemsArray = response.data.results;
         let nextUrl = response.data.next;
@@ -45,35 +79,51 @@ const fetchItems = async (branchId = selectedBranchId) => { {
       } else if (Array.isArray(response.data)) {
         itemsArray = response.data;
       }
+      
       const mapped = itemsArray.map((item: any, index: number) => ({
-        uid: index, id: item.id, billNo: item.bill_no, date: item.date,
-        due_date: item.dueDate, grand_total: item.grand_total,
-        total_basic: item.total_basic, total_tax: item.total_tax,
-        terms: item.payment_terms, narration: item.narration,
+        uid: index, 
+        id: item.id, 
+        billNo: item.bill_no, 
+        date: item.date,
+        due_date: item.dueDate, 
+        grand_total: item.grand_total,
+        total_basic: item.total_basic, 
+        total_tax: item.total_tax,
+        terms: item.payment_terms, 
+        narration: item.narration,
         party_name_name: item.customer_name, 
         F_O_R: (Number(item.frightcharge)||0)+(Number(item.otherexpnse)||0)+(Number(item.roundamount)||0),
         variants: Array.isArray(item.items) ? [...item.items] : [],
       }));
+      
+      console.log(`✅ Loaded ${mapped.length} records for branch:`, effectiveBranchId || 'default');
+      
       setAllItems(mapped);
       setFilteredItems(mapped);
     } catch (err) {
-      console.error(err);
-      setAllItems([]); setFilteredItems([]);
-    } finally { setLoading(false); }
-  }
+      console.error("Fetch error:", err);
+      setAllItems([]); 
+      setFilteredItems([]);
+    } finally { 
+      setLoading(false); 
+    }
   };
 
-  useEffect(() => { fetchItems(); }, []);
+  // ✅ Initial fetch - no branch ID
   useEffect(() => {
-  const userStr = sessionStorage.getItem("user");
-  if (userStr) {
-    const u = JSON.parse(userStr);
-    if (u.role === 'superadmin') {
-      setIsSuperAdmin(true);
-      api.get("branches/").then(res => setBranches(res.data.data || []));
-    }
-  }
-}, []);
+    fetchItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency - only run once on mount
+
+  // ✅ Branch change handler
+  const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setSelectedBranchId(val);
+    // ✅ Fetch with new branch ID
+    fetchItems(val);
+  };
+
+  // ✅ Filtering logic
   useEffect(() => {
     let f = [...allItems];
     if (searchTerm.trim()) {
@@ -98,18 +148,31 @@ const fetchItems = async (branchId = selectedBranchId) => { {
 
   const exportToExcel = () => {
     const rows = filteredItems.map((item, idx) => ({
-      "SR No": idx + 1, "Date": item.date || "-", "Terms": item.terms || "-",
-      "Party Name": item.party_name_name || "-", "Bill No": item.billNo || "-",
-      "Due Date": item.due_date || "-", "Narration": item.narration || "-",
+      "SR No": idx + 1, 
+      "Date": item.date || "-", 
+      "Terms": item.terms || "-",
+      "Party Name": item.party_name_name || "-", 
+      "Bill No": item.billNo || "-",
+      "Due Date": item.due_date || "-", 
+      "Narration": item.narration || "-",
       "Total Basic (₹)": Number(item.total_basic || 0).toFixed(2),
       "Total Tax (₹)":   Number(item.total_tax   || 0).toFixed(2),
       "F+O+R (₹)":       Number(item.F_O_R       || 0).toFixed(2),
       "Grand Total (₹)": Number(item.grand_total  || 0).toFixed(2),
     }));
-    rows.push({ "SR No": "" as any, "Date":"","Terms":"","Party Name":"TOTAL","Bill No":"",
-      "Due Date":"","Narration":"",
-      "Total Basic (₹)": totalBasic.toFixed(2), "Total Tax (₹)": totalTax.toFixed(2),
-      "F+O+R (₹)": totalFOR.toFixed(2), "Grand Total (₹)": grandTotal.toFixed(2) });
+    rows.push({ 
+      "SR No": "" as any, 
+      "Date":"",
+      "Terms":"",
+      "Party Name":"TOTAL",
+      "Bill No":"",
+      "Due Date":"",
+      "Narration":"",
+      "Total Basic (₹)": totalBasic.toFixed(2), 
+      "Total Tax (₹)": totalTax.toFixed(2),
+      "F+O+R (₹)": totalFOR.toFixed(2), 
+      "Grand Total (₹)": grandTotal.toFixed(2) 
+    });
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [{wch:6},{wch:12},{wch:10},{wch:28},{wch:18},{wch:12},{wch:32},{wch:16},{wch:14},{wch:12},{wch:16}];
     const wb = XLSX.utils.book_new();
@@ -129,6 +192,8 @@ const fetchItems = async (branchId = selectedBranchId) => { {
     }
   };
 
+  const selectedBranchName = branches.find(b => String(b.id) === selectedBranchId)?.branch_name || "My Branch";
+
   return (
     <div className="min-h-screen bg-gray-50">
       <style>{`@media print { .no-print{display:none!important} body{background:white} }`}</style>
@@ -142,22 +207,23 @@ const fetchItems = async (branchId = selectedBranchId) => { {
             </button>
             <div>
               <h1 className="text-lg font-bold text-gray-800 leading-tight">Sales Entry Report</h1>
-              <p className="text-xs text-gray-400">{filteredItems.length} records</p>
-              
+              <p className="text-xs text-gray-400">
+                {canViewAllBranches && selectedBranchId && (
+                  <span className="font-semibold text-gray-600">{selectedBranchName} · </span>
+                )}
+                {filteredItems.length} records
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isSuperAdmin && (
+            {canViewAllBranches && (
               <div className="flex items-center gap-2 mr-2">
                 <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
                   <FaBuilding size={12} /> Branch:
                 </label>
                 <select
                   value={selectedBranchId}
-                  onChange={(e) => {
-                    setSelectedBranchId(e.target.value);
-                    fetchItems(e.target.value);
-                  }}
+                  onChange={handleBranchChange}
                   className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[160px]"
                 >
                   <option value="">My Branch (Main)</option>
@@ -175,7 +241,6 @@ const fetchItems = async (branchId = selectedBranchId) => { {
       </div>
 
       <div className="max-w-screen-2xl mx-auto px-6 py-5">
-
         {/* Search + Filter */}
         <div className="no-print bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-5">
           <div className="flex flex-wrap gap-3 items-center">

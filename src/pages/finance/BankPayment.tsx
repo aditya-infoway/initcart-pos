@@ -3,8 +3,9 @@ import { Formik, Form, useField, } from "formik";
 import * as Yup from "yup";
 import api from "../../api/api";
 import { toast } from "react-toastify";
-import { FaSearch, FaTimes, FaFileExcel } from "react-icons/fa";
+import { FaSearch, FaTimes, FaFileExcel, FaPlus } from "react-icons/fa";
 import * as XLSX from "xlsx";
+import { usePermission } from "../../hooks/usePermissions";
 
 /* ---------------- VALIDATION ---------------- */
 const today = new Date().toISOString().split("T")[0];
@@ -202,8 +203,7 @@ const AccountSelect = ({ label, name }: { label: string; name: string }) => {
   );
 };
 
-// Stock Received dropdown — party is always this branch's own single
-// "Sundry Creditor(Main)" account, no per-bill linking needed.
+// Stock Received dropdown
 const StockReceivedDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -279,9 +279,7 @@ const StockReceivedDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bi
   );
 };
 
-// Stock Return REFUND dropdown — superadmin only. Party is the
-// branch-linked Sundry Debitor/Creditor account (Branch Master link),
-// same account used for outgoing Stock Transfer settlements.
+// Stock Return REFUND dropdown
 const StockReturnRefundDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -488,6 +486,10 @@ const BankPayment: React.FC = () => {
   const [billType, setBillType] = useState<string>('');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   
+  // ✅ PERMISSIONS
+  const { canAdd } = usePermission("/Bank-payment");
+  // Note: Edit/Delete nahi hai isme, isliye canEdit/canDelete use nahi kiya
+  
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("");
@@ -509,7 +511,6 @@ const BankPayment: React.FC = () => {
       return;
     }
 
-    // Prepare data for export
     const exportData: any[] = filteredRows.map((row, index) => ({
       "SR No": index + 1,
       "Date": row.date || "-",
@@ -525,7 +526,6 @@ const BankPayment: React.FC = () => {
       "Narration": row.narration || "-",
     }));
 
-    // Add grand total row
     const grandTotal = filteredRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
     exportData.push({
       "SR No": "",
@@ -542,33 +542,17 @@ const BankPayment: React.FC = () => {
       "Narration": "",
     });
 
-    // Create worksheet
     const ws = XLSX.utils.json_to_sheet(exportData);
-    
-    // Set column widths
     ws["!cols"] = [
-      { wch: 6 },
-      { wch: 12 },
-      { wch: 8 },
-      { wch: 15 },
-      { wch: 25 },
-      { wch: 25 },
-      { wch: 15 },
-      { wch: 10 },
-      { wch: 15 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 30 },
+      { wch: 6 }, { wch: 12 }, { wch: 8 }, { wch: 15 },
+      { wch: 25 }, { wch: 25 }, { wch: 15 }, { wch: 10 },
+      { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 30 },
     ];
 
-    // Create workbook and download
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Bank Payment Register");
-    
-    // Generate filename with current date
     const fileName = `Bank_Payment_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, fileName);
-    
     toast.success(`Exported ${filteredRows.length} records successfully`);
   };
 
@@ -616,7 +600,6 @@ const BankPayment: React.FC = () => {
 
   // Filtered rows based on search and type filter
   const filteredRows = rows.filter(row => {
-    // Filter by search term
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       const matchesSearch = 
@@ -627,9 +610,7 @@ const BankPayment: React.FC = () => {
       if (!matchesSearch) return false;
     }
     
-    // Filter by type
     if (filterType && row.type !== filterType) return false;
-    
     return true;
   });
 
@@ -713,7 +694,7 @@ const BankPayment: React.FC = () => {
         return;
       }
 
-      // Stock Received — party auto = branch's own Sundry Creditor(Main)
+      // Stock Received
       if (values.selectedBill && values.paymentType === 'stockReceived') {
         const stockPayload = {
           stock_transfer_bill_id: values.selectedBill.id,
@@ -734,7 +715,7 @@ const BankPayment: React.FC = () => {
         return;
       }
 
-      // Stock Return refund — party auto = branch-linked Sundry account
+      // Stock Return refund
       if (values.selectedBill && values.paymentType === 'stockReturn') {
         const stockReturnPayload = {
           stock_return_bill_id: values.selectedBill.id,
@@ -831,14 +812,19 @@ const BankPayment: React.FC = () => {
             Export Excel
           </button>
           
-          <button
-            onClick={handleOpenModal}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-          >
-            + Add Bank Payment
-          </button>
+          {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
+          {canAdd && (
+            <button
+              onClick={handleOpenModal}
+              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center gap-2"
+            >
+              <FaPlus size={14} />
+              Add Bank Payment
+            </button>
+          )}
         </div>
       </div>
+      
       {/* Search and Filter Bar */}
       <div className="mb-4 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 max-w-md">
@@ -903,6 +889,7 @@ const BankPayment: React.FC = () => {
               <th className="p-3 border border-gray-200 whitespace-nowrap">Cheque Date</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Clear Date</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Narration</th>
+              <th className="p-3 border border-gray-200 whitespace-nowrap">Created By</th> 
             </tr>
           </thead>
           <tbody className="text-center">
@@ -936,11 +923,14 @@ const BankPayment: React.FC = () => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_date || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_clear_date || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.narration || "-"}</td>
+<td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
+  {r.created_by_name || "-"}   {/* ✅ ADD */}
+</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={12} className="p-6 text-center text-gray-500">
+                <td colSpan={13} className="p-6 text-center text-gray-500">
                   No bank payments found
                 </td>
               </tr>
@@ -1193,7 +1183,7 @@ const BankPayment: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Stock Received section — dropdown, party auto = Sundry Creditor(Main) */}
+                      {/* Stock Received section */}
                       {values.paymentType === "stockReceived" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <StockReceivedDropdown
@@ -1216,7 +1206,7 @@ const BankPayment: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Stock Return refund section — superadmin only, party = branch-linked account */}
+                      {/* Stock Return refund section */}
                       {values.paymentType === "stockReturn" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <StockReturnRefundDropdown

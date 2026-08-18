@@ -16,6 +16,7 @@ interface SalesReturn {
   grand_total: string;
   items: any[];
   approved_by: string;
+   created_by_name?: string;
 }
 
 // ✅ Paginated Response Type
@@ -413,6 +414,7 @@ const SalesReturnList: React.FC = () => {
                     <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-left">Reason</th>
                     <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-center">Type</th>
                     <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right">Amount</th>
+                     <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-left">Created By</th>
                     <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-center">Actions</th>
                   </tr>
                 </thead>
@@ -433,6 +435,9 @@ const SalesReturnList: React.FC = () => {
                       <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right font-semibold">
                         ₹{Number(item.grand_total).toFixed(2)}
                       </td>
+                      <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
+  {item.created_by_name || "-"}   {/* ✅ ADD */}
+</td>
                       <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
@@ -456,7 +461,7 @@ const SalesReturnList: React.FC = () => {
                 </tbody>
                 <tfoot className="bg-gray-50">
                   <tr>
-                    <td colSpan={5} className="px-4 py-3 border border-gray-200 whitespace-nowrap font-semibold">Total (Current Page):</td>
+                    <td colSpan={6} className="px-4 py-3 border border-gray-200 whitespace-nowrap font-semibold">Total (Current Page):</td>
                     <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right font-bold text-blue-600">
                       ₹{displayedTotal.toFixed(2)}
                     </td>
@@ -464,7 +469,7 @@ const SalesReturnList: React.FC = () => {
                   </tr>
                   {filteredReturns.length > pageSize && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-3 border border-gray-200 whitespace-nowrap font-semibold text-gray-500">
+                      <td colSpan={6} className="px-4 py-3 border border-gray-200 whitespace-nowrap font-semibold text-gray-500">
                         Grand Total (All {filteredReturns.length} records):
                       </td>
                       <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right font-bold text-green-600">
@@ -633,7 +638,7 @@ const SalesReturnList: React.FC = () => {
                       </tbody>
                       <tfoot className="bg-gray-50">
                         <tr>
-                          <td colSpan={4} className="p-2 border text-right font-semibold">Total:</td>
+                          <td colSpan={5} className="p-2 border text-right font-semibold">Total:</td>
                           <td className="p-2 border text-right font-bold text-blue-600">
                             ₹{selectedReturn.grand_total}
                           </td>

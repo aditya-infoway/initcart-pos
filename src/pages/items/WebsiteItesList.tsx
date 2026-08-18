@@ -3,12 +3,14 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import {
-  FiEye, FiEdit2, FiTrash2, FiCheckCircle, FiXCircle,
-  FiClock, FiRefreshCw, FiPlusCircle, FiInfo, FiImage,
+   FiCheckCircle, FiXCircle,
+  FiClock, FiRefreshCw, FiInfo, FiImage,
   FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight
 } from 'react-icons/fi';
 import { MdOutlineStorefront } from 'react-icons/md';
 import api from '../../api/api';
+import { FaEdit, FaEye, FaTrash } from 'react-icons/fa';
+import { usePermission } from '../../hooks/usePermissions';
 
 // Types
 interface WebsiteItem {
@@ -34,6 +36,8 @@ interface WebsiteItem {
   completion_percentage: number;
   platform_charge_percent: number;
   vendor_receivable: number;
+  created_by?: number;
+  created_by_name?: string;
   platform_deduction: number;
   variants?: Array<{
     id: number;
@@ -74,6 +78,7 @@ interface PaginatedApiResponse {
 
 const WebsiteItemsList: React.FC = () => {
   const navigate = useNavigate();
+  const {canEdit, canDelete} = usePermission("/WebItems");
   const [items, setItems] = useState<WebsiteItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -525,6 +530,7 @@ const WebsiteItemsList: React.FC = () => {
                 <th className="px-6 border border-gray-200 whitespace-nowrap py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Platform charge</th>
                 <th className="px-6 border border-gray-200 whitespace-nowrap py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">You Receive</th>
                 <th className="px-6 border border-gray-200 whitespace-nowrap py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 border border-gray-200 whitespace-nowrap py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created by</th>
                 <th className="px-6 border border-gray-200 whitespace-nowrap py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -608,35 +614,44 @@ const WebsiteItemsList: React.FC = () => {
                       {getStatusBadge(item.website_status)}
                     </td>
                     <td className="px-6 border border-gray-200 whitespace-nowrap py-4">
+                      <div className="text-sm text-gray-900">{item.created_by_name || '-'}</div>
+                    </td>
+                    <td className="px-6 border border-gray-200 whitespace-nowrap py-4">
                       <div className="flex gap-2">
+                        {canEdit && (
                         <button
                           onClick={() => navigate(`/website-items/${item.id}`)}
                           className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 transition"
                           title="View Details"
                         >
-                          <FiEye size={18} />
+                          <FaEye size={17} />
                         </button>
-                        <button
+                        )}
+                        {/* <button
                           onClick={() => handleAddInfo(item)}
                           className="text-purple-600 hover:text-purple-800 p-1 rounded hover:bg-purple-50 transition"
                           title="Add/Edit Product Information"
                         >
-                          <FiPlusCircle size={18} />
-                        </button>
+                          <FaPlusCircle size={18} />
+                        </button> */}
+                        {canEdit && (
                         <button
                           onClick={() => navigate(`/website-items/${item.id}/edit`)}
-                          className="text-green-600 hover:text-green-800 p-1 rounded hover:bg-green-50 transition"
+                          className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-green-50 transition"
                           title="Edit"
                         >
-                          <FiEdit2 size={18} />
+                          <FaEdit size={17} />
                         </button>
+                        )}
+                        {canDelete && (
                         <button
                           onClick={() => handleDelete(item)}
                           className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition"
                           title="Delete"
                         >
-                          <FiTrash2 size={18} />
+                          <FaTrash size={17} />
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>

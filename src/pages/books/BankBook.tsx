@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { FaFileExcel, FaSearch, FaFilter, FaTimes, FaArrowLeft, FaUniversity } from "react-icons/fa";
+import { FaFileExcel, FaSearch, FaFilter, FaTimes, FaArrowLeft, FaUniversity, FaBuilding } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
+import { useAuthStore } from "../../store/authStore";
 
 interface BankEntry {
   id: number;
@@ -29,8 +30,20 @@ interface FilterOptions {
   mode: string;
 }
 
+interface Branch {
+  id: number;
+  branch_name: string;
+}
+
 const BankBook: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
+  const canViewAllBranches = isSuperAdmin || isEmployee;
+  
   const [allEntries, setAllEntries] = useState<BankEntry[]>([]);
   const [filteredEntries, setFilteredEntries] = useState<BankEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,15 +53,41 @@ const BankBook: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
 
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [branches, setBranches] = useState<{id: number, branch_name: string}[]>([]);
+  // ✅ Branch state
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
 
-  const fetchEntries = async (branchId = selectedBranchId) => {
+  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  useEffect(() => {
+    if (canViewAllBranches) {
+      api.get("branches/")
+        .then(res => {
+          let branchData = [];
+          if (res.data?.data && Array.isArray(res.data.data)) {
+            branchData = res.data.data;
+          } else if (Array.isArray(res.data)) {
+            branchData = res.data;
+          } else {
+            branchData = [];
+          }
+          setBranches(branchData);
+        })
+        .catch(err => console.error("Branches fetch failed:", err));
+    }
+  }, [canViewAllBranches]);
+
+  // ✅ FIX: fetchEntries with branch parameter
+  const fetchEntries = async (branchId?: string) => {
     setLoading(true);
     try {
       const token = sessionStorage.getItem("token") || sessionStorage.getItem("accessToken");
-      const branchParam = branchId ? `&branch_id=${branchId}` : '';
+      
+      // ✅ Use provided branchId or current selectedBranchId
+      const effectiveBranchId = branchId !== undefined ? branchId : selectedBranchId;
+      const branchParam = effectiveBranchId ? `&branch_id=${effectiveBranchId}` : '';
+      
+      console.log("🔄 Fetching bank book with branch:", effectiveBranchId || 'default');
       
       const [paymentsRes, receiptsRes] = await Promise.all([
         api.get(`bank-payments/?page=1&page_size=1000${branchParam}`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -93,7 +132,7 @@ const BankBook: React.FC = () => {
         type: p.type || "BP",
         account_name: p.bank_account_name || p.bank_account || "-",
         party_name: p.party_name || p.op_account || "-",
-        amount: -Math.abs(Number(p.amount || 0)), // Negative for payments (money going out)
+        amount: -Math.abs(Number(p.amount || 0)),
         narration: p.narration || "-",
         mode: p.mode || "-",
         cheque_no: p.cheque_no || "-",
@@ -111,7 +150,7 @@ const BankBook: React.FC = () => {
         type: r.type || "BR",
         account_name: r.bank_account_name || r.bank_account || "-",
         party_name: r.party_name || r.op_account || "-",
-        amount: Math.abs(Number(r.amount || 0)), // Positive for receipts (money coming in)
+        amount: Math.abs(Number(r.amount || 0)),
         narration: r.narration || "-",
         mode: r.mode || "-",
         cheque_no: r.cheque_no || "-",
@@ -123,14 +162,14 @@ const BankBook: React.FC = () => {
       // Combine and sort by date and time (newest first)
       const all = [...paymentEntries, ...receiptEntries];
       all.sort((a, b) => {
-        // First sort by date (newest first)
         if (a.date !== b.date) {
           return b.date.localeCompare(a.date);
         }
-        // If same date, sort by created_at time (newest first)
         return b.created_at.localeCompare(a.created_at);
       });
 
+      console.log(`✅ Loaded ${all.length} bank book entries`);
+      
       setAllEntries(all);
       setFilteredEntries(all);
     } catch (err) {
@@ -142,20 +181,19 @@ const BankBook: React.FC = () => {
     }
   };
 
-    useEffect(() => {
-    const userStr = sessionStorage.getItem("user");
-    if (userStr) {
-      const u = JSON.parse(userStr);
-      if (u.role === 'superadmin') {
-        setIsSuperAdmin(true);
-        api.get("branches/").then(res => setBranches(res.data.data || []));
-      }
-    }
-  }, []);
-
+  // ✅ Initial fetch
   useEffect(() => {
     fetchEntries();
   }, []);
+
+  // ✅ Branch change handler
+  const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
+    setSelectedBranchId(val);
+    setSelectedBranchName(name);
+    fetchEntries(val);
+  };
 
   useEffect(() => {
     let f = [...allEntries];
@@ -289,19 +327,25 @@ const BankBook: React.FC = () => {
             </button>
             <div>
               <h1 className="text-lg font-bold text-gray-800 leading-tight">Bank Book</h1>
-              <p className="text-xs text-gray-400">{filteredEntries.length} transactions</p>
+              <p className="text-xs text-gray-400">
+                {/* ✅ Branch name show karo */}
+                {canViewAllBranches && selectedBranchId && (
+                  <span className="font-semibold text-gray-600">{selectedBranchName} · </span>
+                )}
+                {filteredEntries.length} transactions
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isSuperAdmin && (
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-gray-500 whitespace-nowrap">Branch:</label>
+            {/* ✅ Branch Filter - Superadmin + Employee */}
+            {canViewAllBranches && (
+              <div className="flex items-center gap-2 mr-2">
+                <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
+                  <FaBuilding size={12} /> Branch:
+                </label>
                 <select
                   value={selectedBranchId}
-                  onChange={(e) => {
-                    setSelectedBranchId(e.target.value);
-                    fetchEntries(e.target.value);
-                  }}
+                  onChange={handleBranchChange}
                   className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[160px]"
                 >
                   <option value="">My Branch (Main)</option>
@@ -431,9 +475,9 @@ const BankBook: React.FC = () => {
         {/* Summary Cards */}
         <div className="no-print grid grid-cols-2 lg:grid-cols-3 gap-4 mb-5">
           {[
-            { label: "Total Receipts", value: totalReceipts, accent: "border-l-green-500", text: "text-green-700", icon: "↓" },
-            { label: "Total Payments", value: totalPayments, accent: "border-l-red-500", text: "text-red-700", icon: "↑" },
-            { label: "Closing Balance", value: closingBalance, accent: "border-l-blue-500", text: closingBalance >= 0 ? "text-blue-700" : "text-red-700", icon: "₹" },
+            { label: "Total Receipts", value: totalReceipts, accent: "border-l-green-500", text: "text-green-700" },
+            { label: "Total Payments", value: totalPayments, accent: "border-l-red-500", text: "text-red-700" },
+            { label: "Closing Balance", value: closingBalance, accent: "border-l-blue-500", text: closingBalance >= 0 ? "text-blue-700" : "text-red-700" },
           ].map(c => (
             <div key={c.label} className={`bg-white rounded-xl border border-gray-200 shadow-sm p-4 border-l-4 ${c.accent}`}>
               <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">{c.label}</p>

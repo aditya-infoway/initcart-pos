@@ -4,6 +4,7 @@ import api from "../../api/api";
 import { FaEye, FaSearch, FaFilter, FaTimes, FaFileExcel } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { toast } from "react-toastify";
+import { useAuthStore } from "../../store/authStore";
 
 const VARIANT_BY_BRANCH: Record<string, string[]> = {
   fashion: ["size", "color"],
@@ -39,17 +40,25 @@ interface FilterOptions {
 const StockReport: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  
+  // ✅ EXACT SAME LOGIC AS ExcelImportExport.tsx
+  // Employee ko bhi branch filter dikhega (same as superadmin)
+  const canViewAllBranches = isSuperAdmin || isEmployee;
+  
   const [branchType, setBranchType] = useState<string | null>(null);
   const [allItems, setAllItems] = useState<StockItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<StockItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [branches, setBranches] = useState<{id: number, branch_name: string}[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
-  // Pagination - client side (kyunki saara data ek baar fetch)
+  
+  // Pagination - client side
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
 
@@ -65,7 +74,7 @@ const StockReport: React.FC = () => {
     maxStock: "",
   });
 
-  // ✅ Branch type fetch - api interceptor token handle karta hai
+  // ✅ Branch type fetch
   useEffect(() => {
     const fetchBranchType = async () => {
       try {
@@ -79,46 +88,38 @@ const StockReport: React.FC = () => {
     fetchBranchType();
   }, []);
 
+  // ✅ Fetch branches - agar canViewAllBranches true hai toh
   useEffect(() => {
-  const userStr = sessionStorage.getItem("user");
-  if (userStr) {
-    const u = JSON.parse(userStr);
-    if (u.role === 'superadmin') {
-      setIsSuperAdmin(true);
+    if (canViewAllBranches) {
       fetchBranches();
     }
+  }, [canViewAllBranches]);
+
+  async function fetchBranches() {
+    try {
+      const res = await api.get("branches/");
+      setBranches(res.data.data || []);
+    } catch (err) {
+      console.error("Branches fetch failed:", err);
+    }
   }
-}, []);
 
-async function fetchBranches() {
-  try {
-    const res = await api.get("branches/");
-    setBranches(res.data.data || []);
-  } catch (err) {
-    console.error("Branches fetch failed:", err);
-  }
-}
+  // ✅ Stock data fetch
+  const fetchStockData = async (branchId?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const branchParam = branchId || selectedBranchId;
+      const url = branchParam
+        ? `stock-report/?page=1&page_size=10000&branch_id=${branchParam}`
+        : `stock-report/?page=1&page_size=10000`;
+      const res = await api.get(url);
 
-  // ✅ Stock data fetch - saara data ek baar, phir client side pagination
-const fetchStockData = async (branchId?: string) => {
-  setLoading(true);
-  setError(null);
-  try {
-    const branchParam = branchId || selectedBranchId;
-    const url = branchParam
-      ? `stock-report/?page=1&page_size=10000&branch_id=${branchParam}`
-      : `stock-report/?page=1&page_size=10000`;
-    const res = await api.get(url);
-
-     
-      // Backend paginated response: { count, next, previous, results }
       let items: any[] = [];
 
       if (res.data?.results) {
-        // ✅ Paginated response
         items = res.data.results;
       } else if (Array.isArray(res.data)) {
-        // ✅ Direct array response
         items = res.data;
       } else {
         console.warn("Unknown response format:", res.data);
@@ -173,7 +174,7 @@ const fetchStockData = async (branchId?: string) => {
     }
   }, [location]);
 
-  // ✅ Client-side filtering
+  // Client-side filtering
   useEffect(() => {
     let filtered = [...allItems];
 
@@ -223,7 +224,7 @@ const fetchStockData = async (branchId?: string) => {
     setCurrentPage(1);
   }, [searchTerm, filters, allItems]);
 
-  // ✅ Pagination - client side
+  // Pagination - client side
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
 
   const paginatedItems = filteredItems.slice(
@@ -237,15 +238,16 @@ const fetchStockData = async (branchId?: string) => {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
-  function handleBranchChange(e: React.ChangeEvent<HTMLSelectElement>) {
-  const val = e.target.value;
-  const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
-  setSelectedBranchId(val);
-  setSelectedBranchName(name);
-  fetchStockData(val);
-}
 
-  // ✅ Unique filter options
+  function handleBranchChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value;
+    const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
+    setSelectedBranchId(val);
+    setSelectedBranchName(name);
+    fetchStockData(val);
+  }
+
+  // Unique filter options
   const uniqueBrands = useMemo(
     () => [...new Set(allItems.map((i) => i.brand?.name).filter(Boolean))].sort(),
     [allItems]
@@ -276,7 +278,7 @@ const fetchStockData = async (branchId?: string) => {
     });
   };
 
-  // ✅ Export Excel
+  // Export Excel
   const exportToExcel = () => {
     if (filteredItems.length === 0) {
       toast.warning("No data to export");
@@ -341,35 +343,37 @@ const fetchStockData = async (branchId?: string) => {
     <div className="bg-gray-50 font-sans p-4">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-700 to-blue-500 text-white p-4 rounded-xl shadow-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        
         <div>
           <h1 className="text-2xl font-bold tracking-tight drop-shadow-md">Stock Report</h1>
           <p className="text-blue-100 text-sm mt-0.5">
-  {isSuperAdmin && selectedBranchName && (
-    <span className="font-semibold">{selectedBranchName} · </span>
-  )}
-  Total: {allItems.length} variants
-  {allItems.length !== filteredItems.length && ` | Filtered: ${filteredItems.length}`}
-</p>
-
+            {/* ✅ Branch name show karo agar canViewAllBranches true hai */}
+            {canViewAllBranches && selectedBranchName && (
+              <span className="font-semibold">{selectedBranchName} · </span>
+            )}
+            Total: {allItems.length} variants
+            {allItems.length !== filteredItems.length && ` | Filtered: ${filteredItems.length}`}
+          </p>
         </div>
-        {isSuperAdmin && (
-  <div className="flex items-center gap-2 mt-3 sm:mt-0">
-    <label className="text-blue-100 text-sm font-medium whitespace-nowrap">Branch:</label>
-    <select
-      value={selectedBranchId}
-      onChange={handleBranchChange}
-      className="bg-white/20 text-white border border-white/30 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-white/50 focus:outline-none min-w-[180px]"
-    >
-      <option value="" className="text-gray-800 bg-white">My Branch (Main)</option>
-      {branches.map(b => (
-        <option key={b.id} value={String(b.id)} className="text-gray-800 bg-white">
-          {b.branch_name}
-        </option>
-      ))}
-    </select>
-  </div>
-)}
+        
+        {/* ✅ Branch Filter - Sirf canViewAllBranches wale ko dikhe (Superadmin + Employee) */}
+        {canViewAllBranches && (
+          <div className="flex items-center gap-2 mt-3 sm:mt-0">
+            <label className="text-blue-100 text-sm font-medium whitespace-nowrap">Branch:</label>
+            <select
+              value={selectedBranchId}
+              onChange={handleBranchChange}
+              className="bg-white/20 text-white border border-white/30 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-white/50 focus:outline-none min-w-[180px]"
+            >
+              <option value="" className="text-gray-800 bg-white">My Branch (Main)</option>
+              {branches.map(b => (
+                <option key={b.id} value={String(b.id)} className="text-gray-800 bg-white">
+                  {b.branch_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        
         <div className="flex gap-2">
           <button
             onClick={exportToExcel}
@@ -387,10 +391,9 @@ const fetchStockData = async (branchId?: string) => {
         </div>
       </div>
 
-      {/* Search & Filter Bar */}
+      {/* Search & Filter Bar - Same as before */}
       <div className="mt-4 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
         <div className="flex flex-wrap gap-3 items-center">
-          {/* Search */}
           <div className="relative flex-1 min-w-[200px] max-w-md">
             <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -411,7 +414,6 @@ const fetchStockData = async (branchId?: string) => {
             )}
           </div>
 
-          {/* Filter Toggle */}
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`px-4 py-2 rounded-lg flex items-center gap-2 transition ${
@@ -661,7 +663,7 @@ const fetchStockData = async (branchId?: string) => {
           </div>
         </div>
       )}
-    </div>  
+    </div>
   );
 };
 

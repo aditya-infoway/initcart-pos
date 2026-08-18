@@ -14,16 +14,22 @@ import {
   FaFileImport,
   FaFileExport
 } from "react-icons/fa";
-import { MdOutlineCancel } from "react-icons/md";
 import Swal from "sweetalert2";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermissions";
 
 const ExcelImportExport: React.FC = () => {
   const navigate = useNavigate();
+  const { canAdd } = usePermission("/ExcelImportExport");
   const { user } = useAuthStore();
   const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  
+  // ✅ Company items visible to superadmin OR employee (regardless of canAdd)
+  // Kyunki employee ko company items dekhne milte hain (view permission)
+  const canAccessCompanyItems = isSuperAdmin || isEmployee;
   
   const [uploading, setUploading] = useState(false);
   const [manualUploading, setManualUploading] = useState(false);
@@ -143,8 +149,13 @@ const ExcelImportExport: React.FC = () => {
     }
   };
 
-  // Import Items (Regular)
+  // Import Items (Regular) - ONLY IF canAdd
   const handleImportItems = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canAdd) {
+      toast.error("You don't have permission to import items");
+      return;
+    }
+    
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -214,8 +225,13 @@ const ExcelImportExport: React.FC = () => {
     }
   };
 
-  // Manual Import Items
+  // Manual Import Items - ONLY IF canAdd
   const handleManualImportItems = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canAdd) {
+      toast.error("You don't have permission to import items");
+      return;
+    }
+    
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -347,18 +363,20 @@ const ExcelImportExport: React.FC = () => {
           </div>
         </div>
 
-        {/* Company Import/Export - ONLY FOR SUPER ADMIN */}
-        {isSuperAdmin && (
+        {/* ────────────────────────────────────────────────────── */}
+        {/* ✅ Company Items - Superadmin + Employee (both can view) */}
+        {/* ────────────────────────────────────────────────────── */}
+        {canAccessCompanyItems && (
           <div className="mb-8">
             <div className="flex items-center gap-2 mb-4">
               <div className="p-1.5 bg-green-100 rounded-lg">
                 <FaFileExcel className="text-green-600" />
               </div>
               <h2 className="text-lg font-bold text-gray-800">Company Items</h2>
-              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Super Admin</span>
+
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Download Template */}
+              {/* ✅ Download Template - Sabko dikhe (canAdd not required) */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
                 <div className="px-5 py-3.5 border-b border-gray-100 bg-green-50 flex items-center gap-2">
                   <FaDownload className="text-green-600 text-sm" />
@@ -379,34 +397,38 @@ const ExcelImportExport: React.FC = () => {
                 </div>
               </div>
 
-              {/* Import Items */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
-                <div className="px-5 py-3.5 border-b border-gray-100 bg-green-50 flex items-center gap-2">
-                  <FaUpload className="text-green-600 text-sm" />
-                  <h3 className="font-semibold text-gray-800 text-sm">Import Company Items</h3>
+              {/* ✅ Import - Sirf canAdd wale ko dikhe */}
+              {canAdd && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
+                  <div className="px-5 py-3.5 border-b border-gray-100 bg-green-50 flex items-center gap-2">
+                    <FaUpload className="text-green-600 text-sm" />
+                    <h3 className="font-semibold text-gray-800 text-sm">Import Company Items</h3>
+                  </div>
+                  <div className="p-5">
+                    <p className="text-sm text-gray-600 mb-4">
+                      Upload filled Excel file to bulk import company items.
+                    </p>
+                    <label className={`w-full bg-gradient-to-r from-green-600 to-green-500 hover:from-green-700 hover:to-green-600 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all cursor-pointer ${uploading ? "opacity-50 cursor-not-allowed" : ""} shadow-sm`}>
+                      <FaFileImport size={14} />
+                      {uploading ? "Uploading..." : "Choose File & Import"}
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls"
+                        onChange={handleImportItems}
+                        disabled={uploading}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                 </div>
-                <div className="p-5">
-                  <p className="text-sm text-gray-600 mb-4">
-                    Upload filled Excel file to bulk import company items.
-                  </p>
-                  <label className={`w-full bg-gradient-to-r from-green-600 to-green-500 hover:from-green-700 hover:to-green-600 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all cursor-pointer ${uploading ? "opacity-50 cursor-not-allowed" : ""} shadow-sm`}>
-                    <FaFileImport size={14} />
-                    {uploading ? "Uploading..." : "Choose File & Import"}
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls"
-                      onChange={handleImportItems}
-                      disabled={uploading}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Manual Import/Export - ALL USERS */}
+        {/* ────────────────────────────────────────────────────── */}
+        {/* Manual Items - ALL USERS (Superadmin + Employee) */}
+        {/* ────────────────────────────────────────────────────── */}
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-4">
             <div className="p-1.5 bg-gray-100 rounded-lg">
@@ -416,7 +438,7 @@ const ExcelImportExport: React.FC = () => {
 
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Download Manual Template */}
+            {/* ✅ Download Manual Template - Sabko dikhe (canAdd not required) */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
               <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
                 <FaDownload className="text-gray-600 text-sm" />
@@ -437,33 +459,37 @@ const ExcelImportExport: React.FC = () => {
               </div>
             </div>
 
-            {/* Manual Import */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
-              <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
-                <FaUpload className="text-gray-600 text-sm" />
-                <h3 className="font-semibold text-gray-800 text-sm">Import Manual Items</h3>
+            {/* ✅ Manual Import - Sirf canAdd wale ko dikhe */}
+            {canAdd && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
+                <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+                  <FaUpload className="text-gray-600 text-sm" />
+                  <h3 className="font-semibold text-gray-800 text-sm">Import Manual Items</h3>
+                </div>
+                <div className="p-5">
+                  <p className="text-sm text-gray-600 mb-4">
+                    Upload filled manual Excel file to bulk import items.
+                  </p>
+                  <label className={`w-full bg-gradient-to-r from-gray-600 to-gray-500 hover:from-gray-700 hover:to-gray-600 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all cursor-pointer ${manualUploading ? "opacity-50 cursor-not-allowed" : ""} shadow-sm`}>
+                    <FaFileImport size={14} />
+                    {manualUploading ? "Uploading..." : "Choose File & Import"}
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls"
+                      onChange={handleManualImportItems}
+                      disabled={manualUploading}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
               </div>
-              <div className="p-5">
-                <p className="text-sm text-gray-600 mb-4">
-                  Upload filled manual Excel file to bulk import items.
-                </p>
-                <label className={`w-full bg-gradient-to-r from-gray-600 to-gray-500 hover:from-gray-700 hover:to-gray-600 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all cursor-pointer ${manualUploading ? "opacity-50 cursor-not-allowed" : ""} shadow-sm`}>
-                  <FaFileImport size={14} />
-                  {manualUploading ? "Uploading..." : "Choose File & Import"}
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls"
-                    onChange={handleManualImportItems}
-                    disabled={manualUploading}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Export Section */}
+        {/* ────────────────────────────────────────────────────── */}
+        {/* ✅ Export Section - SABKO DIKHE (canAdd not required) */}
+        {/* ────────────────────────────────────────────────────── */}
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-4">
             <div className="p-1.5 bg-blue-100 rounded-lg">
@@ -471,9 +497,9 @@ const ExcelImportExport: React.FC = () => {
             </div>
             <h2 className="text-lg font-bold text-gray-800">Export Options</h2>
           </div>
-          <div className={`grid ${isSuperAdmin ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-1 max-w-md'} gap-4`}>
-            {/* Export Company Items - ONLY FOR SUPER ADMIN */}
-            {isSuperAdmin && (
+          <div className={`grid ${canAccessCompanyItems ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-1 max-w-md'} gap-4`}>
+            {/* ✅ Export Company Items - Sabko dikhe (agar company items visible hain) */}
+            {canAccessCompanyItems && (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
                 <div className="px-5 py-3.5 border-b border-gray-100 bg-blue-50 flex items-center gap-2">
                   <FaDownload className="text-blue-600 text-sm" />
@@ -495,8 +521,8 @@ const ExcelImportExport: React.FC = () => {
               </div>
             )}
 
-            {/* Export Manual Items - ALL USERS */}
-            <div className={`bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow ${!isSuperAdmin ? 'md:col-span-1' : ''}`}>
+            {/* ✅ Export Manual Items - Sabko dikhe */}
+            <div className={`bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow ${!canAccessCompanyItems ? 'md:col-span-1' : ''}`}>
               <div className="px-5 py-3.5 border-b border-gray-100 bg-blue-50 flex items-center gap-2">
                 <FaDownload className="text-blue-600 text-sm" />
                 <h3 className="font-semibold text-gray-800 text-sm">Export Manual Items</h3>

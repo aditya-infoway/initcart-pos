@@ -15,6 +15,7 @@ import {
 import { MdClose, MdLocationOn } from "react-icons/md";
 import * as XLSX from "xlsx";
 import { Country, State, City } from "country-state-city";
+import { usePermission } from "../../hooks/usePermissions";
 
 /* ---------------- TYPES ---------------- */
 interface Branch {
@@ -45,6 +46,9 @@ interface Branch {
     sundry_creditor_account?: number | null;
     sundry_debitor_account_name?: string | null;
     sundry_creditor_account_name?: string | null;
+    created_by?: number;
+    created_by_name?: string;
+
 }
 
 interface BranchFormValues {
@@ -535,6 +539,7 @@ const ViewModal: React.FC<ViewModalProps> = ({ isOpen, onClose, branchId }) => {
 
 /* ---------------- MAIN COMPONENT ---------------- */
 const BranchMaster: React.FC = () => {
+    const { canAdd, canEdit, canDelete } = usePermission("/branchMaster");
     const [branches, setBranches] = useState<Branch[]>([]);
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
@@ -900,7 +905,7 @@ useEffect(() => {
                         <FaFileExcel size={16} />
                         Export Excel
                     </button>
-
+             {canAdd && (
                     <button
                         onClick={handleAdd}
                         className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow transition text-sm"
@@ -908,6 +913,8 @@ useEffect(() => {
                         <FaPlus size={14} />
                         Add Branch
                     </button>
+
+             )}
                 </div>
             </div>
 
@@ -970,6 +977,7 @@ useEffect(() => {
                             <th className="p-3 border border-gray-200 whitespace-nowrap">City</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Status</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Created</th>
+                            <th className="p-3 border border-gray-200 whitespace-nowrap">Created by</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Actions</th>
                         </tr>
                     </thead>
@@ -1041,6 +1049,10 @@ useEffect(() => {
                                             ? new Date(branch.created_at).toLocaleDateString()
                                             : "-"}
                                     </td>
+                                     <td className="p-3 border border-gray-200 whitespace-nowrap">
+                                        {branch.created_by_name|| "-"}
+                                    </td>
+                                    
                                     <td className="p-3 border border-gray-200 whitespace-nowrap">
                                         <div className="flex justify-center gap-2">
                                             <button
@@ -1050,13 +1062,16 @@ useEffect(() => {
                                             >
                                                 <FaEye size={16} />
                                             </button>
+                                            {canEdit && (
                                             <button
                                                 onClick={() => handleEdit(branch)}
-                                                className="text-amber-600 hover:text-amber-800 p-1.5 hover:bg-amber-50 rounded-lg transition-colors"
+                                                className="text-blue-600 hover:text-blue-800 p-1.5 hover:bg-amber-50 rounded-lg transition-colors"
                                                 title="Edit"
                                             >
                                                 <FaEdit size={16} />
                                             </button>
+                                            )}
+                                            {canDelete && (
                                             <button
                                                 onClick={() => handleDelete(branch)}
                                                 className="text-red-600 hover:text-red-800 p-1.5 hover:bg-red-50 rounded-lg transition-colors"
@@ -1064,13 +1079,14 @@ useEffect(() => {
                                             >
                                                 <FaTrash size={16} />
                                             </button>
+                                            )}
                                         </div>
                                     </td>
                                 </tr>
                             ))
                         ) : (
                             <tr>
-                                <td colSpan={11} className="p-6 text-center text-gray-500">
+                                <td colSpan={12} className="p-6 text-center text-gray-500">
                                     No branches found
                                 </td>
                             </tr>

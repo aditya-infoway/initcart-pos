@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+import { State } from "country-state-city";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -243,6 +244,7 @@ const AccountSelect: React.FC<{ name: string; terms: string }> = ({ name, terms 
 
 const CustomerAddModal = ({ isOpen, onClose, onCustomerAdded }: any) => {
   const [formData, setFormData] = useState({ account_name: "", state: "", mobile: "", address: "" });
+  const indiaStates = State.getStatesOfCountry("IN");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
@@ -279,7 +281,7 @@ const CustomerAddModal = ({ isOpen, onClose, onCustomerAdded }: any) => {
         <div className="p-6 space-y-4">
           {[
             { label: "Customer Name *", key: "account_name", type: "text", placeholder: "Enter customer name" },
-            { label: "State *", key: "state", type: "text", placeholder: "Enter state (e.g., Maharashtra)" },
+           
             { label: "Mobile Number", key: "mobile", type: "tel", placeholder: "Enter mobile number" },
           ].map(({ label, key, type, placeholder }) => (
             <div key={key} className="space-y-1">
@@ -293,6 +295,30 @@ const CustomerAddModal = ({ isOpen, onClose, onCustomerAdded }: any) => {
               />
             </div>
           ))}
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">
+              State *
+            </label>
+
+            <select
+              value={formData.state}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  state: e.target.value,
+                })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm bg-white"
+            >
+              <option value="">Select State</option>
+
+              {indiaStates.map((state) => (
+                <option key={state.isoCode} value={state.name}>
+                  {state.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="space-y-1">
             <label className="text-sm font-medium text-gray-700">Address</label>
             <textarea

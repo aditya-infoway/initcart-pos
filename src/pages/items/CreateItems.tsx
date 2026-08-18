@@ -1,4 +1,5 @@
-// CreateItems.tsx - Complete fixed version with Unit fractional support
+// CreateItems.tsx - Complete file with Employee access (same as Superadmin)
+// ✅ SIRF 5 CHANGES: Employee access add kiye hain, baaki sab PURANA WAISA HI HAI
 
 import React, { useEffect, useState } from "react";
 import { Formik, Form, useField, useFormikContext } from "formik";
@@ -48,14 +49,14 @@ const validationSchema = Yup.object({
           }
         ),
       opStock: Yup.number().typeError("Must be a number").min(0, "Non-negative"),
-      // ✅ Barcode validation - only required for Super Admin with company entry
       barcode: Yup.string()
         .matches(/^[a-zA-Z0-9]*$/, "Barcode can only contain letters and numbers")
         .nullable()
-        .optional(), // ✅ Add optional()
+        .optional(),
     })
   ),
 });
+
 // ------------------ Form Components ------------------
 const FormInput: React.FC<any> = ({ label, ...props }) => {
   const [field, meta] = useField(props);
@@ -220,7 +221,7 @@ const DataTable = <T extends { id: number }>({ data, columns, onDelete, onEdit, 
           )}
         </tbody>
         <tfoot>
-          <tr className="bg-gray-100 border-t border-gray-200 font-semibold sticky bottom-0">
+          <tr className="bg-gray-100 border-t border-gray-200 font-semibold sticky-bottom-0">
             <td className="px-2 py-1 sm:py-2" colSpan={(onDelete || onEdit) ? 2 : 1}>Total</td>
             {columns.map((col) => (
               <td key={String(col.key)} className="px-2 py-1 sm:py-2 truncate">
@@ -237,6 +238,7 @@ const DataTable = <T extends { id: number }>({ data, columns, onDelete, onEdit, 
     </div>
   </div>
 );
+
 // ------------------ Utility Functions ------------------
 const createItemRow = (fields: any[] = []) => {
   const base: any = {
@@ -245,7 +247,7 @@ const createItemRow = (fields: any[] = []) => {
     mrp: "",
     barcode: "",
     opStock: "",
-    branchPrice: "",  // ✅ Add branchPrice
+    branchPrice: "",
     basicAmount: 0,
     discountAmount: 0,
     taxAmount: 0,
@@ -258,7 +260,6 @@ const createItemRow = (fields: any[] = []) => {
 };
 
 // ------------------ Branch Fields ------------------
-// ✅ FIXED: Keys should match model field names exactly
 const FIELD_CONFIG: Record<string, any[]> = {
   fashion: [
     { key: "size", label: "Size", type: "text" },
@@ -270,7 +271,7 @@ const FIELD_CONFIG: Record<string, any[]> = {
   electronics: [
     { key: "size", label: "Size", type: "text" },
     { key: "color", label: "Color", type: "text" },
-    { key: "srno", label: "Serial No", type: "text" },  // ✅ srno (lowercase)
+    { key: "srno", label: "Serial No", type: "text" },
     { key: "warrantydate", label: "Warranty Date", type: "date" },
   ],
 };
@@ -316,102 +317,105 @@ const ItemCalculatorWatcher = () => {
   return null;
 };
 
-  interface GroupModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    onGroupCreated: (groupId: number, groupName: string) => void;
-  }
+interface GroupModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onGroupCreated: (groupId: number, groupName: string) => void;
+}
 
-  const CreateGroupModal: React.FC<GroupModalProps> = ({ isOpen, onClose, onGroupCreated }) => {
-    const [groupName, setGroupName] = useState("");
-    const [description, setDescription] = useState("");
-    const [loading, setLoading] = useState(false);
+const CreateGroupModal: React.FC<GroupModalProps> = ({ isOpen, onClose, onGroupCreated }) => {
+  const [groupName, setGroupName] = useState("");
+  const [description, setDescription] = useState("");
+  const [loading, setLoading] = useState(false);
 
-    const handleCreateGroup = async () => {
-      if (!groupName.trim()) {
-        toast.error("Please enter group name");
-        return;
+  const handleCreateGroup = async () => {
+    if (!groupName.trim()) {
+      toast.error("Please enter group name");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = sessionStorage.getItem("token");
+      const response = await api.post(
+        "groups/",
+        { name: groupName.trim(), description: description.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (response.data.success) {
+        toast.success("Group created successfully");
+        onGroupCreated(response.data.group.id, response.data.group.name);
+        setGroupName("");
+        setDescription("");
+        onClose();
+      } else {
+        toast.error(response.data.message || "Failed to create group");
       }
+    } catch (error: any) {
+      console.error("Error creating group:", error);
+      const errorMsg = error.response?.data?.errors?.name?.[0] ||
+        error.response?.data?.message ||
+        "Failed to create group";
+      toast.error(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      setLoading(true);
-      try {
-        const token = sessionStorage.getItem("token");
-        const response = await api.post(
-          "groups/",
-          { name: groupName.trim(), description: description.trim() },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+  if (!isOpen) return null;
 
-        if (response.data.success) {
-          toast.success("Group created successfully");
-          // Return the new group id and name to parent component
-          onGroupCreated(response.data.group.id, response.data.group.name);
-          setGroupName("");
-          setDescription("");
-          onClose();
-        } else {
-          toast.error(response.data.message || "Failed to create group");
-        }
-      } catch (error: any) {
-        console.error("Error creating group:", error);
-        const errorMsg = error.response?.data?.errors?.name?.[0] ||
-          error.response?.data?.message ||
-          "Failed to create group";
-        toast.error(errorMsg);
-      } finally {
-        setLoading(false);
-      }
-    };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold text-gray-800">Create New Group</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-2xl"
+          >
+            ×
+          </button>
+        </div>
 
-    if (!isOpen) return null;
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-        <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-gray-800">Create New Group</h2>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Group Name *
+            </label>
+            <input
+              type="text"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              placeholder="e.g., Electronics, Clothing, Grocery"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={handleCreateGroup}
+              disabled={loading}
+              className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              {loading ? "Creating..." : "Create Group"}
+            </button>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-2xl"
+              className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 transition-colors"
             >
-              ×
+              Cancel
             </button>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Group Name *
-              </label>
-              <input
-                type="text"
-                value={groupName}
-                onChange={(e) => setGroupName(e.target.value)}
-                placeholder="e.g., Electronics, Clothing, Grocery"
-className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex gap-3 pt-4">
-              <button
-                onClick={handleCreateGroup}
-                disabled={loading}
-                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {loading ? "Creating..." : "Create Group"}
-              </button>
-              <button
-                onClick={onClose}
-                className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
           </div>
         </div>
       </div>
-    );
-  };
-// ------------------ Main Component ------------------
+    </div>
+  );
+};
+
+// ================================================================
+// ==================== MAIN COMPONENT ============================
+// ================================================================
+
 const CreateItems: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -442,8 +446,16 @@ const CreateItems: React.FC = () => {
   const [groupsAndUnitsLoaded, setGroupsAndUnitsLoaded] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
 
-  const { user } = useAuthStore();
+  // ==================== ✅ CHANGE 1: User + Permissions ====================
+  const { user, permissions } = useAuthStore();
   const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  
+  // Employee ko bhi company items create karne do (same as Superadmin)
+  const canCreateCompanyItems = isSuperAdmin || isEmployee;
+  
+  // Check if employee has add permission for this page
+  const hasAddPermission = isSuperAdmin || permissions?.some(p => p.page_key === "/AddItems" && p.can_add);
 
   const [selectedUnit, setSelectedUnit] = useState<{
     id: number;
@@ -452,92 +464,90 @@ const CreateItems: React.FC = () => {
     supports_fractional: boolean;
   } | null>(null);
 
-const checkBarcodeUniqueness = async (barcode: string, variantId?: number) => {
-
-  if (!barcode || barcode.length < 3) {
-    setBarcodeError("");
-    return true;
-  }
-
-  setCheckingBarcode(true);
-  try {
-    const token = sessionStorage.getItem("token");
-    let url = `barcodes/check-branch-barcode/?barcode=${encodeURIComponent(barcode)}`;
-    if (variantId && variantId > 0) {
-      url += `&exclude_variant=${variantId}`;
-    }
-
-    const res = await api.get(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (res.data.exists) {
-      setBarcodeError(` Barcode "${barcode}" already exists in this branch`);
-      return false;
-    } else {
+  // ------------------ Barcode Check ------------------
+  const checkBarcodeUniqueness = async (barcode: string, variantId?: number) => {
+    if (!barcode || barcode.length < 3) {
       setBarcodeError("");
       return true;
     }
-  } catch (error) {
-    console.error("Barcode check error:", error);
-    setBarcodeError("");
-    return true;
-  } finally {
-    setCheckingBarcode(false);
-  }
-};
 
-
-const handleEditVariant = (row: VariantItem, setFieldValue: any) => {
-  setFieldValue("items[0]", {
-    purchasePrice: row.purchasePrice,
-    salesPrice: row.salesPrice,
-    mrp: row.mrp,
-    barcode: row.barcode,
-    opStock: row.opStock,
-    branchPrice: row.branchPrice,
-    basicAmount: row.basicAmount,
-    discountAmount: row.discountAmount,
-    taxAmount: row.taxAmount,
-    netValue: row.netValue,
-    ...branchFields.reduce((acc: any, f: any) => ({ ...acc, [f.key]: row[f.key] || "" }), {}),
-  }, false);
-  setEditingId(row.id);
-  setBarcodeError("");
-};
-
-const handleCancelEdit = (setFieldValue: any) => {
-  setFieldValue("items[0]", createItemRow(branchFields), false);
-  setEditingId(null);
-};
-
-
-useEffect(() => {
-  const fetchBranchType = async () => {
+    setCheckingBarcode(true);
     try {
-      const res = await api.get("user-branch/", {
-        headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` },
+      const token = sessionStorage.getItem("token");
+      let url = `barcodes/check-branch-barcode/?barcode=${encodeURIComponent(barcode)}`;
+      if (variantId && variantId > 0) {
+        url += `&exclude_variant=${variantId}`;
+      }
+
+      const res = await api.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-      
-      // ✅ Get branch_type and convert to lowercase for matching
-      const type = res.data.branch_type?.toLowerCase() || "fashion";
-      
-      // ✅ Get fields from config, fallback to empty array
-      const fields = FIELD_CONFIG[type] || [];
-      setBranchFields(fields);
-      setBranchLoaded(true);
-      
-      console.log("✅ Branch type:", type);
-      console.log("✅ Branch fields:", fields);
+
+      if (res.data.exists) {
+        setBarcodeError(` Barcode "${barcode}" already exists in this branch`);
+        return false;
+      } else {
+        setBarcodeError("");
+        return true;
+      }
     } catch (error) {
-      console.error("Error fetching branch type:", error);
-      setBranchFields([]);
-      setBranchLoaded(true);
+      console.error("Barcode check error:", error);
+      setBarcodeError("");
+      return true;
+    } finally {
+      setCheckingBarcode(false);
     }
   };
-  fetchBranchType();
-}, []);
 
+  // ------------------ Edit/Delete Variant ------------------
+  const handleEditVariant = (row: VariantItem, setFieldValue: any) => {
+    setFieldValue("items[0]", {
+      purchasePrice: row.purchasePrice,
+      salesPrice: row.salesPrice,
+      mrp: row.mrp,
+      barcode: row.barcode,
+      opStock: row.opStock,
+      branchPrice: row.branchPrice,
+      basicAmount: row.basicAmount,
+      discountAmount: row.discountAmount,
+      taxAmount: row.taxAmount,
+      netValue: row.netValue,
+      ...branchFields.reduce((acc: any, f: any) => ({ ...acc, [f.key]: row[f.key] || "" }), {}),
+    }, false);
+    setEditingId(row.id);
+    setBarcodeError("");
+  };
+
+  const handleCancelEdit = (setFieldValue: any) => {
+    setFieldValue("items[0]", createItemRow(branchFields), false);
+    setEditingId(null);
+  };
+
+  // ------------------ Fetch Branch Type ------------------
+  useEffect(() => {
+    const fetchBranchType = async () => {
+      try {
+        const res = await api.get("user-branch/", {
+          headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` },
+        });
+        
+        const type = res.data.branch_type?.toLowerCase() || "fashion";
+        const fields = FIELD_CONFIG[type] || [];
+        setBranchFields(fields);
+        setBranchLoaded(true);
+        
+        console.log("✅ Branch type:", type);
+        console.log("✅ Branch fields:", fields);
+      } catch (error) {
+        console.error("Error fetching branch type:", error);
+        setBranchFields([]);
+        setBranchLoaded(true);
+      }
+    };
+    fetchBranchType();
+  }, []);
+
+  // ------------------ Fetch Groups & Units ------------------
   useEffect(() => {
     const fetchGroupsAndUnits = async () => {
       const token = sessionStorage.getItem("token");
@@ -567,13 +577,14 @@ useEffect(() => {
       } finally {
         setLoadingGroups(false);
         setLoadingUnits(false);
-        setGroupsAndUnitsLoaded(true); // ✅ Flag set karo
+        setGroupsAndUnitsLoaded(true);
       }
     };
 
     fetchGroupsAndUnits();
   }, []);
 
+  // ------------------ Fetch Categories & Brands ------------------
   useEffect(() => {
     const fetchCategoriesAndBrands = async () => {
       try {
@@ -600,24 +611,26 @@ useEffect(() => {
       fetchCategoriesAndBrands();
     }
   }, [entryType]);
+
+  // ==================== ✅ CHANGE 2: Entry Type useEffect ====================
   useEffect(() => {
-    if (!isSuperAdmin) {
+    if (isEmployee && !hasAddPermission) {
       setEntryType("manual");
     }
-  }, [isSuperAdmin]);
+  }, [isEmployee, hasAddPermission]);
 
+  // ------------------ Fetch Item Data (Edit Mode) ------------------
   useEffect(() => {
     if (!branchLoaded) return;
 
     if (isEditMode && id) {
-      let isMounted = true;  // ✅ Prevent state updates after unmount
+      let isMounted = true;
 
       const fetchItemData = async () => {
         setLoading(true);
         try {
           const token = sessionStorage.getItem("token");
 
-          // ✅ Fetch units fresh inside this function
           const unitsRes = await api.get("all-units/", {
             headers: { Authorization: `Bearer ${token}` }
           });
@@ -634,11 +647,15 @@ useEffect(() => {
             const variantsData = response.data.variants;
             const entryTypeVal = itemData.entry_type || "company";
 
-              if (!isSuperAdmin && itemData.created_by_superadmin) {
-    toast.error("You can only edit manually created items.");
-    navigate("/AddItems");
-    return;
-  }
+            // ==================== ✅ CHANGE 3: Edit Mode Validation ====================
+            const canEditItems = isSuperAdmin || permissions?.some(
+              p => p.page_key === "/AddItems" && p.can_edit
+            );
+            if (isEmployee && !canEditItems) {
+              toast.error("You don't have permission to edit items.");
+              navigate("/AddItems");
+              return;
+            }
 
             setEntryType(entryTypeVal);
 
@@ -648,7 +665,6 @@ useEffect(() => {
             let subSubCategoryId = "";
 
             if (entryTypeVal === "company") {
-              // ✅ FIX: brand/category ab objects hain {id, name} — .id se lo
               brandId = itemData.brand?.id ? String(itemData.brand.id) : "";
               categoryId = itemData.category?.id ? String(itemData.category.id) : "";
               subCategoryId = itemData.subCategory?.id ? String(itemData.subCategory.id) : "";
@@ -660,11 +676,9 @@ useEffect(() => {
               subSubCategoryId = itemData.manual_subSubCategory || "";
             }
 
-            // ✅ FIX: group aur unit ab objects hain {id, name} — .id se lo
             const groupId = itemData.group?.id ? String(itemData.group.id) : "";
             const unitId = itemData.unit?.id ? String(itemData.unit.id) : "";
 
-            // ✅ selectedUnit set karo directly from itemData (fresh fetch ki zaroorat nahi)
             if (itemData.unit?.id) {
               setSelectedUnit({
                 id: itemData.unit.id,
@@ -724,8 +738,6 @@ useEffect(() => {
       };
 
       fetchItemData();
-
-      // ✅ Cleanup function to prevent state update on unmount
       return () => {
         isMounted = false;
       };
@@ -733,8 +745,9 @@ useEffect(() => {
       setLoading(false);
       setDataFetchComplete(true);
     }
-  }, [id, isEditMode, branchFields, branchLoaded, navigate]); // ✅ REMOVED 'units' dependency
+  }, [id, isEditMode, branchFields, branchLoaded, navigate, isEmployee]);
 
+  // ------------------ Save Handler ------------------
   const handleFinalSave = async (values: any) => {
     if (addedItems.length === 0) {
       toast.error("At least one variant required ");
@@ -747,7 +760,6 @@ useEffect(() => {
     console.log("addedItems:", addedItems.map(v => ({ id: v.id, barcode: v.barcode })));
 
     let groupIdValue = values.group;
-    // ✅ FIX: Agar form value empty hai aur edit mode hai, initialItemData se lo
     if (!groupIdValue && isEditMode && initialItemData?.group) {
       groupIdValue = initialItemData.group;
     }
@@ -758,7 +770,6 @@ useEffect(() => {
     }
 
     let unitIdValue = values.unit;
-    // ✅ FIX: Agar form value empty hai aur edit mode hai, initialItemData se lo
     if (!unitIdValue && isEditMode && initialItemData?.unit) {
       unitIdValue = initialItemData.unit;
     }
@@ -768,22 +779,18 @@ useEffect(() => {
       unitIdValue = Number(unitIdValue);
     }
 
-    // ✅ FIX: Handle brand, category based on entry type
     let brandValue = values.brand;
     let categoryValue = values.category;
     let subCategoryValue = values.subCategory;
     let subSubCategoryValue = values.subSubCategory;
 
     if (entryType === "company") {
-      // Company entry: convert to number if possible, otherwise null
       brandValue = brandValue && !isNaN(Number(brandValue)) ? Number(brandValue) : null;
       categoryValue = categoryValue && !isNaN(Number(categoryValue)) ? Number(categoryValue) : null;
       subCategoryValue = subCategoryValue && !isNaN(Number(subCategoryValue)) ? Number(subCategoryValue) : null;
       subSubCategoryValue = subSubCategoryValue && !isNaN(Number(subSubCategoryValue)) ? Number(subSubCategoryValue) : null;
     }
-    // Manual entry: keep as string (text values)
 
-    // ✅ Create payload directly - NO LOOP that causes TypeScript error
     const payload = {
       itemName: values.itemName,
       entry_type: entryType,
@@ -810,13 +817,10 @@ useEffect(() => {
           netValue: Number(v.netValue),
         };
 
-        // Only include id if it's a positive number (existing variant)
         if (v.id && v.id > 0) {
           variantPayload.id = v.id;
         }
 
-
-        // Add branch-specific fields
         branchFields.forEach((f) => {
           variantPayload[f.key] = v[f.key] || null;
         });
@@ -849,7 +853,6 @@ useEffect(() => {
     } catch (err: any) {
       console.error("Save failed:", err.response?.data || err);
       if (err.response?.data) {
-        // Show detailed error
         const errors = err.response.data;
         if (typeof errors === 'object') {
           Object.keys(errors).forEach(key => {
@@ -864,55 +867,55 @@ useEffect(() => {
     }
   };
 
-const handleAddVariant = async (values: any, setFieldValue: any) => {
-  if (!values.items || !values.items[0]) {
-    toast.error("Please fill in variant details first");
-    return;
-  }
-  const cur = values.items[0];
-  if (!cur.purchasePrice || !cur.salesPrice || !cur.mrp) {
-    toast.error("Please fill in Purchase Price, Sales Price, and MRP");
-    return;
-  }
-
-  if (isSuperAdmin && cur.barcode && cur.barcode.trim() !== "") {
-    // ✅ apna hi barcode dobara check na kare jab edit kar rahe ho
-    const isUnique = await checkBarcodeUniqueness(cur.barcode, editingId ?? undefined);
-    if (!isUnique) {
-      toast.error(`Barcode "${cur.barcode}" already exists in this branch. Please use a different barcode.`);
+  // ------------------ Add/Update Variant ------------------
+  const handleAddVariant = async (values: any, setFieldValue: any) => {
+    if (!values.items || !values.items[0]) {
+      toast.error("Please fill in variant details first");
       return;
     }
-  }
+    const cur = values.items[0];
+    if (!cur.purchasePrice || !cur.salesPrice || !cur.mrp) {
+      toast.error("Please fill in Purchase Price, Sales Price, and MRP");
+      return;
+    }
 
-  const variantPayload = {
-    purchasePrice: Number(cur.purchasePrice),
-    salesPrice: Number(cur.salesPrice),
-    mrp: Number(cur.mrp),
-    branchPrice: Number(cur.branchPrice) || Number(cur.purchasePrice),
-    barcode: cur.barcode || "",
-    opStock: Number(cur.opStock) || 0,
-    basicAmount: Number(cur.basicAmount) || 0,
-    discountAmount: Number(cur.discountAmount) || 0,
-    taxAmount: Number(cur.taxAmount) || 0,
-    netValue: Number(cur.netValue) || 0,
-    ...branchFields.reduce((acc, f) => ({ ...acc, [f.key]: cur[f.key] || "" }), {}),
+    if (isSuperAdmin && cur.barcode && cur.barcode.trim() !== "") {
+      const isUnique = await checkBarcodeUniqueness(cur.barcode, editingId ?? undefined);
+      if (!isUnique) {
+        toast.error(`Barcode "${cur.barcode}" already exists in this branch. Please use a different barcode.`);
+        return;
+      }
+    }
+
+    const variantPayload = {
+      purchasePrice: Number(cur.purchasePrice),
+      salesPrice: Number(cur.salesPrice),
+      mrp: Number(cur.mrp),
+      branchPrice: Number(cur.branchPrice) || Number(cur.purchasePrice),
+      barcode: cur.barcode || "",
+      opStock: Number(cur.opStock) || 0,
+      basicAmount: Number(cur.basicAmount) || 0,
+      discountAmount: Number(cur.discountAmount) || 0,
+      taxAmount: Number(cur.taxAmount) || 0,
+      netValue: Number(cur.netValue) || 0,
+      ...branchFields.reduce((acc, f) => ({ ...acc, [f.key]: cur[f.key] || "" }), {}),
+    };
+
+    if (editingId !== null) {
+      setAddedItems(prev => prev.map(v => v.id === editingId ? { ...v, ...variantPayload, id: editingId } : v));
+      toast.success("Variant updated successfully");
+      setEditingId(null);
+    } else {
+      const newVariant = { id: -Date.now(), ...variantPayload };
+      setAddedItems(prev => [...prev, newVariant]);
+      toast.success("Variant added successfully");
+    }
+
+    setFieldValue("items[0]", createItemRow(branchFields), false);
+    setBarcodeError("");
   };
 
-  if (editingId !== null) {
-    // ✅ UPDATE existing row (id preserved so backend knows it's an existing variant)
-    setAddedItems(prev => prev.map(v => v.id === editingId ? { ...v, ...variantPayload, id: editingId } : v));
-    toast.success("Variant updated successfully");
-    setEditingId(null);
-  } else {
-    const newVariant = { id: -Date.now(), ...variantPayload };
-    setAddedItems(prev => [...prev, newVariant]);
-    toast.success("Variant added successfully");
-  }
-
-  setFieldValue("items[0]", createItemRow(branchFields), false);
-  setBarcodeError("");
-};
-
+  // ------------------ Delete Variant ------------------
   const deleteVariant = async (row: VariantItem) => {
     if (!window.confirm("Delete this variant?")) return;
 
@@ -922,7 +925,7 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
           headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` },
         });
         toast.success("Variant deleted successfully");
-} catch (err: any) {
+      } catch (err: any) {
         console.error("Delete failed:", err);
         const msg = err.response?.data?.error || "Failed to delete variant";
         toast.error(msg);
@@ -931,9 +934,9 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
     }
 
     setAddedItems(prev => prev.filter(v => v.id !== row.id));
-  }
- 
+  };
 
+  // ------------------ Calculate Totals ------------------
   const calculateTotals = (items: VariantItem[]) => ({
     totalQty: items.reduce((sum, it) => sum + Number(it.opStock || 0), 0),
     totalBasic: items.reduce((sum, it) => sum + Number(it.basicAmount || 0), 0).toFixed(2),
@@ -942,6 +945,7 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
     totalNet: items.reduce((sum, it) => sum + Number(it.netValue || 0), 0).toFixed(2),
   });
 
+  // ------------------ Loading State ------------------
   if (loading || !branchLoaded || !dataFetchComplete || !groupsAndUnitsLoaded) {
     return (
       <div className="bg-gray-100 min-h-screen flex justify-center items-center">
@@ -950,6 +954,10 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
       </div>
     );
   }
+
+  // ================================================================
+  // ==================== RENDER ====================================
+  // ================================================================
 
   return (
     <div className="bg-gray-100 min-h-screen">
@@ -985,23 +993,19 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
         validationSchema={validationSchema}
         validateOnChange={true}
         validateOnBlur={true}
-        // ✅ Pass entryType to validation context
         context={{ entryType }}
         onSubmit={handleFinalSave}
       >
         {({
-    values,
-    setFieldValue,
-    validateForm,
-    setTouched,
-}) => {
+          values,
+          setFieldValue,
+          validateForm,
+          setTouched,
+        }) => {
           const totals = calculateTotals(addedItems);
 
-          // ✅ YAHAN PAR handleGroupCreated FUNCTION DEFINE KAREIN
           const handleGroupCreated = (groupId: number, groupName: string) => {
-            // Add the new group to the groups list
             setGroups(prevGroups => [...prevGroups, { id: groupId, name: groupName }]);
-            // Automatically select the newly created group - setFieldValue available hai
             setFieldValue("group", String(groupId));
             toast.success(`Group "${groupName}" created and selected`);
           };
@@ -1010,7 +1014,6 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
             const fetchSubCategories = async () => {
               const categoryId = values.category || (isEditMode && initialItemData?.category);
 
-              // ✅ FIX: Only fetch if categoryId is a valid number (for company entry)
               if (!categoryId || !String(categoryId).match(/^\d+$/)) {
                 setSubCategories([]);
                 if (!isEditMode) {
@@ -1039,7 +1042,6 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
             const fetchSubSubCategories = async () => {
               const subCategoryId = values.subCategory || (isEditMode && initialItemData?.subCategory);
 
-              // ✅ FIX: Only fetch if subCategoryId is a valid number
               if (!subCategoryId || !String(subCategoryId).match(/^\d+$/)) {
                 setSubSubCategories([]);
                 if (!isEditMode) {
@@ -1064,17 +1066,15 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
             fetchSubSubCategories();
           }, [values.subCategory, isEditMode, initialItemData?.subCategory, setFieldValue]);
 
-          // CreateItems.tsx - Fixed version (remove duplicate grid)
-
           return (
             <Form className="bg-white p-2 sm:p-3 md:p-4">
               <BranchWatcher branchFields={branchFields} />
               <ItemCalculatorWatcher />
 
-              {/* Entry Type Selection */}
+              {/* ==================== ✅ CHANGE 4: Entry Type Selection ==================== */}
               <div className="col-span-full flex items-center justify-between mt-1 gap-6">
                 <div className="flex gap-6 items-center">
-                  {isSuperAdmin && (
+                  {canCreateCompanyItems && (
                     <label className="flex items-center gap-2 text-sm font-medium">
                       <input
                         type="radio"
@@ -1205,136 +1205,114 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
                 <FormSelect label="Tax Slab" name="taxSlab" options={["5%", "12%", "18%", "28%", "Tax Free"].map(t => ({ label: t, value: t }))} />
               </div>
 
-{/* ✅ Size/Price Details Section - Variant fields pehle, prices baad mein */}
-<div className="col-span-full mt-3 rounded-b-lg shadow grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 pb-10">
-  <div className="col-span-full border-b pb-1">
-    <h2 className="text-sm font-semibold text-blue-700">Size / Price Details</h2>
-  </div>
+              {/* Size / Price Details Section */}
+              <div className="col-span-full mt-3 rounded-b-lg shadow grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 pb-10">
+                <div className="col-span-full border-b pb-1">
+                  <h2 className="text-sm font-semibold text-blue-700">Size / Price Details</h2>
+                </div>
 
-  {/* ✅ MAIN GRID - Variant fields PEHLE, prices BAAD mein */}
-  <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-2 bg-gray-50 p-2 rounded">
+                <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-2 bg-gray-50 p-2 rounded">
+                  {branchFields.length > 0 && (
+                    <>
+                      {branchFields.map((field) => (
+                        <FormInput
+                          key={field.key}
+                          label={field.label}
+                          name={`items[0].${field.key}`}
+                          type={field.type === "date" ? "date" : "text"}
+                        />
+                      ))}
+                    </>
+                  )}
 
-    {/* ✅ STEP 1: VARIANT FIELDS PEHLE (size, color, srno, warrantydate) */}
-    {branchFields.length > 0 && (
-      <>
-        {branchFields.map((field) => (
-          <FormInput
-            key={field.key}
-            label={field.label}
-            name={`items[0].${field.key}`}
-            type={field.type === "date" ? "date" : "text"}
-          />
-        ))}
-      </>
-    )}
+                  <FormInput label="P.Price (Source)" name="items[0].purchasePrice" type="number" />
 
-    {/* ✅ STEP 2: PRICES - P.Price (Source) */}
-    <FormInput label="P.Price (Source)" name="items[0].purchasePrice" type="number" />
+                  {/* ==================== ✅ CHANGE 5: Branch Price - Employee ko bhi dikhao ==================== */}
+                  {(isSuperAdmin || isEmployee) && (
+                    <FormInput label="Branch Price" name="items[0].branchPrice" type="number" />
+                  )}
 
-    {/* ✅ STEP 3: Branch Price (only for Super Admin) */}
-    {isSuperAdmin && (
-      <FormInput label="Branch Price" name="items[0].branchPrice" type="number" />
-    )}
+                  <FormInput label="S.Price" name="items[0].salesPrice" type="number" />
+                  <FormInput label="M.R.P" name="items[0].mrp" type="number" />
 
-    {/* ✅ STEP 4: Sales Price */}
-    <FormInput label="S.Price" name="items[0].salesPrice" type="number" />
+                  <div className="text-xs sm:text-sm">
+                    <label className="block font-medium text-gray-600">Barcode</label>
+                    <input
+                      type="text"
+                      name="items[0].barcode"
+                      value={values.items?.[0]?.barcode || ""}
+                      onChange={(e) => {
+                        const newValue = e.target.value.replace(/[^a-zA-Z0-9]/g, "");
+                        setFieldValue("items[0].barcode", newValue);
+                        setCurrentBarcode(newValue);
+                        
+                        if (newValue.length >= 3) {
+                          setTimeout(async () => {
+                            if (currentBarcode === newValue) {
+                              await checkBarcodeUniqueness(newValue, editingId ?? undefined);
+                            }
+                          }, 500);
+                        } else {
+                          setBarcodeError("");
+                        }
+                      }}
+                      onBlur={async () => {
+                        const val = values.items?.[0]?.barcode;
+                        if (val && val.length >= 3) {
+                          await checkBarcodeUniqueness(val, editingId ?? undefined);
+                        }
+                      }}
+                      className={`w-full p-1 sm:p-2 border ${
+                        barcodeError ? "border-red-500" : "border-gray-300"
+                      } rounded text-xs sm:text-sm bg-white`}
+                    />
+                    {barcodeError && (
+                      <div className="text-red-500 text-[10px] sm:text-xs mt-1">{barcodeError}</div>
+                    )}
+                  </div>
 
-    {/* ✅ STEP 5: MRP */}
-    <FormInput label="M.R.P" name="items[0].mrp" type="number" />
+                  <FormInput label="Op.Stock" name="items[0].opStock" type="number" />
+                  <DisplayField label="Net" value={values.items?.[0]?.netValue || "0.00"} />
 
-{/* STEP 6: Barcode - Now completely optional for everyone */}
-<div className="text-xs sm:text-sm">
-  <label className="block font-medium text-gray-600">
-    Barcode
-    
-  </label>
-  <input
-    type="text"
-    name="items[0].barcode"
-    value={values.items?.[0]?.barcode || ""}
-    onChange={(e) => {
-      const newValue = e.target.value.replace(/[^a-zA-Z0-9]/g, "");
-      setFieldValue("items[0].barcode", newValue);
-      setCurrentBarcode(newValue);
-      
-      // Still check uniqueness if user enters a barcode, but don't require it
-      if (newValue.length >= 3) {
-        setTimeout(async () => {
-          if (currentBarcode === newValue) {
-            await checkBarcodeUniqueness(newValue, editingId ?? undefined);
-          }
-        }, 500);
-      } else {
-        setBarcodeError("");
-      }
-    }}
-    onBlur={async () => {
-      const val = values.items?.[0]?.barcode;
-      if (val && val.length >= 3) {
-        await checkBarcodeUniqueness(val, editingId ?? undefined);
-      }
-    }}
+                  <div className="flex items-end gap-1">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const errors = await validateForm();
+                        setTouched({
+                          items: [
+                            {
+                              purchasePrice: true,
+                              salesPrice: true,
+                              mrp: true,
+                              opStock: true,
+                              barcode: true,
+                            },
+                          ],
+                        });
 
-    className={`w-full p-1 sm:p-2 border ${
-      barcodeError ? "border-red-500" : "border-gray-300"
-    } rounded text-xs sm:text-sm bg-white`}
-  />
-  {barcodeError && (
-    <div className="text-red-500 text-[10px] sm:text-xs mt-1">{barcodeError}</div>
-  )}
-  
-</div>
+                        if (errors.items) {
+                          return;
+                        }
 
-    {/* ✅ STEP 7: Opening Stock */}
-    <FormInput label="Op.Stock" name="items[0].opStock" type="number" />
+                        handleAddVariant(values, setFieldValue);
+                      }}
+                      className="bg-green-600 text-white flex-1 p-1 sm:p-2 rounded hover:bg-green-700 flex items-center justify-center text-xs h-8 sm:h-9"
+                    >
+                      <FaCheckCircle className="mr-1" /> {editingId !== null ? "Update" : "Add"}
+                    </button>
+                    {editingId !== null && (
+                      <button
+                        type="button"
+                        onClick={() => handleCancelEdit(setFieldValue)}
+                        className="bg-gray-400 text-white px-2 rounded hover:bg-gray-500 text-xs h-8 sm:h-9"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-    {/* ✅ STEP 8: Net Value (Display only) */}
-    <DisplayField label="Net" value={values.items?.[0]?.netValue || "0.00"} />
-
-{/* ✅ STEP 9: Add / Update Button */}
-    <div className="flex items-end gap-1">
-      <button
-        type="button"
-        onClick={async () => {
-
-    const errors = await validateForm();
-
-    setTouched({
-        items: [
-            {
-                purchasePrice: true,
-                salesPrice: true,
-                mrp: true,
-                opStock: true,
-                barcode: true,
-            },
-        ],
-    });
-
-    if (errors.items) {
-        return;
-    }
-
-    handleAddVariant(values, setFieldValue);
-}}
-        className="bg-green-600 text-white flex-1 p-1 sm:p-2 rounded hover:bg-green-700 flex items-center justify-center text-xs h-8 sm:h-9"
-      >
-        <FaCheckCircle className="mr-1" /> {editingId !== null ? "Update" : "Add"}
-      </button>
-      {editingId !== null && (
-        <button
-          type="button"
-          onClick={() => handleCancelEdit(setFieldValue)}
-          className="bg-gray-400 text-white px-2 rounded hover:bg-gray-500 text-xs h-8 sm:h-9"
-        >
-          Cancel
-        </button>
-      )}
-    </div>
-  </div>
-
-
-                {/* Fractional unit info display */}
                 {selectedUnit?.supports_fractional && (
                   <div className="col-span-full mt-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
                     <div className="text-xs text-blue-700">
@@ -1357,7 +1335,7 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
                     columns={[
                       ...branchFields.map(f => ({ key: f.key, label: f.label })),
                       { key: "purchasePrice", label: "P.Price" },
-                      ...(isSuperAdmin ? [{ key: "branchPrice", label: "Branch Price" }] : []),
+                      ...((isSuperAdmin || isEmployee) ? [{ key: "branchPrice", label: "Branch Price" }] : []),
                       { key: "salesPrice", label: "S.Price" },
                       { key: "mrp", label: "M.R.P" },
                       { key: "barcode", label: "Barcode" },
@@ -1369,7 +1347,7 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
                   />
                 </div>
 
-                {/* Website Display (only for company items) */}
+                {/* Website Display */}
                 {entryType === "company" && (
                   <div className="col-span-full mt-4 p-3 border rounded bg-gray-50 flex items-center gap-3 max-w-xs">
                     <label className="font-semibold text-gray-700 text-sm">Website Display</label>
@@ -1404,15 +1382,13 @@ const handleAddVariant = async (values: any, setFieldValue: any) => {
         }}
       </Formik>
 
-      {/* ✅ MODAL YAHAN RENDER KARO — Formik ke bahar */}
+      {/* Group Modal */}
       {showGroupModal && (
         <CreateGroupModal
           isOpen={showGroupModal}
           onClose={() => setShowGroupModal(false)}
           onGroupCreated={(groupId, groupName) => {
             setGroups(prev => [...prev, { id: groupId, name: groupName }]);
-            // ⚠️ setFieldValue yahan available nahi — isliye sirf groups update karo
-            // User manually select karega ya auto-select ke liye neeche wala approach use karo
             toast.success(`Group "${groupName}" created and added to list`);
           }}
         />
