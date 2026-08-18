@@ -3,9 +3,10 @@ import { Formik, Form, useField } from "formik";
 import * as Yup from "yup";
 import api from "../../api/api";
 import { toast } from "react-toastify";
-import { FaFileExcel, FaSearch, FaTimes } from "react-icons/fa";
+import { FaFileExcel, FaSearch, FaTimes, FaPlus } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { printReceipt } from "../../utils/ReceiptPrint";
+import { usePermission } from "../../hooks/usePermissions";
 
 /* ---------------- VALIDATION ---------------- */
 const today = new Date().toISOString().split("T")[0];
@@ -192,7 +193,7 @@ const AccountSelect = ({ label, name }: { label: string; name: string }) => {
   );
 };
 
-// StockTransferDropdown - right side, small height, shows 5 bills
+// StockTransferDropdown
 const StockTransferDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -360,8 +361,7 @@ const StockReturnDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill
   );
 };
 
-
-// B2BSaleDropdown — Superadmin ke pending B2B Sales dikhata hai (Stock Transfer wala exact pattern)
+// B2BSaleDropdown
 const B2BSaleDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -376,7 +376,6 @@ const B2BSaleDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: an
         setBills(res.data.bills || []);
       } catch (err) {
         console.error("Failed to load B2B sale bills:", err);
-
         setBills([]);
       } finally {
         setLoading(false);
@@ -444,7 +443,8 @@ const B2BSaleDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: an
     </div>
   );
 };
-// Bill Search Modal Component (Sales Entry / Purchase Return only)
+
+// Bill Search Modal Component
 const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [bills, setBills] = useState<any[]>([]);
@@ -576,6 +576,10 @@ const CashReceipt: React.FC = () => {
   const [billType, setBillType] = useState<string>('');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isBranch, setIsBranch] = useState(false);
+
+  // ✅ PERMISSIONS
+  const { canAdd } = usePermission("/Cash-receipt");
+  // Note: Edit/Delete nahi hai isme, isliye canEdit/canDelete use nahi kiya
 
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState("");
@@ -760,7 +764,6 @@ const CashReceipt: React.FC = () => {
         return;
       }
 
-      // For Stock Transfer bill — party auto-selected on backend (to_branch)
       if (values.selectedBill && values.receiptType === 'stockTransfer') {
         const stockTransferPayload = {
           stock_transfer_bill_id: values.selectedBill.id,
@@ -777,7 +780,6 @@ const CashReceipt: React.FC = () => {
         return;
       }
 
-      // ✅ NEW — For B2B Sale bill — party auto-selected on backend (to_branch)
       if (values.selectedBill && values.receiptType === 'b2bSale') {
         const b2bSalePayload = {
           b2b_sale_bill_id: values.selectedBill.id,
@@ -794,7 +796,6 @@ const CashReceipt: React.FC = () => {
         return;
       }
 
-      // For Stock Return bill — party auto-selected on backend (own Sundry Creditor(Main))
       if (values.selectedBill && values.receiptType === 'stockReturn') {
         const stockReturnPayload = {
           stock_return_bill_id: values.selectedBill.id,
@@ -877,12 +878,16 @@ const CashReceipt: React.FC = () => {
             Export Excel
           </button>
 
-          <button
-            onClick={handleOpenModal}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-          >
-            + Add Cash Receipt
-          </button>
+          {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
+          {canAdd && (
+            <button
+              onClick={handleOpenModal}
+              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center gap-2"
+            >
+              <FaPlus size={14} />
+              Add Cash Receipt
+            </button>
+          )}
         </div>
       </div>
 
@@ -945,6 +950,7 @@ const CashReceipt: React.FC = () => {
               <th className="p-3 border border-gray-200 whitespace-nowrap">Party Name</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Amount</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Narration</th>
+              <th className="p-3 border border-gray-200 whitespace-nowrap">Created By</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Receipt</th>
             </tr>
           </thead>
@@ -976,16 +982,16 @@ const CashReceipt: React.FC = () => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.party_name || r.op_account || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap font-semibold">₹{Number(r.amount || 0).toLocaleString()}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.narration || "-"}</td>
-<td className="p-3 border border-gray-200 whitespace-nowrap">
-  <button
-    type="button"
-    onClick={() => printReceipt(r, "cash")}
-    className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
-  >
-    Print
-  </button>
-</td>
-
+                  <td className="p-3 border border-gray-200 whitespace-nowrap">{r.created_by_name || "-"}</td>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => printReceipt(r, "cash")}
+                      className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
+                    >
+                      Print
+                    </button>
+                  </td>
                 </tr>
               ))
             ) : (
@@ -1182,7 +1188,7 @@ const CashReceipt: React.FC = () => {
                             </label>
                           )}
 
-                          {/* ✅ NEW — B2B Sale, superadmin only */}
+                          {/* B2B Sale, superadmin only */}
                           {isSuperAdmin && (
                             <label className="flex items-center gap-2">
                               <input
@@ -1279,7 +1285,7 @@ const CashReceipt: React.FC = () => {
                         </div>
                       )}
 
-                      {/* ✅ NEW — B2B Sale section */}
+                      {/* B2B Sale section */}
                       {values.receiptType === "b2bSale" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <div className="relative">

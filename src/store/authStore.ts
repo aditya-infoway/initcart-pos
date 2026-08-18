@@ -30,6 +30,21 @@ interface Branch {
   status: string;
 }
 
+// ✅ Ye dono interfaces pehle se hain - koi change nahi
+interface Employee {
+  id: number;
+  full_name: string;
+  department: string;
+}
+
+interface Permission {
+  page_key: string;
+  can_view: boolean;
+  can_add: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+}
+
 interface AuthState {
   isAuthenticated: boolean;
   isRestoring: boolean;
@@ -41,7 +56,12 @@ interface AuthState {
   loading: boolean;
   error: string | null;
   inactivityTimer: any;
-
+  
+  // ✅ Ye teeno pehle se hain - koi change nahi
+  employee: Employee | null;
+  permissions: Permission[];
+  hasPermission: (pageKey: string, action?: 'view' | 'add' | 'edit' | 'delete') => boolean;
+  
   login: (identifier: string, password: string) => Promise<any>;
   logout: () => void;
   logoutAndRedirect: () => void;
@@ -63,6 +83,9 @@ const clearStorage = () => {
   sessionStorage.removeItem("branch");
   sessionStorage.removeItem("prefixes");
   sessionStorage.removeItem("gst_toggle");
+  // ✅ ADD: Remove employee and permissions from sessionStorage
+  sessionStorage.removeItem("employee");
+  sessionStorage.removeItem("permissions");
 };
 
 const showSessionAlert = (message: string, onConfirm: () => void) => {
@@ -86,6 +109,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loading: false,
   error: null,
   inactivityTimer: null,
+  
+  // ✅ ADD: Initial state for employee and permissions
+  employee: null,
+  permissions: [],
+  
+  // ✅ ADD: hasPermission function
+  hasPermission: (pageKey, action = 'view') => {
+    const { user, permissions } = get();
+    if (user?.role !== 'employee') return true; // superadmin/branch: full access
+    const perm = permissions.find((p) => p.page_key === pageKey);
+    if (!perm) return false;
+    if (action === 'view') return perm.can_view;
+    if (action === 'add') return perm.can_add;
+    if (action === 'edit') return perm.can_edit;
+    if (action === 'delete') return perm.can_delete;
+    return false;
+  },
 
   setPrefixes: (p) => set({ prefixes: p }),
 
@@ -96,10 +136,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const branchStr = sessionStorage.getItem("branch");
     const prefixesStr = sessionStorage.getItem("prefixes");
 
-    // ✅ Branch required nahi — superadmin ke liye null bhi valid hai
     if (accessToken && userStr) {
       try {
-        // ✅ branchStr "null" string ya missing ho to null treat karo
         const branch = branchStr && branchStr !== "null"
           ? JSON.parse(branchStr)
           : null;
@@ -112,6 +150,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           accessToken,
           refreshToken,
           prefixes: prefixesStr ? JSON.parse(prefixesStr) : {},
+          // ✅ ADD: Restore employee and permissions from sessionStorage
+          employee: sessionStorage.getItem("employee") ? JSON.parse(sessionStorage.getItem("employee")!) : null,
+          permissions: sessionStorage.getItem("permissions") ? JSON.parse(sessionStorage.getItem("permissions")!) : [],
         });
         get().startTimers();
         return true;
@@ -146,22 +187,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({
           isAuthenticated: true,
           user: data.user,
-          branch: data.branch ?? null,   // ✅ undefined bhi null ban jaye
+          branch: data.branch ?? null,
           accessToken: data.access,
           refreshToken: data.refresh,
           loading: false,
           error: null,
           prefixes: data.prefixes || {},
+          // ✅ ADD: Set employee and permissions from login response
+          employee: data.employee ?? null,
+          permissions: data.permissions ?? [],
         });
 
         sessionStorage.setItem("accessToken", data.access);
         sessionStorage.setItem("refreshToken", data.refresh);
         sessionStorage.setItem("user", JSON.stringify(data.user));
-        // ✅ Branch null ho to "null" string store karo (safe parse ke liye)
         sessionStorage.setItem("branch", JSON.stringify(data.branch ?? null));
         if (data.prefixes) {
           sessionStorage.setItem("prefixes", JSON.stringify(data.prefixes));
         }
+        // ✅ ADD: Store employee and permissions in sessionStorage
+        sessionStorage.setItem("employee", JSON.stringify(data.employee ?? null));
+        sessionStorage.setItem("permissions", JSON.stringify(data.permissions ?? []));
 
         get().startTimers();
         return data;

@@ -1,10 +1,13 @@
+// src/pages/purchaseReturn/PurchaseReturnList.tsx
+
 import React, { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
-import { FaArrowLeft, FaEye, FaTrash, FaFileExcel, FaPrint, FaSearch, FaFilter, FaTimes } from "react-icons/fa";
+import { FaArrowLeft, FaEye, FaTrash, FaFileExcel, FaPrint, FaSearch, FaFilter, FaTimes, FaPlus } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import api from "../../api/api";
 import * as XLSX from "xlsx";
+import { usePermission } from "../../hooks/usePermissions";
 
 interface PurchaseReturn {
     id: number;
@@ -16,9 +19,10 @@ interface PurchaseReturn {
     grand_total: string;
     items: any[];
     approved_by: string;
+    created_by?: number;
+    created_by_name?: string;
 }
 
-// ✅ Paginated Response Type
 interface PaginatedResponse {
     count: number;
     next: string | null;
@@ -26,40 +30,39 @@ interface PaginatedResponse {
     results: PurchaseReturn[];
 }
 
-// ✅ Filter options interface
 interface FilterOptions {
     return_type: string;
 }
 
 const PurchaseReturnList: React.FC = () => {
     const navigate = useNavigate();
+ 
+    const { canAdd, canDelete } = usePermission("/purchaseReturnList");
+    // Note: Edit nahi hai isme, isliye canEdit use nahi kiya
+    
     const [allReturns, setAllReturns] = useState<PurchaseReturn[]>([]);
     const [filteredReturns, setFilteredReturns] = useState<PurchaseReturn[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedReturn, setSelectedReturn] = useState<PurchaseReturn | null>(null);
     const [showDetailModal, setShowDetailModal] = useState(false);
     
-    // ✅ Search and Filter state
     const [searchTerm, setSearchTerm] = useState<string>("");
     const [showFilters, setShowFilters] = useState<boolean>(false);
     const [filters, setFilters] = useState<FilterOptions>({
         return_type: "",
     });
     
-    // ✅ Pagination state (for filtered items)
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(15);
     const [totalItems, setTotalItems] = useState(0);
     const [totalPages, setTotalPages] = useState(1);
 
-        // ✅ Add Export to Excel function
     const exportToExcel = () => {
         if (filteredReturns.length === 0) {
             toast.warning("No data to export");
             return;
         }
 
-        // Prepare data for export
         const exportData: any[] = filteredReturns.map((item, index) => ({
             "SR No": index + 1,
             "Return No": item.return_no || "-",
@@ -71,7 +74,6 @@ const PurchaseReturnList: React.FC = () => {
             "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
         }));
 
-        // Add grand total row
         const grandTotal = filteredReturns.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
         exportData.push({
             "SR No": "",
@@ -84,34 +86,19 @@ const PurchaseReturnList: React.FC = () => {
             "Grand Total (₹)": grandTotal.toFixed(2),
         });
 
-        // Create worksheet
         const ws = XLSX.utils.json_to_sheet(exportData);
-        
-        // Set column widths
         ws["!cols"] = [
-            { wch: 6 },   // SR No
-            { wch: 18 },  // Return No
-            { wch: 12 },  // Date
-            { wch: 25 },  // Party Name
-            { wch: 35 },  // Reason for Return
-            { wch: 14 },  // Return Type
-            { wch: 18 },  // Approved By
-            { wch: 16 },  // Grand Total
+            { wch: 6 }, { wch: 18 }, { wch: 12 }, { wch: 25 },
+            { wch: 35 }, { wch: 14 }, { wch: 18 }, { wch: 16 },
         ];
 
-        // Create workbook and download
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Purchase Return List");
-        
-        // Generate filename with current date
         const fileName = `Purchase_Return_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
         XLSX.writeFile(wb, fileName);
-        
         toast.success(`Exported ${filteredReturns.length} records successfully`);
     };
 
-
-    // ✅ Fetch all returns (without pagination from API)
     const fetchReturns = async () => {
         setLoading(true);
         try {
@@ -119,11 +106,8 @@ const PurchaseReturnList: React.FC = () => {
             
             let allResults: PurchaseReturn[] = [];
             
-            // ✅ Handle DRF paginated response - fetch all pages
             if (res.data.results) {
                 allResults = res.data.results;
-                
-                // ✅ If there are more pages, fetch them all
                 let nextUrl = res.data.next;
                 while (nextUrl) {
                     const nextResponse = await api.get(nextUrl);
@@ -146,16 +130,13 @@ const PurchaseReturnList: React.FC = () => {
         }
     };
 
-    // ✅ Initial fetch - runs only once on mount
     useEffect(() => {
         fetchReturns();
     }, []);
 
-    // ✅ Client-side filtering
     useEffect(() => {
         let filtered = [...allReturns];
 
-        // ✅ Filter by search term (return_no, party_name, original_bill_no)
         if (searchTerm.trim() !== "") {
             const term = searchTerm.toLowerCase();
             filtered = filtered.filter(
@@ -166,7 +147,6 @@ const PurchaseReturnList: React.FC = () => {
             );
         }
 
-        // ✅ Filter by return type
         if (filters.return_type) {
             filtered = filtered.filter(
                 (item) => item.return_type?.toLowerCase() === filters.return_type.toLowerCase()
@@ -176,10 +156,9 @@ const PurchaseReturnList: React.FC = () => {
         setFilteredReturns(filtered);
         setTotalItems(filtered.length);
         setTotalPages(Math.ceil(filtered.length / pageSize));
-        setCurrentPage(1); // Reset to first page when filters change
+        setCurrentPage(1);
     }, [searchTerm, filters, allReturns]);
 
-    // ✅ Pagination handlers
     const handlePageChange = (page: number) => {
         if (page >= 1 && page <= totalPages) {
             setCurrentPage(page);
@@ -189,10 +168,9 @@ const PurchaseReturnList: React.FC = () => {
     const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const newSize = parseInt(e.target.value);
         setPageSize(newSize);
-        setCurrentPage(1); // Reset to first page
+        setCurrentPage(1);
     };
 
-    // ✅ Search Handlers
     const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setSearchTerm(e.target.value);
     };
@@ -201,7 +179,6 @@ const PurchaseReturnList: React.FC = () => {
         setSearchTerm("");
     };
 
-    // ✅ Filter Handlers
     const handleFilterChange = (key: keyof FilterOptions, value: string) => {
         setFilters(prev => ({ ...prev, [key]: value }));
     };
@@ -216,12 +193,18 @@ const PurchaseReturnList: React.FC = () => {
         return filters.return_type !== "";
     };
 
+    // ✅ DELETE WITH PERMISSION CHECK
     const handleDelete = async (id: number) => {
+        if (!canDelete) {
+            toast.error("You don't have permission to delete purchase returns");
+            return;
+        }
+        
         if (window.confirm("Are you sure you want to delete this purchase return?")) {
             try {
                 await api.delete(`/purchase-return-delete/${id}/`);
                 toast.success("Purchase return deleted successfully");
-                fetchReturns(); // Refresh all data
+                fetchReturns();
             } catch (err) {
                 console.error("Error deleting return:", err);
                 toast.error("Failed to delete purchase return");
@@ -238,24 +221,20 @@ const PurchaseReturnList: React.FC = () => {
         return type === 'Full' ? 'bg-purple-100 text-purple-800' : 'bg-orange-100 text-orange-800';
     };
 
-    // ✅ Get paginated data
     const paginatedReturns = filteredReturns.slice(
         (currentPage - 1) * pageSize,
         currentPage * pageSize
     );
 
-    // ✅ Calculate totals for displayed items
     const displayedTotal = paginatedReturns.reduce((sum, r) => sum + Number(r.grand_total), 0);
     const overallTotal = filteredReturns.reduce((sum, r) => sum + Number(r.grand_total), 0);
 
     return (
         <div className="min-h-screen bg-gray-100 pb-8">
             <div className="bg-gray-100 px-4 py-4">
-                {/* ✅ Header with Export Button */}
                 <div className="flex justify-between items-center mb-4">
                     <h1 className="text-xl font-bold text-gray-800">Purchase Return List</h1>
                     <div className="flex gap-2">
-                        {/* ✅ Export Excel Button */}
                         <button
                             onClick={exportToExcel}
                             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition"
@@ -264,20 +243,23 @@ const PurchaseReturnList: React.FC = () => {
                             Export Excel
                         </button>
                         
-                        <button
-                            onClick={() => navigate("/purchase-return")}
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow flex items-center gap-2 transition"
-                        >
-                            + New Return
-                        </button>
+                        {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
+                        {canAdd && (
+                            <button
+                                onClick={() => navigate("/purchase-return")}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow flex items-center gap-2 transition"
+                            >
+                                <FaPlus size={14} />
+                                New Return
+                            </button>
+                        )}
                     </div>
                 </div>
 
-                {/* ✅ Search and Filter Bar */}
+                {/* Search and Filter Bar */}
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
                     <div className="flex flex-wrap gap-3 items-center justify-between">
                         <div className="flex gap-2 flex-1">
-                            {/* Search Input */}
                             <div className="relative flex-1 max-w-md">
                                 <div className="absolute inset-y-0 left-0 flex items-center pl-3">  
                                     <FaSearch className="text-gray-400" />
@@ -300,7 +282,6 @@ const PurchaseReturnList: React.FC = () => {
                                 )}
                             </div>
 
-                            {/* Filter Toggle Button */}
                             <button
                                 onClick={() => setShowFilters(!showFilters)}
                                 className={`px-4 py-2 rounded-lg flex items-center gap-2 transition ${
@@ -318,7 +299,6 @@ const PurchaseReturnList: React.FC = () => {
                                 )}
                             </button>
 
-                            {/* Clear All Filters Button */}
                             {hasActiveFilters() && (
                                 <button
                                     onClick={clearFilters}
@@ -331,11 +311,9 @@ const PurchaseReturnList: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Filter Panel */}
                     {showFilters && (
                         <div className="mt-4 pt-4 border-t border-gray-200">
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {/* Return Type Filter */}
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Return Type</label>
                                     <select
@@ -353,7 +331,6 @@ const PurchaseReturnList: React.FC = () => {
                     )}
                 </div>
 
-                {/* ✅ Results Count */}
                 <div className="mb-4 text-sm text-gray-600">
                     Showing {paginatedReturns.length} of {filteredReturns.length} purchase returns
                     {searchTerm && ` matching "${searchTerm}"`}
@@ -373,12 +350,14 @@ const PurchaseReturnList: React.FC = () => {
                     ) : filteredReturns.length === 0 ? (
                         <div className="text-center py-12 text-gray-500">
                             <p>{searchTerm || hasActiveFilters() ? "No purchase returns match your search/filters" : "No purchase returns found"}</p>
-                            <button
-                                onClick={() => navigate("/purchase-return")}
-                                className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-                            >
-                                Create New Return
-                            </button>
+                            {canAdd && (
+                                <button
+                                    onClick={() => navigate("/purchase-return")}
+                                    className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                                >
+                                    Create New Return
+                                </button>
+                            )}
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
@@ -391,15 +370,13 @@ const PurchaseReturnList: React.FC = () => {
                                         <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-left">Reason</th>
                                         <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-center">Type</th>
                                         <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right">Amount</th>
+                                        <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right">Created by</th>
                                         <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-center">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {paginatedReturns.map((item, index) => (
-                                        <tr
-                                            key={item.id}
-                                            className="hover:bg-gray-50 transition"
-                                        >
+                                        <tr key={item.id} className="hover:bg-gray-50 transition">
                                             <td className="px-4 py-3 border border-gray-200 whitespace-nowrap font-medium text-blue-600">{item.return_no}</td>
                                             <td className="px-4 py-3 border border-gray-200 whitespace-nowrap">{item.date}</td>
                                             <td className="px-4 py-3 border border-gray-200 whitespace-nowrap">{item.party_name}</td>
@@ -412,6 +389,7 @@ const PurchaseReturnList: React.FC = () => {
                                             <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right font-semibold">
                                                 ₹{Number(item.grand_total).toFixed(2)}
                                             </td>
+                                            <td className="px-4 py-3 border border-gray-200 whitespace-nowrap">{item.created_by_name || "-"}</td>
                                             <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-center">
                                                 <div className="flex items-center justify-center gap-2">
                                                     <button
@@ -421,13 +399,17 @@ const PurchaseReturnList: React.FC = () => {
                                                     >
                                                         <FaEye size={16} />
                                                     </button>
-                                                    <button
-                                                        onClick={() => handleDelete(item.id)}
-                                                        className="text-red-600 hover:text-red-800 p-1 transition"
-                                                        title="Delete"
-                                                    >
-                                                        <FaTrash size={16} />
-                                                    </button>
+                                                    
+                                                    {/* ✅ DELETE BUTTON - Sirf canDelete wale ko dikhe */}
+                                                    {canDelete && (
+                                                        <button
+                                                            onClick={() => handleDelete(item.id)}
+                                                            className="text-red-600 hover:text-red-800 p-1 transition"
+                                                            title="Delete"
+                                                        >
+                                                            <FaTrash size={16} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
@@ -457,7 +439,6 @@ const PurchaseReturnList: React.FC = () => {
                                 </tfoot>
                             </table>
                             
-                            {/* ✅ Enhanced Pagination Controls */}
                             {totalPages > 0 && filteredReturns.length > 0 && (
                                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4 p-4 border-t">
                                     <div className="flex items-center gap-3">
@@ -492,7 +473,6 @@ const PurchaseReturnList: React.FC = () => {
                                             Prev
                                         </button>
 
-                                        {/* Smart Page Numbers */}
                                         {(() => {
                                             const maxVisible = 5;
                                             let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
@@ -541,7 +521,7 @@ const PurchaseReturnList: React.FC = () => {
                 </div>
             </div>
 
-            {/* Details Modal - Same as before */}
+            {/* Details Modal */}
             {showDetailModal && selectedReturn && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                     <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden">
@@ -555,7 +535,6 @@ const PurchaseReturnList: React.FC = () => {
                             </button>
                         </div>
                         <div className="p-6 overflow-y-auto max-h-[calc(85vh-120px)]">
-                            {/* Header Info */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 bg-gray-50 p-4 rounded-lg">
                                 <div>
                                     <p className="text-xs text-gray-500">Return No</p>
@@ -589,7 +568,6 @@ const PurchaseReturnList: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Items Table */}
                             {selectedReturn.items && selectedReturn.items.length > 0 && (
                                 <>
                                     <h4 className="font-semibold mb-3">Returned Items</h4>

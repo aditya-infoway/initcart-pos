@@ -14,6 +14,7 @@ import { MdClose } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermissions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ interface SchemeOffer {
   status: "active" | "inactive";
   created_by_branch_name: string | null;
   created_at: string;
+  created_by_name?: string;
 }
 
 interface FormValues {
@@ -232,7 +234,6 @@ const SchemeFormModal: React.FC<{
       .then((res) => {
         console.log("Branches API response:", res.data);
         
-        // ✅ FIX: Handle { success: true, data: [...] } format
         let branchData = [];
         if (res.data?.data && Array.isArray(res.data.data)) {
           branchData = res.data.data;
@@ -388,19 +389,15 @@ const SchemeFormModal: React.FC<{
 // ─── Helper to extract data from API response ───────────────────────────────
 
 const extractDataFromResponse = (response: any): any[] => {
-  // Handle { success: true, data: [...] } format
   if (response?.data && Array.isArray(response.data)) {
     return response.data;
   }
-  // Handle { success: true, results: [...] } format (DRF pagination)
   if (response?.results && Array.isArray(response.results)) {
     return response.results;
   }
-  // Handle plain array
   if (Array.isArray(response)) {
     return response;
   }
-  // Handle { data: { results: [...] } } nested
   if (response?.data?.results && Array.isArray(response.data.results)) {
     return response.data.results;
   }
@@ -411,6 +408,7 @@ const extractDataFromResponse = (response: any): any[] => {
 
 const SchemeOfferManagement: React.FC = () => {
   const navigate = useNavigate();
+  const { canAdd, canEdit, canDelete } = usePermission("/SchemeOffer");
   const { user } = useAuthStore() as any;
   const isMainBranch = user?.role === "superadmin";
 
@@ -428,11 +426,8 @@ const SchemeOfferManagement: React.FC = () => {
       .get(endpoint)
       .then((res) => {
         console.log("Schemes API response:", res.data);
-        
-        // ✅ FIX: Handle { success: true, data: [...] } format
         const schemeData = extractDataFromResponse(res.data);
         console.log("Scheme data extracted:", schemeData);
-        
         setSchemes(Array.isArray(schemeData) ? schemeData : []);
       })
       .catch((err) => {
@@ -485,7 +480,9 @@ const SchemeOfferManagement: React.FC = () => {
               <FaGift /> SCHEME OFFERS
             </h1>
           </div>
-          {isMainBranch && (
+        
+          {/* ✅ New Scheme - Sirf superadmin OR employee with canAdd */}
+          {(isMainBranch || canAdd) && (
             <button
               onClick={() => { setEditingScheme(null); setShowFormModal(true); }}
               className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition flex items-center gap-2 text-sm shadow-sm"
@@ -493,6 +490,7 @@ const SchemeOfferManagement: React.FC = () => {
               <FaPlus /> New Scheme
             </button>
           )}
+        
         </div>
 
         <div className="bg-white rounded-xl shadow-lg overflow-hidden">
@@ -506,6 +504,7 @@ const SchemeOfferManagement: React.FC = () => {
                   <th className="px-4 py-3 text-right">Amount</th>
                   <th className="px-4 py-3 text-center">Type</th>
                   <th className="px-4 py-3 text-center">Status</th>
+                  <th className="px-4 py-3 text-left">Created By</th> 
                   <th className="px-4 py-3 text-center">Actions</th>
                 </tr>
               </thead>
@@ -529,8 +528,12 @@ const SchemeOfferManagement: React.FC = () => {
                     <td className="px-4 py-3 text-right font-semibold">₹{Number(scheme.amount).toFixed(2)}</td>
                     <td className="px-4 py-3 text-center capitalize text-xs">{scheme.scheme_type.replace("_", " ")}</td>
                     <td className="px-4 py-3 text-center"><StatusBadge status={scheme.status} /></td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+  {scheme.created_by_name || "-"}   {/* ✅ ADD */}
+</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-center gap-2">
+                        {/* ✅ View - Sabko dikhe */}
                         <button
                           title="View Report"
                           onClick={() => handleViewReport(scheme.id)}
@@ -538,23 +541,27 @@ const SchemeOfferManagement: React.FC = () => {
                         >
                           <FaEye />
                         </button>
-                        {isMainBranch && (
-                          <>
-                            <button
-                              title="Edit"
-                              onClick={() => { setEditingScheme(scheme); setShowFormModal(true); }}
-                              className="text-blue-600 hover:text-blue-800 p-1"
-                            >
-                              <FaEdit />
-                            </button>
-                            <button
-                              title="Delete"
-                              onClick={() => handleDelete(scheme)}
-                              className="text-red-500 hover:text-red-700 p-1"
-                            >
-                              <FaTrash />
-                            </button>
-                          </>
+                        
+                        {/* ✅ Edit - Sirf superadmin OR employee with canEdit */}
+                        {(isMainBranch || canEdit) && (
+                          <button
+                            title="Edit"
+                            onClick={() => { setEditingScheme(scheme); setShowFormModal(true); }}
+                            className="text-blue-600 hover:text-blue-800 p-1"
+                          >
+                            <FaEdit />
+                          </button>
+                        )}
+                        
+                        {/* ✅ Delete - Sirf superadmin OR employee with canDelete */}
+                        {(isMainBranch || canDelete) && (
+                          <button
+                            title="Delete"
+                            onClick={() => handleDelete(scheme)}
+                            className="text-red-500 hover:text-red-700 p-1"
+                          >
+                            <FaTrash />
+                          </button>
                         )}
                       </div>
                     </td>

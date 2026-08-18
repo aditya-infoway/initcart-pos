@@ -3,6 +3,7 @@ import { FaEdit, FaSearch, FaSync } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { toast } from "react-toastify";
+import { usePermission } from "../../hooks/usePermissions";
 
 // ------------------ Types ------------------
 interface Account {
@@ -29,11 +30,16 @@ interface Account {
     birthday_on?: string;
     anniversary?: string;
     current_drcr: string;
+    created_by?: number;
+    created_by_name?: string;
+
+
 }
 
 // ------------------ Main Component ------------------
 const AddAccount: React.FC = () => {
     const navigate = useNavigate();
+    const { canAdd, canEdit } = usePermission("/addAccounts");
 
     const [items, setItems] = useState<Account[]>([]);
     const [filteredItems, setFilteredItems] = useState<Account[]>([]);
@@ -149,12 +155,11 @@ const AddAccount: React.FC = () => {
                     >
                         <FaSync /> Refresh
                     </button>
-                    <button
-                        onClick={() => navigate("/accounts")}
-                        className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
-                    >
-                        + Add Account
-                    </button>
+{canAdd && (
+  <button onClick={() => navigate("/accounts")} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow">
+    + Add Account
+  </button>
+)}
                 </div>
             </div>
 
@@ -196,6 +201,7 @@ const AddAccount: React.FC = () => {
                             <th className="p-3 border border-gray-300 whitespace-nowrap text-left">Mobile no.</th>
                             <th className="p-3 border border-gray-300 whitespace-nowrap text-left">Opening Balance</th>
                             <th className="p-3 border border-gray-300 whitespace-nowrap text-left">Current Balance</th>
+                            <th className="p-3 border border-gray-300 whitespace-nowrap text-left">created By </th>
                             <th className="p-3 border border-gray-300 whitespace-nowrap text-center">Action</th>
                         </tr>
                     </thead>
@@ -233,7 +239,13 @@ const AddAccount: React.FC = () => {
                                     <td className="p-3 border border-gray-300 whitespace-nowrap">
                                         ₹{account.current_balance} {account.current_drcr}
                                     </td>
+                                    <td className="p-3 border border-gray-300 whitespace-nowrap">
+                                        {account.created_by_name}
+                                    </td>
+
                                     <td className="p-3 border border-gray-300 whitespace-nowrap text-center">
+
+                                    {canEdit &&(
                                         <button
                                             onClick={() => handleEditClick(account)}
                                             className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200"
@@ -241,6 +253,7 @@ const AddAccount: React.FC = () => {
                                         >
                                             <FaEdit />
                                         </button>
+                                        )}
                                     </td>
                                 </tr>
                             ))

@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import api from "../../api/api";
 import * as XLSX from "xlsx";
-
+import { usePermission } from "../../hooks/usePermissions";
 // ------------------ Common variant columns ------------------
 const COMMON_VARIANT_COLUMNS = [
   "itemName_name",
@@ -30,6 +30,7 @@ interface FilterOptions {
 
 const Addpurchaseitem: React.FC = () => {
   const navigate = useNavigate();
+  const {canAdd} = usePermission("/Addpurchaseitem");
 
   const [allItems, setAllItems] = useState<any[]>([]); // Store all items from API
   const [filteredItems, setFilteredItems] = useState<any[]>([]); // Filtered items for display
@@ -164,6 +165,8 @@ const fetchItems = async () => {
         narration: item.narration,
         party_name_name: item.party_name_name,
         purchasebill_no: item.purchasebill_no,
+        created_by: item.created_by,
+        created_by_name: item.created_by_name,
         F_O_R: (Number(item.frightcharge) || 0) + (Number(item.otherexpnse) || 0) + (Number(item.roundamount) || 0),
         variants: Array.isArray(item.items) ? item.items.map((v: any) => ({
           itemName_name: v.itemName_name || v.itemName?.itemName || "",
@@ -300,13 +303,14 @@ const fetchItems = async () => {
             <FaFileExcel size={16} />
             Export Excel
           </button>
-          
+          {canAdd && (
           <button
             onClick={() => navigate("/purchases")}
             className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
           >
             + Add Purchase
           </button>
+          )}
         </div>
       </div>
 
@@ -416,6 +420,7 @@ const fetchItems = async () => {
                 "Total Tax",
                 "F+O+R",
                 "Grand Total",
+                "Created by",
                 "Action",
               ].map((h) => (
                 <th key={h} className="p-3 border border-gray-200 whitespace-nowrap text-left font-medium">
@@ -428,7 +433,7 @@ const fetchItems = async () => {
           <tbody>
             {paginatedItems.length === 0 ? (
               <tr>
-                <td colSpan={13} className="text-center p-8 text-gray-500">
+                <td colSpan={14} className="text-center p-8 text-gray-500">
                   {searchTerm || hasActiveFilters() 
                     ? "No purchase records match your search/filters"
                     : "No purchase records found"}
@@ -466,6 +471,7 @@ const fetchItems = async () => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap">₹{Number(item.total_tax || 0).toFixed(2)}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">₹{Number(item.F_O_R || 0).toFixed(2)}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap font-semibold">₹{Number(item.grand_total || 0).toFixed(2)}</td>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap">{item.created_by_name || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap text-center">
                     <button
                       onClick={() => handleViewVariants(item.id)}

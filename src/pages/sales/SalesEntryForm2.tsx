@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import MobileSalesEntry from "./MobileSalesEntry";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+import { State } from "country-state-city";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -155,6 +156,7 @@ const AccountSelect: React.FC<{ name: string; terms: string }> = ({ name, terms 
 const CustomerAddModal = ({ isOpen, onClose, onCustomerAdded }: any) => {
   const [fd, setFd] = useState({ account_name: "", state: "", mobile: "", email: "", address: "" });
   const [loading, setLoading] = useState(false);
+  const indiaStates = State.getStatesOfCountry("IN");
  
   const submit = async () => {
     if (!fd.account_name) { toast.error("Name required"); return; }
@@ -180,7 +182,6 @@ const CustomerAddModal = ({ isOpen, onClose, onCustomerAdded }: any) => {
         <div className="p-5 space-y-3">
           {[
             { label: "Customer Name *", key: "account_name", type: "text" },
-            { label: "State *", key: "state", type: "text" },
             { label: "Mobile", key: "mobile", type: "tel" },
             { label: "Email", key: "email", type: "email" },
           ].map(({ label, key, type }) => (
@@ -190,6 +191,30 @@ const CustomerAddModal = ({ isOpen, onClose, onCustomerAdded }: any) => {
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-400" />
             </div>
           ))}
+          <div className="space-y-1">
+  <label className="text-sm font-medium text-gray-700">
+    State *
+  </label>
+
+  <select
+    value={fd.state}
+    onChange={(e) =>
+      setFd({
+        ...fd,
+        state: e.target.value,
+      })
+    }
+    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm bg-white"
+  >
+    <option value="">Select State</option>
+
+    {indiaStates.map((state) => (
+      <option key={state.isoCode} value={state.name}>
+        {state.name}
+      </option>
+    ))}
+  </select>
+</div>
           <div>
             <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">Address</label>
             <textarea value={fd.address} onChange={e => setFd({ ...fd, address: e.target.value })}

@@ -67,6 +67,9 @@ import B2BStockReturnManagement from "../pages/transactions/B2BStockReturnManage
 import B2BSales from "../pages/transactions/B2BSales";
 import B2BSalesVerify from "../pages/transactions/B2BSalesVerify";
 import B2BSalesList from "../pages/transactions/B2BSalesList";
+import EmployeeList from "../pages/Employees/EployeeList";
+import EmployeeForm from "../pages/Employees/EmployeeForm";
+import EmployeePermissions from "../pages/Employees/EmployeePermissions";
 // import AccountCreationForm from "../pages/accounts/AccountCreationForm";
 
 const AppRouter = () => (
@@ -148,6 +151,10 @@ const AppRouter = () => (
         <Route path="/b2bsalescreate" element={<B2BSales/>}/>
         <Route path="/b2bpurchaseverify" element={<B2BSalesVerify/>}/>
         
+        <Route path="/allEmployees" element={<EmployeeList/>}/>
+        <Route path="/Employees" element={<EmployeeForm/>}/>
+        <Route path="/Employees/edit/:id/" element={<EmployeeForm/>}/>
+        <Route path="/employees/:id/permissions" element={<EmployeePermissions/>}/>
         {/* <Route path="/productcategory" element={<ProductCategory />} />
         <Route path="/servicecategory" element={<ServiceCategory />} />
         <Route path="/productvendor" element={<ProductVendor />} />

@@ -187,7 +187,7 @@ const extractErrorMessage = (data: any): string => {
   if (data.error) return String(data.error);
   if (data.alert_message) return String(data.alert_message);
 
-  // DRF field-level errors: { "field_name": ["message"] }
+
   const firstKey = Object.keys(data)[0];
   if (firstKey) {
     const val = data[firstKey];
@@ -450,11 +450,26 @@ const AccountSelect: React.FC<Props> = ({ name, terms: termsProp }) => {
 const PartySelect = ({ name }: { name: any }) => {
   const [field, meta, helpers] = useField(name);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.get("account-type/?group=Supplier")
-      .then((res) => setSuppliers(res.data))
-      .catch(() => console.error("Failed to load suppliers"));
+    const fetchSuppliers = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.get("account-type/?group=Supplier");
+        setSuppliers(res.data || []);
+      } catch (err: any) {
+        console.error("Failed to load suppliers:", err);
+        setError(err.response?.data?.error || "Failed to load suppliers");
+        // ✅ EMPTY suppliers, but don't break the form
+        setSuppliers([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSuppliers();
   }, []);
 
   return (
@@ -467,9 +482,15 @@ const PartySelect = ({ name }: { name: any }) => {
           ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
         value={field.value}
         onChange={(e) => helpers.setValue(e.target.value)}
+        disabled={loading}
       >
-        <option value="">Select Supplier</option>
-        {suppliers.map((s) => <option key={s.id} value={s.id}>{s.account_name}</option>)}
+        <option value="">{loading ? "Loading suppliers..." : error || "Select Supplier"}</option>
+        {suppliers.map((s) => (
+          <option key={s.id} value={s.id}>{s.account_name}</option>
+        ))}
+        {!loading && suppliers.length === 0 && !error && (
+          <option value="" disabled>No suppliers found</option>
+        )}
       </select>
       {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
     </div>

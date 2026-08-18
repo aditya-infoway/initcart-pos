@@ -3,9 +3,10 @@ import { Formik, Form, useField } from "formik";
 import * as Yup from "yup";
 import api from "../../api/api";
 import { toast } from "react-toastify";
-import { FaSearch, FaTimes, FaFileExcel } from "react-icons/fa";
+import { FaSearch, FaTimes, FaFileExcel, FaPlus } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { printReceipt } from "../../utils/ReceiptPrint";
+import { usePermission } from "../../hooks/usePermissions";
 
 /* ---------------- VALIDATION ---------------- */
 const today = new Date().toISOString().split("T")[0];
@@ -207,7 +208,7 @@ const AccountSelect = ({ label, name }: { label: string; name: string }) => {
   );
 };
 
-// StockTransferDropdown - right side, small height, shows 5 bills
+// StockTransferDropdown
 const StockTransferDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -375,7 +376,7 @@ const StockReturnDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill
   );
 };
 
-// B2BSaleDropdown — Superadmin ke pending B2B Sales dikhata hai (Stock Transfer wala exact pattern)
+// B2BSaleDropdown
 const B2BSaleDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: any) => void; refreshKey: number }) => {
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -459,7 +460,7 @@ const B2BSaleDropdown = ({ onSelectBill, refreshKey }: { onSelectBill: (bill: an
   );
 };
 
-// Bill Search Modal Component (Sales Entry / Purchase Return only)
+// Bill Search Modal Component
 const BillSearchModal = ({ isOpen, onClose, onSelectBill, billType }: any) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [bills, setBills] = useState<any[]>([]);
@@ -591,6 +592,10 @@ const BankReceipt: React.FC = () => {
   const [billType, setBillType] = useState<string>('');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isBranch, setIsBranch] = useState(false);
+
+  // ✅ PERMISSIONS
+  const { canAdd } = usePermission("/Bank-receipt");
+  // Note: Edit/Delete nahi hai isme, isliye canEdit/canDelete use nahi kiya
 
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState("");
@@ -782,7 +787,6 @@ const BankReceipt: React.FC = () => {
         return;
       }
 
-      // For Stock Transfer bill — party auto-selected on backend (to_branch)
       if (values.selectedBill && values.receiptType === 'stockTransfer') {
         const stockTransferPayload = {
           stock_transfer_bill_id: values.selectedBill.id,
@@ -802,7 +806,6 @@ const BankReceipt: React.FC = () => {
         return;
       }
 
-      // ✅ NEW — For B2B Sale bill — party auto-selected on backend (to_branch)
       if (values.selectedBill && values.receiptType === 'b2bSale') {
         const b2bSalePayload = {
           b2b_sale_bill_id: values.selectedBill.id,
@@ -822,7 +825,6 @@ const BankReceipt: React.FC = () => {
         return;
       }
 
-      // For Stock Return bill — party auto-selected on backend (own Sundry Creditor(Main))
       if (values.selectedBill && values.receiptType === 'stockReturn') {
         const stockReturnPayload = {
           stock_return_bill_id: values.selectedBill.id,
@@ -915,15 +917,20 @@ const BankReceipt: React.FC = () => {
             Export Excel
           </button>
 
-          <button
-            onClick={handleOpenModal}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-          >
-            + Add Bank Receipt
-          </button>
+          {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
+          {canAdd && (
+            <button
+              onClick={handleOpenModal}
+              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center gap-2"
+            >
+              <FaPlus size={14} />
+              Add Bank Receipt
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Search and Filter */}
       <div className="mb-4 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 max-w-md">
           <div className="absolute inset-y-0 left-0 flex items-center pl-3">
@@ -971,6 +978,7 @@ const BankReceipt: React.FC = () => {
         )}
       </div>
 
+      {/* Table */}
       <div className="bg-white rounded-lg shadow overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-blue-600 text-white text-center">
@@ -986,6 +994,7 @@ const BankReceipt: React.FC = () => {
               <th className="p-3 border border-gray-200 whitespace-nowrap">Cheque No</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Cheque Date</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Clear Date</th>
+              <th className="p-3 border border-gray-200 whitespace-nowrap">Created By</th>
               <th className="p-3 border border-gray-200 whitespace-nowrap">Receipt</th>
             </tr>
           </thead>
@@ -1019,24 +1028,24 @@ const BankReceipt: React.FC = () => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.mode || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_no || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_date || "-"}</td>
-
-
-
-<td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_clear_date || "-"}</td>
-<td className="p-3 border border-gray-200 whitespace-nowrap">
-  <button
-    type="button"
-    onClick={() => printReceipt(r, "bank")}
-    className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
-  >
-    Print
-  </button>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_clear_date || "-"}</td>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
+  {r.created_by_name || "-"}   {/* ✅ ADD */}
 </td>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => printReceipt(r, "bank")}
+                      className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
+                    >
+                      Print
+                    </button>
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={11} className="p-6 text-center text-gray-500">
+                <td colSpan={12} className="p-6 text-center text-gray-500">
                   No bank receipts found
                 </td>
               </tr>
@@ -1045,6 +1054,7 @@ const BankReceipt: React.FC = () => {
         </table>
       </div>
 
+      {/* Pagination */}
       {filteredRows.length > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
@@ -1123,6 +1133,7 @@ const BankReceipt: React.FC = () => {
         </div>
       )}
 
+      {/* Modal */}
       {open && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white w-[95%] sm:w-[90%] md:w-full md:max-w-4xl rounded-lg relative overflow-hidden">
@@ -1169,6 +1180,7 @@ const BankReceipt: React.FC = () => {
                 return (
                   <>
                     <Form className="p-6 max-h-[70vh] overflow-y-auto space-y-4">
+                      {/* Radio Buttons */}
                       <div className="mb-4">
                         <label className="block text-sm font-medium mb-2">Receipt Type</label>
                         <div className="flex gap-4 flex-wrap">
@@ -1232,7 +1244,7 @@ const BankReceipt: React.FC = () => {
                             </label>
                           )}
 
-                          {/* ✅ NEW — B2B Sale, superadmin only */}
+                          {/* B2B Sale, superadmin only */}
                           {isSuperAdmin && (
                             <label className="flex items-center gap-2">
                               <input
@@ -1270,6 +1282,7 @@ const BankReceipt: React.FC = () => {
                         </div>
                       </div>
 
+                      {/* Bill Search */}
                       {(values.receiptType === "salesEntry" || values.receiptType === "purchaseReturn") && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <div className="flex gap-2 items-end">
@@ -1329,7 +1342,7 @@ const BankReceipt: React.FC = () => {
                         </div>
                       )}
 
-                    {/* ✅ NEW — B2B Sale section */}
+                      {/* B2B Sale section */}
                       {values.receiptType === "b2bSale" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <div className="relative">
@@ -1353,7 +1366,6 @@ const BankReceipt: React.FC = () => {
                           )}
                         </div>
                       )}
-
 
                       {/* Stock Return section */}
                       {values.receiptType === "stockReturn" && (
@@ -1429,7 +1441,7 @@ const BankReceipt: React.FC = () => {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded">
                           <Input label="Cheque No" name="chequeNo" />
                           <Input label="Cheque Date" name="chequeDate" type="date" />
-                          <Input label="Cheque Clear Date" name="chequeClearDate" type="date" />
+                          <Input label="Cheque Clear Date" name="chequeClearDate" type="date" />  
                         </div>
                       )}
 

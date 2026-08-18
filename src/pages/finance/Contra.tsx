@@ -3,8 +3,9 @@ import { Formik, Form, useField } from "formik";
 import * as Yup from "yup";
 import api from "../../api/api";
 import { toast } from "react-toastify";
-import { FaSearch, FaTimes, FaFileExcel} from "react-icons/fa";
+import { FaSearch, FaTimes, FaFileExcel, FaPlus } from "react-icons/fa";
 import * as XLSX from "xlsx";
+import { usePermission } from "../../hooks/usePermissions";
 
 const today = new Date().toISOString().split("T")[0];
 
@@ -191,6 +192,10 @@ const Contra = () => {
     const [, setPrefixes] = useState<any>({});
     const [, setAccounts] = useState<any[]>([]);
     
+    // ✅ PERMISSIONS
+    const { canAdd } = usePermission("/Contra");
+    // Note: Edit/Delete nahi hai isme, isliye canEdit/canDelete use nahi kiya
+    
     // Search and Filter state
     const [searchTerm, setSearchTerm] = useState("");
     const [filterType, setFilterType] = useState("");
@@ -198,7 +203,7 @@ const Contra = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const rowsPerPage = 15;
 
-        // ✅ Add Export to Excel function
+    // ✅ Add Export to Excel function
     const exportToExcel = () => {
         if (filteredRows.length === 0) {
             toast.warning("No data to export");
@@ -341,12 +346,16 @@ const Contra = () => {
                         Export Excel
                     </button>
                     
-                    <button
-                        onClick={() => setOpen(true)}
-                        className="bg-green-600 text-white px-5 py-2 rounded-md shadow-md hover:bg-blue-800 transition"
-                    >
-                        + Add Contra
-                    </button>
+                    {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
+                    {canAdd && (
+                        <button
+                            onClick={() => setOpen(true)}
+                            className="bg-green-600 text-white px-5 py-2 rounded-md shadow-md hover:bg-green-700 transition flex items-center gap-2"
+                        >
+                            <FaPlus size={14} />
+                            Add Contra
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -407,6 +416,7 @@ const Contra = () => {
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Cash/Bank Account</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Opp. Account</th>
                             <th className="p-3 border border-gray-200 whitespace-nowrap">Amount</th>
+                            <th className="p-3 border border-gray-200 whitespace-nowrap">Created By </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -429,11 +439,12 @@ const Contra = () => {
                                     <td className="p-3 border border-gray-200 whitespace-nowrap">{row.cash_account_name}</td>
                                     <td className="p-3 border border-gray-200 whitespace-nowrap">{row.party_name}</td>
                                     <td className="p-3 border border-gray-200 whitespace-nowrap font-bold">₹{row.amount}</td>
+                                    <td className="p-3 border border-gray-200 whitespace-nowrap font-bold">{row.created_by_name || "-"}</td>
                                 </tr>
                             ))
                         ) : (
                             <tr>
-                                <td colSpan={7} className="p-6 text-center text-gray-500">
+                                <td colSpan={8} className="p-6 text-center text-gray-500">
                                     No contra entries found
                                 </td>
                             </tr>

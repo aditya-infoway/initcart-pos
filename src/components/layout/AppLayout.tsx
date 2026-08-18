@@ -56,6 +56,18 @@ export const menuItems: MenuCategory[] = [
       },
     ],
   },
+    {
+    items: [
+      {
+        title: "Employee Management",
+        icon: <FaShoppingCart size={20} />,
+        submenu: [
+          {name: "Employee Master" , to : "/allEmployees"},
+
+        ],
+      },
+    ],
+  },
   {
     items: [
       {
@@ -355,10 +367,43 @@ export const menuItems: MenuCategory[] = [
   },
 ];
 
+export const getSuperAdminMenuItems = (): MenuCategory[] => {
+  return menuItems
+    .map(category => ({
+      ...category,
+      items: category.items
+        // purchase submenu se "B2B Purchase Verify" hataana
+        .map(item => {
+          if (item.title === "purchase" && item.submenu) {
+            return {
+              ...item,
+              submenu: item.submenu.filter(
+                sub => sub.name !== "B2B Purchase Verify"
+              )
+            };
+          }
+          return item;
+        })
+        // superadmin ke liye hide hone wale top-level items
+        .filter(item =>
+          item.title !== "Stock Verification" &&
+          item.title !== "Order Items" &&
+          item.title !== "Stock Return" &&
+          item.title !== "B2B Stock Return" &&
+          item.title !== "B2B Stock Transfer" &&
+          item.title !== "Scheme Offer Register"
+        )
+    }))
+    .filter(category => category.items.length > 0);
+};
+
 // ── Main AppLayout ──────────────────────────────────────────
 const AppLayout = ({ children }: { children: React.ReactNode }) => {
-  const { user } = useAuthStore();
+
+  const { user, permissions } = useAuthStore(); 
   const isSuperAdmin = user?.role === "superadmin";
+  // ✅ ADD: employee check — header dropdown me "Setting" button chhupane ke liye
+  const isEmployeeRole = user?.role === "employee";
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isIconOnly, setIsIconOnly] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -370,13 +415,37 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const [branchLogo, setBranchLogo] = useState<string | null>(null);
   const [branchName, setBranchName] = useState<string>("");
 
-  // ✅ CORRECT FILTERING LOGIC
-  const filteredMenuItems = React.useMemo(() => {
-    if (!menuItems) return [];
-    
-    const isBranchOrVendor = user?.role === 'branch' || user?.role === 'vendor' || 
-                             user?.role === 'branch_both' || user?.role === 'branch_customer' ||
-                             user?.role === 'branch_agent' || user?.role === 'branch_single';
+const filteredMenuItems = React.useMemo(() => {
+  if (!menuItems) return [];
+
+  const isEmployee = user?.role === "employee";
+
+  if (isEmployee) {
+    const allowedKeys = new Set(permissions.filter(p => p.can_view).map(p => p.page_key));
+    return menuItems
+      .map(category => ({
+        ...category,
+        items: category.items
+          .map(item => {
+            if (item.submenu && item.submenu.length > 0) {
+              return { ...item, submenu: item.submenu.filter(sub => sub.to && allowedKeys.has(sub.to)) };
+            }
+            return item;
+          })
+          .filter(item => {
+            if (item.title === "Logout" || item.title === "Dashboard") return true;
+            if (item.submenu && item.submenu.length > 0) return true;
+            if (item.to) return allowedKeys.has(item.to);
+            return false;
+          })
+      }))
+      .filter(category => category.items.length > 0);
+  }
+
+  const isBranchOrVendor = user?.role === 'branch' || user?.role === 'vendor' ||
+                           user?.role === 'branch_both' || user?.role === 'branch_customer' ||
+                           user?.role === 'branch_agent' || user?.role === 'branch_single';
+
     
 if (isSuperAdmin) {
   return menuItems
@@ -438,7 +507,8 @@ if (isBranchOrVendor) {
           item.title !== "Stock Transfer" && 
           item.title !== "Stock Return Verification" &&
           item.title !== "B2B Stock Returns" &&
-          item.title !== "Scheme Offers" 
+          item.title !== "Scheme Offers" &&
+          item.title !== "Employee Management"
         )
     }))
     .filter(category => category.items.length > 0);
@@ -525,6 +595,9 @@ if (isBranchOrVendor) {
     }
   }, [location.pathname]);
 
+
+  
+
   const handleMenuClick = (title: string, path: string) => {
     setActiveMenu(title);
     navigate(path);
@@ -586,12 +659,16 @@ if (isBranchOrVendor) {
                 >
                   Profile
                 </button>
-                <button
-                  onClick={() => { navigate("/Setting"); setOpen(false); }}
-                  className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100 transition cursor-pointer"
-                >
-                  Setting
-                </button>
+                {/* ✅ CHANGE: "Setting" button employee role ke liye hide kar diya —
+                    sirf superadmin/branch/vendor waghera ko hi dikhega */}
+                {!isEmployeeRole && (
+                  <button
+                    onClick={() => { navigate("/Setting"); setOpen(false); }}
+                    className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100 transition cursor-pointer"
+                  >
+                    Setting
+                  </button>
+                )}
                 <button
                   onClick={() => navigate("/logout")}
                   className="block w-full text-left px-4 py-2 text-red-600 hover:bg-red-50 transition cursor-pointer"

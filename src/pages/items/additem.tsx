@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermissions";
 
 /* ------------------ Branch variant mapping ------------------ */
 export const VARIANT_BY_BRANCH: Record<string, string[]> = {
@@ -35,6 +36,7 @@ interface Item {
   hsnCode?: string;
   taxSlab?: string;
   created_by_superadmin?: boolean;
+  created_by_name?:string;
 }
 
 interface Variant {
@@ -73,6 +75,7 @@ const useDebounce = <T,>(value: T, delay: number): T => {
 /* ------------------ Main Component ------------------ */
 const AddItems: React.FC = () => {
   const navigate = useNavigate();
+  const { canAdd, canEdit,canDelete } = usePermission("/AddItems");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuthStore();
   const isSuperAdmin = user?.role === 'superadmin';
@@ -349,12 +352,14 @@ const AddItems: React.FC = () => {
           >
             <FaSync className={refreshing ? "animate-spin" : ""} /> Refresh
           </button>
+          {canAdd && (
           <button
             onClick={() => navigate("/items")}
             className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
           >
             + Add Item
           </button>
+          )}
         </div>
       </div>
 
@@ -498,6 +503,7 @@ const AddItems: React.FC = () => {
                 <th className="p-3 border border-gray-300 whitespace-nowrap text-left">Unit</th>
                 <th className="p-3 border border-gray-300 whitespace-nowrap text-left">HSN</th>
                 <th className="p-3 border border-gray-300 whitespace-nowrap text-left">Tax</th>
+                <th className="p-3 border border-gray-300 whitespace-nowrap text-left">created by</th>
                 <th className="p-3 border border-gray-300 whitespace-nowrap text-center">Actions</th>
               </tr>
             </thead>
@@ -550,6 +556,9 @@ const AddItems: React.FC = () => {
                     <td className="p-3 border border-gray-300 whitespace-nowrap">
                       {item.taxSlab || "-"}
                     </td>
+                    <td className="p-3 border border-gray-300 whitespace-nowrap">
+                      {item.created_by_name || "-"}
+                    </td>
                     <td className="p-3 border border-gray-300 whitespace-nowrap text-center">
                       <div className="flex gap-2 justify-center">
                         <button
@@ -561,6 +570,7 @@ const AddItems: React.FC = () => {
                         </button>
                         {canEditDelete(item) && (
                           <>
+                            {canEdit && (
                             <button
                               onClick={() => handleEditItem(item)}
                               className="bg-green-100 p-2 rounded-full text-green-600 hover:bg-green-200"
@@ -568,6 +578,8 @@ const AddItems: React.FC = () => {
                             >
                               <FaEdit />
                             </button>
+                            )}
+                            {canDelete && (
                             <button
                               onClick={() => handleDeleteItem(item)}
                               className="bg-red-100 p-2 rounded-full text-red-600 hover:bg-red-200"
@@ -575,6 +587,7 @@ const AddItems: React.FC = () => {
                             >
                               <FaTrash />
                             </button>
+                            )}
                           </>
                         )}
                         {!isSuperAdmin && item.created_by_superadmin && (

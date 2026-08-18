@@ -3,6 +3,7 @@ import { FaFileExcel, FaPrint, FaSearch, FaFilter, FaTimes, FaEye, FaArrowLeft, 
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
+import { useAuthStore } from "../../store/authStore";
 
 interface FilterOptions {
   terms: string;
@@ -11,13 +12,20 @@ interface FilterOptions {
   party: string;
 }
 
-interface Branch{
-  id : number;
-  branch_name : string;
+interface Branch {
+  id: number;
+  branch_name: string;
 }
 
 const PurchaseEntryReport: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
+  const canViewAllBranches = isSuperAdmin || isEmployee;
+  
   const [allItems, setAllItems] = useState<any[]>([]);
   const [filteredItems, setFilteredItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,17 +36,44 @@ const PurchaseEntryReport: React.FC = () => {
   const [pageSize, setPageSize] = useState(15);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [variants, setVariants] = useState<any[]>([]);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
 
+  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  useEffect(() => {
+    if (canViewAllBranches) {
+      api.get("branches/")
+        .then(res => {
+          let branchData = [];
+          if (res.data?.data && Array.isArray(res.data.data)) {
+            branchData = res.data.data;
+          } else if (Array.isArray(res.data)) {
+            branchData = res.data;
+          } else {
+            branchData = [];
+          }
+          setBranches(branchData);
+        })
+        .catch(err => console.error("Branches fetch failed:", err));
+    }
+  }, [canViewAllBranches]);
 
-  const fetchItems = async (branchId = selectedBranchId) => {
+  // ✅ FIX: fetchItems function - proper branch parameter
+  const fetchItems = async (branchId?: string) => {
     setLoading(true);
     try {
       const token = sessionStorage.getItem("token");
-      const branchParam = branchId ? `&branch_id=${branchId}` : '';
-      const response = await api.get(`purchse-items/?page=1&page_size=1000${branchParam}`, { headers: { Authorization: `Bearer ${token}` } });
+      
+      // ✅ branchId parameter ko sahi se pass karo
+      let url = `purchse-items/?page=1&page_size=1000`;
+      if (branchId) {
+        url += `&branch_id=${branchId}`;
+      }
+      
+      console.log("🔄 Fetching purchases with URL:", url);
+      
+      const response = await api.get(url, { headers: { Authorization: `Bearer ${token}` } });
       let itemsArray: any[] = [];
       if (response.data.results) {
         itemsArray = response.data.results;
@@ -60,6 +95,9 @@ const PurchaseEntryReport: React.FC = () => {
         F_O_R: (Number(item.frightcharge)||0)+(Number(item.otherexpnse)||0)+(Number(item.roundamount)||0),
         variants: Array.isArray(item.items) ? [...item.items] : [],
       }));
+      
+      console.log(`✅ Loaded ${mapped.length} records for branch:`, branchId || 'default');
+      
       setAllItems(mapped);
       setFilteredItems(mapped);
     } catch (err) {
@@ -68,18 +106,21 @@ const PurchaseEntryReport: React.FC = () => {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchItems(); }, []);
-    useEffect(() => {
-    const userStr = sessionStorage.getItem("user");
-    if (userStr) {
-      const u = JSON.parse(userStr);
-      if (u.role === 'superadmin') {
-        setIsSuperAdmin(true);
-        api.get("branches/").then(res => setBranches(res.data.data || []));
-      }
-    }
+  // ✅ Initial fetch
+  useEffect(() => {
+    fetchItems();
   }, []);
 
+  // ✅ Branch change handler
+  const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
+    setSelectedBranchId(val);
+    setSelectedBranchName(name);
+    fetchItems(val);
+  };
+
+  // ✅ Filtering logic
   useEffect(() => {
     let f = [...allItems];
     if (searchTerm.trim()) {
@@ -149,21 +190,24 @@ const PurchaseEntryReport: React.FC = () => {
             </button>
             <div>
               <h1 className="text-lg font-bold text-gray-800 leading-tight">Purchase Entry Report</h1>
-              <p className="text-xs text-gray-400">{filteredItems.length} records</p>
+              <p className="text-xs text-gray-400">
+                {canViewAllBranches && selectedBranchId && (
+                  <span className="font-semibold text-gray-600">{selectedBranchName} · </span>
+                )}
+                {filteredItems.length} records
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isSuperAdmin && (
+            {/* ✅ Branch Filter - Superadmin + Employee */}
+            {canViewAllBranches && (
               <div className="flex items-center gap-2 mr-2">
                 <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
                   <FaBuilding size={12} /> Branch:
                 </label>
                 <select
                   value={selectedBranchId}
-                  onChange={(e) => {
-                    setSelectedBranchId(e.target.value);
-                    fetchItems(e.target.value);
-                  }}
+                  onChange={handleBranchChange}
                   className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[160px]"
                 >
                   <option value="">My Branch (Main)</option>
@@ -176,9 +220,6 @@ const PurchaseEntryReport: React.FC = () => {
             <button onClick={exportToExcel} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
               <FaFileExcel size={14} /> Export Excel
             </button>
-            {/* <button onClick={() => window.print()} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
-              <FaPrint size={13} /> Print
-            </button> */}
           </div>
         </div>
       </div>

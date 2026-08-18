@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
 import { toast } from "react-toastify";
+import { useAuthStore } from "../../store/authStore";
 
 interface ReceivableRow {
   id: number;
@@ -72,6 +73,14 @@ const termsColor = (terms: string) => {
 
 const OutstandingReport: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+  
+  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
+  // ✅ EXACT SAME LOGIC AS StockReport.tsx AND ExcelImportExport.tsx
+  const canViewAllBranches = isSuperAdmin || isEmployee;
 
   const [activeTab, setActiveTab] = useState<"receivable" | "payable">("receivable");
   const [receivable, setReceivable] = useState<ReceivableRow[]>([]);
@@ -79,9 +88,9 @@ const OutstandingReport: React.FC = () => {
   const [receivableSummary, setReceivableSummary] = useState<Summary | null>(null);
   const [payableSummary, setPayableSummary]       = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [selectedBranchName, setSelectedBranchName] = useState<string>("");
 
   // search + filter
   const [searchTerm, setSearchTerm] = useState("");
@@ -111,16 +120,24 @@ const OutstandingReport: React.FC = () => {
     }
   }, [selectedBranchId]);
 
+  // ✅ Fetch branches - agar canViewAllBranches true hai toh
   useEffect(() => {
-    const userStr = sessionStorage.getItem("user");
-    if (userStr) {
-      const u = JSON.parse(userStr);
-      if (u.role === 'superadmin') {
-        setIsSuperAdmin(true);
-        api.get("branches/").then(res => setBranches(res.data.data || []));
-      }
+    if (canViewAllBranches) {
+      api.get("branches/")
+        .then(res => {
+          let branchData = [];
+          if (res.data?.data && Array.isArray(res.data.data)) {
+            branchData = res.data.data;
+          } else if (Array.isArray(res.data)) {
+            branchData = res.data;
+          } else {
+            branchData = [];
+          }
+          setBranches(branchData);
+        })
+        .catch(err => console.error("Branches fetch failed:", err));
     }
-  }, []);
+  }, [canViewAllBranches]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -248,7 +265,8 @@ const OutstandingReport: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isSuperAdmin && (
+            {/* ✅ Branch Filter - Sirf canViewAllBranches wale ko dikhe (Superadmin + Employee) */}
+            {canViewAllBranches && (
               <div className="flex items-center gap-2 mr-2">
                 <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
                   <FaBuilding size={12} /> Branch:
@@ -256,8 +274,11 @@ const OutstandingReport: React.FC = () => {
                 <select
                   value={selectedBranchId}
                   onChange={(e) => {
-                    setSelectedBranchId(e.target.value);
-                    fetchData(e.target.value);
+                    const val = e.target.value;
+                    const name = branches.find(b => String(b.id) === val)?.branch_name || "";
+                    setSelectedBranchId(val);
+                    setSelectedBranchName(name);
+                    fetchData(val);
                   }}
                   className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[160px]"
                 >
