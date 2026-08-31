@@ -36,6 +36,7 @@ const PAGE_ALLOWED_ACTIONS: Record<string, AllowedActions> = {
 
   // ── purchase ─────────────────────────────
   "/Addpurchaseitem":    { can_view: true, can_add: true,  can_edit: false, can_delete: false }, // Purchase Entry
+  "/purchaseimport":    { can_view: true, can_add: true,  can_edit: false, can_delete: false },
   "/purchaseReturnList": { can_view: true, can_add: true,  can_edit: false, can_delete: true },  // Purchase Return
 
   // ── sales ────────────────────────────────

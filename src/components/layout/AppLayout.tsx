@@ -69,6 +69,16 @@ export const menuItems: MenuCategory[] = [
     ],
   },
   {
+  items: [
+    {
+      title: "My Branches",
+      icon: <FaUserTie size={20} />,
+      to: "/myBranches",
+      submenu: [],
+    },
+  ],
+},
+  {
     items: [
       {
         title: "Master",
@@ -176,6 +186,7 @@ export const menuItems: MenuCategory[] = [
         icon: <MdOutlineInventory2 size={20} />,
         submenu: [
           { name: "Purchase Entry", to: "/Addpurchaseitem" },
+          { name: "Purchase Import", to: "/purchaseimport" },
           { name: "B2B Purchase Verify", to: "/b2bpurchaseverify" },
           { name: "Purchase Return", to: "/purchaseReturnList" },
           { name: "Create Order", to: "#" },
@@ -400,7 +411,8 @@ export const getSuperAdminMenuItems = (): MenuCategory[] => {
 // ── Main AppLayout ──────────────────────────────────────────
 const AppLayout = ({ children }: { children: React.ReactNode }) => {
 
-  const { user, permissions } = useAuthStore(); 
+  
+  const { user, permissions, branch } = useAuthStore();
   const isSuperAdmin = user?.role === "superadmin";
   // ✅ ADD: employee check — header dropdown me "Setting" button chhupane ke liye
   const isEmployeeRole = user?.role === "employee";
@@ -473,42 +485,37 @@ if (isSuperAdmin) {
           item.title !== "Stock Return" &&
           item.title !== "B2B Stock Return" &&
           item.title !== "B2B Stock Transfer" &&
-          item.title !== "Scheme Offer Register"
+          item.title !== "Scheme Offer Register" &&
+          item.title !== "My Branches"  
         )
     }))
     .filter(category => category.items.length > 0);
 }
     
 if (isBranchOrVendor) {
+  const { branch } = useAuthStore.getState(); 
+  const isFranchise = branch?.ownership_type === "franchise";   // 🔧 confirm this field name in your authStore
+
   return menuItems
     .map(category => ({
       ...category,
       items: category.items
         .map(item => {
-          // ✅ If this is the "Master" menu item, filter its submenu
           if (item.title === "Master" && item.submenu) {
-            return {
-              ...item,
-              submenu: item.submenu.filter(sub => sub.name !== "Branch Master")
-            };
+            return { ...item, submenu: item.submenu.filter(sub => sub.name !== "Branch Master") };
           }
-
           if (item.title === "sales" && item.submenu) {
-  return {
-    ...item,
-    submenu: item.submenu.filter(
-      sub => sub.name !== "B2B Sales"
-    )
-  };
-}
+            return { ...item, submenu: item.submenu.filter(sub => sub.name !== "B2B Sales") };
+          }
           return item;
         })
-        .filter(item => 
-          item.title !== "Stock Transfer" && 
+        .filter(item =>
+          item.title !== "Stock Transfer" &&
           item.title !== "Stock Return Verification" &&
           item.title !== "B2B Stock Returns" &&
           item.title !== "Scheme Offers" &&
-          item.title !== "Employee Management"
+          item.title !== "Employee Management" &&
+          (item.title !== "My Branches" || isFranchise)   // ✅ NEW — only franchises see this
         )
     }))
     .filter(category => category.items.length > 0);
@@ -526,7 +533,8 @@ if (isBranchOrVendor) {
             item.title !== "Stock Return" &&
             item.title !== "Stock Return Verification" &&
             item.title !== "Order Items"&&
-            item.title !== "Scheme Offer Register"
+            item.title !== "Scheme Offer Register" &&
+            item.title !== "My Branches"
         )
       }))
       .filter(category => category.items.length > 0);

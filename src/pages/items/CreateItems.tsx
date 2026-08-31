@@ -425,7 +425,7 @@ const CreateItems: React.FC = () => {
   const [branchLoaded, setBranchLoaded] = useState(false);
   const [addedItems, setAddedItems] = useState<VariantItem[]>([]);
   const [toggleOk, setToggleOk] = useState<boolean>(false);
-  const [entryType, setEntryType] = useState<"company" | "manual">("company");
+  const [entryType, setEntryType] = useState<"company" | "manual">("manual");
   const [loading, setLoading] = useState(true);
   const [initialItemData, setInitialItemData] = useState<any>(null);
   const [dataFetchComplete, setDataFetchComplete] = useState(false);

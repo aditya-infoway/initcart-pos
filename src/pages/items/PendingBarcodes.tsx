@@ -1076,7 +1076,7 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
             {barcodeUpdateSuccess.has(v.variant_id) && (
                 <span className="text-green-500 text-xs font-medium">✓</span>
             )}
-        </div>
+        </div>  
     )}
 </td>
                           </tr>

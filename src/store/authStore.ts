@@ -6,6 +6,7 @@ interface User {
   username: string;
   email: string;
   role: string;
+  ownership_type?: 'branch' | 'franchise';
 }
 
 interface PrefixMap {
@@ -28,6 +29,7 @@ interface Branch {
   branch_type: string;
   phone: string;
   status: string;
+  ownership_type?: 'branch' | 'franchise';
 }
 
 // ✅ Ye dono interfaces pehle se hain - koi change nahi

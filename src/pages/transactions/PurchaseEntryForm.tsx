@@ -15,6 +15,7 @@ import { MdClose } from "react-icons/md";
 import api from "../../api/api";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 import Barcode from "react-barcode";
+import { usePermission } from "../../hooks/usePermissions";
 
 
 // ─── Barcode Scanner ──────────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ interface BarcodeScannerProps {
   itemsModalData: any[];
   onItemSelected: (row: any) => void;
   partyName: number | string; 
+ 
 }
 
 const PurchaseBarcodeScanner: React.FC<BarcodeScannerProps> = ({ 
@@ -329,7 +331,7 @@ interface FormItem {
 
 // ─── Formik-connected Form Components ────────────────────────────────────────
 
-const FormInput: React.FC<any> = ({ label, icon: Icon, ...props }) => {
+const FormInput: React.FC<any> = ({ label, icon: Icon, inputProps, ...props }) => {
   const [field, meta] = useField(props);
   return (
     <div className="space-y-1">
@@ -342,6 +344,7 @@ const FormInput: React.FC<any> = ({ label, icon: Icon, ...props }) => {
           ${meta.touched && meta.error ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
         {...field}
         {...props}
+        {...inputProps}
       />
       {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
     </div>
@@ -613,6 +616,8 @@ interface BarcodeInputProps {
   barcodeGenerated: boolean;
   barcodeSaved: boolean;
   disabled?: boolean;
+ 
+  canManageBarcode: boolean;
 }
 
 
@@ -628,6 +633,7 @@ const BarcodeInput: React.FC<BarcodeInputProps> = ({
   itemName,
   isSuperAdmin, 
   existingBarcode,
+  canManageBarcode,
   isGenerating,
   isSaving,
   barcodeGenerated,
@@ -638,7 +644,7 @@ const BarcodeInput: React.FC<BarcodeInputProps> = ({
   const manualInputRef = useRef<HTMLInputElement>(null);
 
   // ─── ONLY SHOW IF: Superadmin AND no existing barcode AND a variant is selected ───
-  const shouldShow = isSuperAdmin && !existingBarcode && variantId;
+  const shouldShow = canManageBarcode && !existingBarcode && variantId;
 
   // ─── Auto-focus manual input jab bhi ye box dikhe (item select hote hi) ───
   useEffect(() => {
@@ -803,8 +809,18 @@ const PurchaseEntryForm: React.FC = () => {
   const navigate = useNavigate();
   const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
 
+
+ const { canAdd } = usePermission("/Addpurchaseitem");
   // ─── Check if user is Superadmin ──────────────────────────────────────────
+  // ─── Check if user is Superadmin / Employee ────────────────────────────────
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+  const [isEmployee, setIsEmployee] = useState<boolean>(false);
+
+  // ✅ FIX: sirf superadmin OR (employee jiske paas add-permission hai) —
+  // normal branch ke liye canAdd ko trust mat karo, warna unko bhi
+  // barcode section dikh jaata tha aur mandatory barcode requirement lag jaata tha.
+  const canManageBarcode = isSuperAdmin || (isEmployee && canAdd);
+
   const [isGeneratingBarcode, setIsGeneratingBarcode] = useState<boolean>(false);
   const [isSavingBarcode, setIsSavingBarcode] = useState<boolean>(false);
 
@@ -814,6 +830,7 @@ const PurchaseEntryForm: React.FC = () => {
       try {
         const user = JSON.parse(userStr);
         setIsSuperAdmin(user?.role === "superadmin");
+        setIsEmployee(user?.role === "employee");
       } catch (e) {
         console.error("Failed to parse user:", e);
       }
@@ -897,6 +914,7 @@ const PurchaseEntryForm: React.FC = () => {
   // ── State ──
   const [addedItems, setAddedItems] = useState<Item[]>([]);
   const [idCounter, setIdCounter] = useState<number>(1);
+  const [isAddingItem, setIsAddingItem] = useState<boolean>(false); 
   const [itemsModalData, setItemsModalData] = useState<any[]>([]);
   const [openModal, setOpenModal] = useState(false);
   const [branchType, setBranchType] = useState<string | null>(null);
@@ -1109,7 +1127,8 @@ const accountId = Number(values.account);
             setSubmitting(false);
           }}
         >
-          {({ values, setFieldValue }) => {
+                  
+          {({ values, setFieldValue, isSubmitting }) => {
 
             // ── Barcode scanner function ──
 const handleBarcodeItemSelect = (row: any) => {
@@ -1128,7 +1147,12 @@ const finalPrice = round2(row.purchasePrice || row.per_unit_price || 0);
   setFieldValue("items[0].unit_supports_fractional", supportsFractional);
   setFieldValue("items[0].taxSlab", row.taxSlab || "0");
   setFieldValue("items[0].opStock", row.opStock);
-  
+
+  // ✅ FIX: purane item ka leftover quantity/discount naye item me carry na ho
+  setFieldValue("items[0].quantity", "");
+  setFieldValue("items[0].altQuantity", "");
+  setFieldValue("items[0].discountPercent", "");
+
   // Barcode handling
   setFieldValue("items[0].existingBarcode", hasBarcode ? row.barcode : "");
   setFieldValue("items[0].barcodeValue", hasBarcode ? row.barcode : "");
@@ -1143,7 +1167,7 @@ const finalPrice = round2(row.purchasePrice || row.per_unit_price || 0);
   
   // Auto-focus quantity input after selection
   setTimeout(() => {
-    if (!hasBarcode && isSuperAdmin) {
+    if (!hasBarcode && canManageBarcode) {
       const barcodeInput = document.querySelector<HTMLInputElement>('input[placeholder="Scan or type barcode"]');
       if (barcodeInput) { barcodeInput.focus(); return; }
     }
@@ -1166,22 +1190,13 @@ const finalPrice = round2(row.purchasePrice || row.per_unit_price || 0);
               setFieldValue("items[0].netValue", netValue.toFixed(2));
             }, [values.items[0].quantity, values.items[0].price, values.items[0].discountPercent]);
 
-            // ── Tax slab fetch ──
+            // ✅ FIX: taxSlab item select ke time hi row.taxSlab se set ho chuka hai —
+            // dobara API call karne ki zaroorat nahi thi (extra load + late-response se
+            // tax% achanak change hone ka risk tha)
             useEffect(() => {
-              const fetchTaxSlabForItem = async () => {
-                const itemId = values.items[0].itemId;
-                if (itemId) {
-                  try {
-                    const itemDetails = await fetchItemDetails(Number(itemId));
-                    if (itemDetails?.taxSlab) setFieldValue("items[0].taxSlab", itemDetails.taxSlab);
-                  } catch (err) {
-                    console.error("Error fetching tax slab:", err);
-                  }
-                } else {
-                  setFieldValue("items[0].taxSlab", "");
-                }
-              };
-              fetchTaxSlabForItem();
+              if (!values.items[0].itemId) {
+                setFieldValue("items[0].taxSlab", "");
+              }
             }, [values.items[0].itemId, setFieldValue]);
 
             // ── Handle Generate Barcode (only generates, does NOT save) ──
@@ -1250,90 +1265,95 @@ const finalPrice = round2(row.purchasePrice || row.per_unit_price || 0);
               }
             };
             const idCounterRef = useRef(1);
+const handleAddItem = async () => {
+  if (isAddingItem) return; // ✅ FIX: double-click ya double-tap ko block karo
 
-            // ── Add item handler ──
-            const handleAddItem = async () => {
-              const cur = values.items[0] as FormItem;
-              if (!values.partyName) { toast.error("Select Party first"); return; }
-              if (!cur.itemId) { toast.error("Select Item"); return; }
-              if (!cur.quantity || Number(cur.quantity) <= 0) { toast.error("Enter valid quantity"); return; }
-              if (!cur.price || Number(cur.price) <= 0) { toast.error("Enter valid price"); return; }
-              if (!cur.unit) { toast.error("Select unit"); return; }
+  const cur = values.items[0] as FormItem;
+  if (!values.partyName) { toast.error("Select Party first"); return; }
+  if (!cur.itemId) { toast.error("Select Item"); return; }
+  if (!cur.quantity || Number(cur.quantity) <= 0) { toast.error("Enter valid quantity"); return; }
+  if (!cur.price || Number(cur.price) <= 0) { toast.error("Enter valid price"); return; }
+  if (!cur.unit) { toast.error("Select unit"); return; }
 
-              // ── Barcode validation for superadmin ──
-              if (isSuperAdmin && !cur.existingBarcode) {
-                if (!cur.barcodeValue) {
-                  toast.error("Please generate or enter a barcode first");
-                  return;
-                }
-                if (!cur.barcodeSaved) {
-                  toast.error("Please save the barcode first by clicking 'Save Barcode'");
-                  return;
-                }
-              }
+  // ─── Barcode validation for Superadmin OR Employee with canAdd ───
+  if (canManageBarcode && !cur.existingBarcode) {   // ✅ Combined condition
+    if (!cur.barcodeValue) {
+      toast.error("Please generate or enter a barcode first");
+      return;
+    }
+    if (!cur.barcodeSaved) {
+      toast.error("Please save the barcode first by clicking 'Save Barcode'");
+      return;
+    }
+  }
 
-              let finalBarcode = cur.barcodeValue || cur.existingBarcode || "";
-
+  let finalBarcode = cur.barcodeValue || cur.existingBarcode || "";
   const newId = idCounterRef.current++;   // turant, synchronously unique
 
+  setIsAddingItem(true); // ✅ FIX
   let taxData;
   try {
     taxData = await fetchItemTax(cur, Number(values.partyName));
-  } catch (err) { toast.error("Tax calculation failed"); return; }
+  } catch (err) {
+    toast.error("Tax calculation failed");
+    setIsAddingItem(false); // ✅ FIX
+    return;
+  }
 
-setAddedItems((prev: any) => [
-                ...prev,
-                {
-                  id: newId,
-                  itemId: Number(cur.itemId),
-                  variantId: cur.variantId ?? null,
-                  itemName: cur.itemName,
-                  hsnCode: cur.hsnCode,
-                  quantity: round2(cur.quantity),
-                  altQuantity: round2(cur.altQuantity || 0),
-                  price: round2(cur.price),
-                  unit: cur.unit,
-                  discountPercent: round2(cur.discountPercent || 0),
-                  basicAmount: round2(taxData.basic_amount),
-                  discountAmount: round2(taxData.discount_amount),
-                  taxAmount: round2(taxData.total_tax),
-                  cgst: round2(taxData.cgst),
-                  sgst: round2(taxData.sgst),
-                  igst: round2(taxData.igst),
-                  netValue: round2(taxData.net_amount),
-                  taxSlab: taxData.tax_percent?.toString() || "0",
-                  barcode: finalBarcode || "",
-                },
-              ]);
-              
-              setFieldValue("items[0]", {
-                itemId: "",
-                variantId: null,
-                itemName: "",
-                hsnCode: "",
-                quantity: "",
-                altQuantity: "",
-                price: "",
-                unit: "",
-                discountPercent: "",
-                basicAmount: "0.00",
-                discountAmount: "0.00",
-                taxAmount: "0.00",
-                cgst: "0.00",
-                sgst: "0.00",
-                igst: "0.00",
-                netValue: "0.00",
-                taxSlab: "",
-                unit_supports_fractional: false,
-                opStock: 0,
-                existingBarcode: "",
-                barcodeMode: "manual",
-                barcodeValue: "",
-                barcodeVariantId: null,
-                barcodeGenerated: false,
-                barcodeSaved: false,
-              });
-            };
+  setAddedItems((prev: any) => [
+    ...prev,
+    {
+      id: newId,
+      itemId: Number(cur.itemId),
+      variantId: cur.variantId ?? null,
+      itemName: cur.itemName,
+      hsnCode: cur.hsnCode,
+      quantity: round2(cur.quantity),
+      altQuantity: round2(cur.altQuantity || 0),
+      price: round2(cur.price),
+      unit: cur.unit,
+      discountPercent: round2(cur.discountPercent || 0),
+      basicAmount: round2(taxData.basic_amount),
+      discountAmount: round2(taxData.discount_amount),
+      taxAmount: round2(taxData.total_tax),
+      cgst: round2(taxData.cgst),
+      sgst: round2(taxData.sgst),
+      igst: round2(taxData.igst),
+      netValue: round2(taxData.net_amount),
+      taxSlab: taxData.tax_percent?.toString() || "0",
+      barcode: finalBarcode || "",
+    },
+  ]);
+
+  setFieldValue("items[0]", {
+    itemId: "",
+    variantId: null,
+    itemName: "",
+    hsnCode: "",
+    quantity: "",
+    altQuantity: "",
+    price: "",
+    unit: "",
+    discountPercent: "",
+    basicAmount: "0.00",
+    discountAmount: "0.00",
+    taxAmount: "0.00",
+    cgst: "0.00",
+    sgst: "0.00",
+    igst: "0.00",
+    netValue: "0.00",
+    taxSlab: "",
+    unit_supports_fractional: false,
+    opStock: 0,
+    existingBarcode: "",
+    barcodeMode: "manual",
+    barcodeValue: "",
+    barcodeVariantId: null,
+    barcodeGenerated: false,
+    barcodeSaved: false,
+  });
+  setIsAddingItem(false); // ✅ FIX
+};
 
             // ── Voucher number fetch ──
             useEffect(() => {
@@ -1415,12 +1435,21 @@ const totals = calculateTotals(addedItems);
                             type="button"
                             onClick={handleAddItem}
                             className={`px-3 py-2 rounded-lg transition flex items-center justify-center gap-1 text-sm h-[38px]
-                              ${!values.items[0].barcodeSaved && isSuperAdmin && !values.items[0].existingBarcode 
+                              ${(!values.items[0].barcodeSaved && canManageBarcode && !values.items[0].existingBarcode) || isAddingItem
                                 ? 'bg-gray-400 cursor-not-allowed' 
                                 : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-                            disabled={!values.items[0].barcodeSaved && isSuperAdmin && !values.items[0].existingBarcode}
+                            disabled={
+                              isAddingItem ||
+                              (!values.items[0].barcodeSaved &&
+                                canManageBarcode &&   // ✅ Combined condition
+                                !values.items[0].existingBarcode)
+                            }
                           >
-                            <FaPlus size={17} /> 
+                            {isAddingItem ? (
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <FaPlus size={17} />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -1428,7 +1457,8 @@ const totals = calculateTotals(addedItems);
 
                     {/* ─── Barcode Input for Superadmin ─── */}
                     <BarcodeInput
-                      isSuperAdmin={isSuperAdmin}
+                      canManageBarcode={canManageBarcode}  
+                      isSuperAdmin={isSuperAdmin}  
                       mode={values.items[0].barcodeMode || 'manual'}
                       barcodeValue={values.items[0].barcodeValue || ''}
                       onBarcodeChange={(value) => setFieldValue("items[0].barcodeValue", value)}
@@ -1541,10 +1571,10 @@ const totals = calculateTotals(addedItems);
 
                     <button
                       type="submit"
-                      disabled={locationLoading}
+                      disabled={locationLoading || isSubmitting}
                       className="px-7 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2 text-sm disabled:opacity-50"
                     >
-                      <FaSave /> Save
+                      <FaSave /> {isSubmitting ? "Saving..." : "Save"}
                     </button>
                     <button
                     onClick={() => navigate("/Addpurchaseitem")}
@@ -1659,7 +1689,12 @@ const totals = calculateTotals(addedItems);
                                             setFieldValue("items[0].unit_supports_fractional", supportsFractional);
                                             setFieldValue("items[0].taxSlab", row.taxSlab || "0");
                                             setFieldValue("items[0].opStock", row.opStock);
-                                            
+
+                                            // ✅ FIX: purane item ka leftover quantity/discount naye item me carry na ho
+                                            setFieldValue("items[0].quantity", "");
+                                            setFieldValue("items[0].altQuantity", "");
+                                            setFieldValue("items[0].discountPercent", "");
+
                                             // ── Store existing barcode if present ──
                                             setFieldValue("items[0].existingBarcode", hasBarcode ? row.barcode : "");
                                             setFieldValue("items[0].barcodeValue", hasBarcode ? row.barcode : "");

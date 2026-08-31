@@ -108,6 +108,7 @@ const PartySelect = ({ name, disabled = false }: { name: string; disabled?: bool
   const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+
   useEffect(() => {
     const fetchAccounts = async () => {
       try {
@@ -592,6 +593,8 @@ const BankReceipt: React.FC = () => {
   const [billType, setBillType] = useState<string>('');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isBranch, setIsBranch] = useState(false);
+  const [isSuperAdminOrEmployee, setIsSuperAdminOrEmployee] = useState(false);
+  
 
   // ✅ PERMISSIONS
   const { canAdd } = usePermission("/Bank-receipt");
@@ -607,10 +610,15 @@ const BankReceipt: React.FC = () => {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-  useEffect(() => {
-    setIsSuperAdmin(getUserRole() === "superadmin");
-    setIsBranch(isBranchUser());
-  }, []);
+// ─── useEffect ───
+useEffect(() => {
+  const role = getUserRole();
+  const isSA = role === "superadmin";
+  const isEmp = role === "employee";
+  
+  setIsSuperAdmin(isSA);
+  setIsSuperAdminOrEmployee(isSA || isEmp);   // ✅ NEW
+}, []);
 
   // Add Export to Excel function
   const exportToExcel = () => {
@@ -1180,107 +1188,80 @@ const BankReceipt: React.FC = () => {
                 return (
                   <>
                     <Form className="p-6 max-h-[70vh] overflow-y-auto space-y-4">
-                      {/* Radio Buttons */}
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium mb-2">Receipt Type</label>
-                        <div className="flex gap-4 flex-wrap">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              value="manual"
-                              checked={values.receiptType === "manual"}
-                              onChange={() => {
-                                setFieldValue("receiptType", "manual");
-                                setFieldValue("billNo", "");
-                                setFieldValue("selectedBill", null);
-                                setFieldValue("opAccount", null);
-                              }}
-                            />
-                            <span>Manual</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              value="salesEntry"
-                              checked={values.receiptType === "salesEntry"}
-                              onChange={() => {
-                                setFieldValue("receiptType", "salesEntry");
-                                setFieldValue("billNo", "");
-                                setFieldValue("selectedBill", null);
-                                setFieldValue("opAccount", null);
-                              }}
-                            />
-                            <span>Sales Entry</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              value="purchaseReturn"
-                              checked={values.receiptType === "purchaseReturn"}
-                              onChange={() => {
-                                setFieldValue("receiptType", "purchaseReturn");
-                                setFieldValue("billNo", "");
-                                setFieldValue("selectedBill", null);
-                                setFieldValue("opAccount", null);
-                              }}
-                            />
-                            <span>Purchase Return</span>
-                          </label>
-                          {/* Stock Transfer, superadmin only */}
-                          {isSuperAdmin && (
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                value="stockTransfer"
-                                checked={values.receiptType === "stockTransfer"}
-                                onChange={() => {
-                                  setFieldValue("receiptType", "stockTransfer");
-                                  setFieldValue("billNo", "");
-                                  setFieldValue("selectedBill", null);
-                                  setFieldValue("opAccount", null);
-                                }}
-                              />
-                              <span>Stock Transfer</span>
-                            </label>
-                          )}
+{/* Radio Buttons - Receipt Type */}
+<div className="mb-4">
+  <label className="block text-sm font-medium mb-2">Receipt Type</label>
+  <div className="flex gap-4 flex-wrap">
+    <label className="flex items-center gap-2">
+      <input type="radio" value="manual" checked={values.receiptType === "manual"} onChange={() => {
+        setFieldValue("receiptType", "manual");
+        setFieldValue("billNo", "");
+        setFieldValue("selectedBill", null);
+        setFieldValue("opAccount", null);
+      }} />
+      <span>Manual</span>
+    </label>
+    
+    <label className="flex items-center gap-2">
+      <input type="radio" value="salesEntry" checked={values.receiptType === "salesEntry"} onChange={() => {
+        setFieldValue("receiptType", "salesEntry");
+        setFieldValue("billNo", "");
+        setFieldValue("selectedBill", null);
+        setFieldValue("opAccount", null);
+      }} />
+      <span>Sales Entry</span>
+    </label>
+    
+    <label className="flex items-center gap-2">
+      <input type="radio" value="purchaseReturn" checked={values.receiptType === "purchaseReturn"} onChange={() => {
+        setFieldValue("receiptType", "purchaseReturn");
+        setFieldValue("billNo", "");
+        setFieldValue("selectedBill", null);
+        setFieldValue("opAccount", null);
+      }} />
+      <span>Purchase Return</span>
+    </label>
 
-                          {/* B2B Sale, superadmin only */}
-                          {isSuperAdmin && (
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                value="b2bSale"
-                                checked={values.receiptType === "b2bSale"}
-                                onChange={() => {
-                                  setFieldValue("receiptType", "b2bSale");
-                                  setFieldValue("billNo", "");
-                                  setFieldValue("selectedBill", null);
-                                  setFieldValue("opAccount", null);
-                                }}
-                              />
-                              <span>B2B Sale</span>
-                            </label>
-                          )}
+    {/* ✅ Stock Transfer - Superadmin OR Employee (donon ko dikhe) */}
+    {isSuperAdminOrEmployee && (
+      <label className="flex items-center gap-2">
+        <input type="radio" value="stockTransfer" checked={values.receiptType === "stockTransfer"} onChange={() => {
+          setFieldValue("receiptType", "stockTransfer");
+          setFieldValue("billNo", "");
+          setFieldValue("selectedBill", null);
+          setFieldValue("opAccount", null);
+        }} />
+        <span>Stock Transfer</span>
+      </label>
+    )}
 
-                          {/* Stock Return, branch users only */}
-                          {isBranch && (
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                value="stockReturn"
-                                checked={values.receiptType === "stockReturn"}
-                                onChange={() => {
-                                  setFieldValue("receiptType", "stockReturn");
-                                  setFieldValue("billNo", "");
-                                  setFieldValue("selectedBill", null);
-                                  setFieldValue("opAccount", null);
-                                }}
-                              />
-                              <span>Stock Return</span>
-                            </label>
-                          )}
-                        </div>
-                      </div>
+    {/* ✅ B2B Sale - Superadmin OR Employee (donon ko dikhe) */}
+    {isSuperAdminOrEmployee && (
+      <label className="flex items-center gap-2">
+        <input type="radio" value="b2bSale" checked={values.receiptType === "b2bSale"} onChange={() => {
+          setFieldValue("receiptType", "b2bSale");
+          setFieldValue("billNo", "");
+          setFieldValue("selectedBill", null);
+          setFieldValue("opAccount", null);
+        }} />
+        <span>B2B Sale</span>
+      </label>
+    )}
+
+    {/* ✅ Stock Return - Sirf normal branch users (superadmin/employee nahi) */}
+    {!isSuperAdminOrEmployee && (
+      <label className="flex items-center gap-2">
+        <input type="radio" value="stockReturn" checked={values.receiptType === "stockReturn"} onChange={() => {
+          setFieldValue("receiptType", "stockReturn");
+          setFieldValue("billNo", "");
+          setFieldValue("selectedBill", null);
+          setFieldValue("opAccount", null);
+        }} />
+        <span>Stock Return</span>
+      </label>
+    )}
+  </div>
+</div>
 
                       {/* Bill Search */}
                       {(values.receiptType === "salesEntry" || values.receiptType === "purchaseReturn") && (
