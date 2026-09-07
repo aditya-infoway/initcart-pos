@@ -15,6 +15,64 @@ import Swal from "sweetalert2";
 import { toast } from "react-toastify";
 import api from "../../api/api";
 import { usePermission } from "../../hooks/usePermissions";
+import jsPDF from "jspdf";
+
+
+// ✅ NEW — module-level helper, component ke bahar
+const downloadErrorReportPdf = (errors: string[]) => {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const marginX = 14;
+  let y = 20;
+
+  doc.setFontSize(16);
+  doc.setTextColor(180, 30, 30);
+  doc.text("Purchase Import — Error Report", marginX, y);
+  y += 8;
+
+  doc.setFontSize(10);
+  doc.setTextColor(90, 90, 90);
+  doc.text(`Generated: ${new Date().toLocaleString()}`, marginX, y);
+  y += 10;
+
+  doc.setFontSize(11);
+  doc.setTextColor(0, 0, 0);
+  doc.text(`${errors.length} issue(s) found. Fix these in your Excel file and re-upload:`, marginX, y);
+  y += 8;
+
+  doc.setFontSize(10);
+  errors.forEach((err, idx) => {
+    const lines = doc.splitTextToSize(`${idx + 1}. ${err}`, pageWidth - marginX * 2) as string[];
+    lines.forEach((line) => {
+      if (y > 280) { doc.addPage(); y = 20; }
+      doc.text(line, marginX, y);
+      y += 6;
+    });
+    y += 2;
+  });
+
+  doc.addPage();
+  y = 20;
+  doc.setFontSize(13);
+  doc.setTextColor(30, 100, 30);
+  doc.text("Common Fixes", marginX, y);
+  y += 8;
+  doc.setFontSize(10);
+  doc.setTextColor(0, 0, 0);
+  [
+    "PARTY_NAME, DATE, TERMS, ITEM_VARIANT, QTY, PRICE must be filled for every entry.",
+    "Credit terms: fill only DUE_DATE. Cash: fill only CASH_ACCOUNT. Bank: fill only BANK_ACCOUNT.",
+    "Item names must exactly match one of the dropdown options — don't type them manually.",
+    "DISCOUNT_PERCENT must be a number between 0 and 100.",
+    "A new PARTY_NAME row starts a new purchase entry — don't repeat items under a blank party row.",
+  ].forEach((tip) => {
+    const lines = doc.splitTextToSize(`• ${tip}`, pageWidth - marginX * 2) as string[];
+    lines.forEach((line) => { doc.text(line, marginX, y); y += 6; });
+    y += 2;
+  });
+
+  doc.save(`purchase-import-errors-${Date.now()}.pdf`);
+};
 
 const PurchaseExcelImportExport: React.FC = () => {
   const navigate = useNavigate();
@@ -124,6 +182,7 @@ const PurchaseExcelImportExport: React.FC = () => {
         });
         navigate("/Addpurchaseitem");
       }
+// ── AFTER ──
     } catch (error: any) {
       console.error("Purchase import error:", error);
       if (error.response?.data?.errors) {
@@ -141,10 +200,18 @@ const PurchaseExcelImportExport: React.FC = () => {
               <div class="max-h-60 overflow-y-auto">
                 <ul class="list-disc pl-4">${errorList}</ul>
               </div>
+              <button id="download-error-pdf-btn" type="button"
+                class="mt-3 w-full bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-4 py-2 rounded-lg">
+                Download Error Report (PDF)
+              </button>
             </div>
           `,
           icon: "error",
           confirmButtonColor: "#d33",
+          didOpen: () => {
+            document.getElementById("download-error-pdf-btn")
+              ?.addEventListener("click", () => downloadErrorReportPdf(errors));
+          },
         });
       } else {
         toast.error(error.response?.data?.error || "Failed to import purchases");

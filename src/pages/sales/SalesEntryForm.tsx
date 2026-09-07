@@ -935,9 +935,9 @@ const SalesEntryForm: React.FC = () => {
   const handleAddItem = async () => {
     const errors: Record<string, string> = {};
     if (!selectedCustomerId) { toast.error("Select Customer first"); return; }
-    if (!currentItem.itemId)                                   errors.itemId = "Item select karein";
-    if (!currentItem.quantity || Number(currentItem.quantity) <= 0) errors.quantity = "Valid quantity enter karein";
-    if (!currentItem.price || Number(currentItem.price) <= 0)  errors.price = "Valid price enter karein";
+    if (!currentItem.itemId)                                   errors.itemId = "Select item";
+    if (!currentItem.quantity || Number(currentItem.quantity) <= 0) errors.quantity = "Enter Valid quantity";
+    if (!currentItem.price || Number(currentItem.price) <= 0)  errors.price = "Enter Valid price";
     if (!currentItem.per)                                      errors.per = "Unit required";
 
     if (Object.keys(errors).length > 0) {
@@ -1244,16 +1244,20 @@ const SalesEntryForm: React.FC = () => {
 
                       {/* Select Item button */}
                       <div className="flex flex-col justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setOpenModal(true)}
-                          className={`px-3 py-2 rounded-lg transition flex items-center justify-center gap-1 text-sm h-[38px] w-full
-                            ${currentItemErrors.itemId
-                              ? "bg-red-500 text-white hover:bg-red-600 ring-2 ring-red-300"
-                              : "bg-green-600 text-white hover:bg-green-700"}`}
-                        >
-                          <FaSearch size={12} /> Select
-                        </button>
+<button
+  type="button"
+  onClick={() => {
+    setSearchTerm("");
+    setFilteredItems(itemsModalData); 
+    setOpenModal(true);
+  }}
+  className={`px-3 py-2 rounded-lg transition flex items-center justify-center gap-1 text-sm h-[38px] w-full
+    ${currentItemErrors.itemId
+      ? "bg-red-500 text-white hover:bg-red-600 ring-2 ring-red-300"
+      : "bg-green-600 text-white hover:bg-green-700"}`}
+>
+  <FaSearch size={12} /> Select
+</button>
                         {currentItemErrors.itemId && (
                           <p className="text-xs text-red-500 mt-1">{currentItemErrors.itemId}</p>
                         )}
@@ -1543,25 +1547,26 @@ const SalesEntryForm: React.FC = () => {
                                 {filteredItems.map((row, idx) => (
                                   <tr key={idx} className="border-b hover:bg-gray-50 transition">
                                     <td className="px-2 py-2 text-center">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          applyItemToForm(row);
-                                          setOpenModal(false);
-                                          setSearchTerm("");
-                                          setTimeout(() => {
-                                            const qtyInput = document.querySelector<HTMLInputElement>('[data-qty-input="true"]');
-                                            if (qtyInput) qtyInput.focus();
-                                          }, 200);
-                                        }}
-                                        disabled={row.current_stock <= 0}
-                                        className={`px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 mx-auto
-                                          ${row.current_stock > 0
-                                            ? "bg-green-500 text-white hover:bg-green-600"
-                                            : "bg-gray-300 text-gray-500 cursor-not-allowed"}`}
-                                      >
-                                        <FaCheckCircle size={10} /> Select
-                                      </button>
+<button
+  type="button"
+  onClick={() => {
+    applyItemToForm(row);
+    setOpenModal(false);
+    setSearchTerm("");
+    setFilteredItems(itemsModalData);   // ✅ next open ke liye list wapas full reset
+    setTimeout(() => {
+      const qtyInput = document.querySelector<HTMLInputElement>('[data-qty-input="true"]');
+      if (qtyInput) qtyInput.focus();
+    }, 200);
+  }}
+  disabled={row.current_stock <= 0}
+  className={`px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 mx-auto
+    ${row.current_stock > 0
+      ? "bg-green-500 text-white hover:bg-green-600"
+      : "bg-gray-300 text-gray-500 cursor-not-allowed"}`}
+>
+  <FaCheckCircle size={10} /> Select
+</button>
                                     </td>
                                     <td className="px-2 py-2 font-medium">{row.itemName}</td>
                                     <td className="px-2 py-2 font-mono text-xs">{row.hsnCode}</td>
@@ -1591,13 +1596,13 @@ const SalesEntryForm: React.FC = () => {
                           </div>
                         </div>
                         <div className="flex justify-center p-4 pt-0">
-                          <button
-                            type="button"
-                            onClick={() => { setOpenModal(false); setSearchTerm(""); }}
-                            className="px-8 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
-                          >
-                            Close
-                          </button>
+<button
+  type="button"
+  onClick={() => { setOpenModal(false); setSearchTerm(""); setFilteredItems(itemsModalData); }}
+  className="px-8 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
+>
+  Close
+</button>
                         </div>
                       </motion.div>
                     </div>
