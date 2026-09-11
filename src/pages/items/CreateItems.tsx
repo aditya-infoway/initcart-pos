@@ -1,5 +1,6 @@
 // CreateItems.tsx - Complete file with Employee access (same as Superadmin)
 // ✅ SIRF 5 CHANGES: Employee access add kiye hain, baaki sab PURANA WAISA HI HAI
+//old software page with all functionalities
 
 import React, { useEffect, useState } from "react";
 import { Formik, Form, useField, useFormikContext } from "formik";
@@ -425,7 +426,7 @@ const CreateItems: React.FC = () => {
   const [branchLoaded, setBranchLoaded] = useState(false);
   const [addedItems, setAddedItems] = useState<VariantItem[]>([]);
   const [toggleOk, setToggleOk] = useState<boolean>(false);
-  const [entryType, setEntryType] = useState<"company" | "manual">("company");
+  const [entryType, setEntryType] = useState<"company" | "manual">("manual");
   const [loading, setLoading] = useState(true);
   const [initialItemData, setInitialItemData] = useState<any>(null);
   const [dataFetchComplete, setDataFetchComplete] = useState(false);
@@ -1202,7 +1203,17 @@ const CreateItems: React.FC = () => {
                 </div>
 
                 <FormInput label="HSN Code" name="hsnCode" />
-                <FormSelect label="Tax Slab" name="taxSlab" options={["5%", "12%", "18%", "28%", "Tax Free"].map(t => ({ label: t, value: t }))} />
+                                <FormSelect
+                  label="Tax Slab"
+                  name="taxSlab"
+                  options={[
+                    { label: "5%", value: "5" },
+                    { label: "12%", value: "12" },
+                    { label: "18%", value: "18" },
+                    { label: "28%", value: "28" },
+                    { label: "Tax Free", value: "0" },
+                  ]}
+                />
               </div>
 
               {/* Size / Price Details Section */}

@@ -10,7 +10,6 @@ import CreateItems from "../pages/items/CreateItems";
 import PurchaseEntryForm from "../pages/transactions/PurchaseEntryForm";
 import PurchaseReturnForm from "../pages/transactions/PurchaseReturnForm";
 import SalesEntryForm from "../pages/sales/SalesEntryForm";
-// import SaleReceipt from "../pages/sales/salereceipt";
 import SalesReturnForm from "../pages/sales/SalesReturnForm";
 import StockReport from "../pages/reports/StockReport";
 import LedgerReport from "../pages/reports/LedgerReport";
@@ -70,7 +69,11 @@ import B2BSalesList from "../pages/transactions/B2BSalesList";
 import EmployeeList from "../pages/Employees/EployeeList";
 import EmployeeForm from "../pages/Employees/EmployeeForm";
 import EmployeePermissions from "../pages/Employees/EmployeePermissions";
-// import AccountCreationForm from "../pages/accounts/AccountCreationForm";
+import AIPurchaseBill from "../pages/AI/AIPurchaseBill";
+import PurchaseExcelImportExport from "../pages/transactions/PurchaseExcelImportExport_1";
+import MyBranches from "../pages/accounts/MyBranches";
+
+
 
 const AppRouter = () => (
   <BrowserRouter basename="/pos">
@@ -155,28 +158,13 @@ const AppRouter = () => (
         <Route path="/Employees" element={<EmployeeForm/>}/>
         <Route path="/Employees/edit/:id/" element={<EmployeeForm/>}/>
         <Route path="/employees/:id/permissions" element={<EmployeePermissions/>}/>
-        {/* <Route path="/productcategory" element={<ProductCategory />} />
-        <Route path="/servicecategory" element={<ServiceCategory />} />
-        <Route path="/productvendor" element={<ProductVendor />} />
-        <Route path="/servicevendor" element={<ServiceVendor />} />
-        <Route path="/servicevendorrequests" element={<ServiceVendorRequests />} />
-        <Route path="/productvendorrequests" element={<ProductVendorRequests />} />
-        <Route path="/subcategory" element={<SubCategory />} />
-        <Route path="/subsubcategory" element={<SubSubCategory />} />
-        <Route path="/allorders" element={<All />} />
-        <Route path="/pendingorders" element={<Pending />} />
-        <Route path="/confirmedorders" element={<Confirmed />} />
-        <Route path="/packagingorders" element={<Packaging />} />
-        <Route path="/outfordeliveryorders" element={<OutForDelivery />} />
-        <Route path="/deliveredorders" element={<Delivered />} />
-        <Route path="/returnedorders" element={<Returned />} />
-        <Route path="/failedtodeliverorders" element={<FailedToDeliver />} />
-        <Route path="/cancelledorders" element={<Cancelled />} /> */}
 
-        {/* Add more protected routes */}
+        <Route path="/aipurchasebill" element={<AIPurchaseBill/>}/>
+        <Route path="/purchaseimport" element={<PurchaseExcelImportExport/>}/>
+        <Route path="/myBranches" element={<MyBranches />} />
+
       </Route>
 
-      {/* <Route path="*" element={<NotFound />} /> <==== ADD LATER */}
     </Routes>
   </BrowserRouter>
 );
