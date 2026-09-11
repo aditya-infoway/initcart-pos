@@ -25,7 +25,7 @@ const PAGE_ALLOWED_ACTIONS: Record<string, AllowedActions> = {
   "/AddItems":             { can_view: true, can_add: true,  can_edit: true,  can_delete: true },  // Add Items
   "/WebItems":             { can_view: true, can_add: true,  can_edit: true,  can_delete: true },  // Website Items
   "/PendingBarcodes":      { can_view: true, can_add: true,  can_edit: true,  can_delete: false }, // Item Barcodes
-  "/Orders":                { can_view: true, can_add: false, can_edit: false, can_delete: false }, // Orders
+  "/Orders":                { can_view: true, can_add: false, can_edit: true, can_delete: false }, // Orders
   "/createGroup":           { can_view: true, can_add: true,  can_edit: true,  can_delete: true },  // Group
   "/ExcelImportExport":     { can_view: true, can_add: true,  can_edit: false, can_delete: false }, // Item Import
 

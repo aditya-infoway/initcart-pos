@@ -8,6 +8,7 @@ import {
 } from "react-icons/fa";
 import Swal from "sweetalert2";
 import api from "../../api/api";
+import { usePermission } from "../../hooks/usePermissions"; // ✅ ADDED
 
 interface OrderItem {
   id: number;
@@ -84,6 +85,8 @@ const BranchOrderDetailPage: React.FC = () => {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
   
+  const { canEdit } = usePermission("/Orders"); // ✅ ADDED
+  
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -130,32 +133,32 @@ const BranchOrderDetailPage: React.FC = () => {
     }
   };
 
-const fetchDeliveryInfo = async () => {
+  const fetchDeliveryInfo = async () => {
     try {
-        const response = await api.get(`/branch/orders/${orderId}/delivery/`);
-        
-        if (response.data.success && response.data.data) {
-            setDeliveryInfo(response.data.data);
-        }
+      const response = await api.get(`/branch/orders/${orderId}/delivery/`);
+      
+      if (response.data.success && response.data.data) {
+        setDeliveryInfo(response.data.data);
+      }
     } catch (error: any) {
-        // If 404, it's okay - delivery info doesn't exist yet
-        if (error.response?.status !== 404) {
-            console.error("Error fetching delivery info:", error);
-        }
-        // Initialize with default values
-        setDeliveryInfo({
-            delivery_service: "self",
-            delivery_man_name: "",
-            delivery_man_phone: "",
-            delivery_incentive: 0,
-            expected_delivery_date: "",
-            tracking_id: "",
-            courier_name: "",
-            courier_website: "",
-            delivery_status: "pending"
-        });
+      // If 404, it's okay - delivery info doesn't exist yet
+      if (error.response?.status !== 404) {
+        console.error("Error fetching delivery info:", error);
+      }
+      // Initialize with default values
+      setDeliveryInfo({
+        delivery_service: "self",
+        delivery_man_name: "",
+        delivery_man_phone: "",
+        delivery_incentive: 0,
+        expected_delivery_date: "",
+        tracking_id: "",
+        courier_name: "",
+        courier_website: "",
+        delivery_status: "pending"
+      });
     }
-};
+  };
 
   const handleBack = () => {
     navigate(-1);
@@ -289,42 +292,40 @@ const fetchDeliveryInfo = async () => {
     }
   };
 
-// In BranchOrderDetail.tsx - Update handleStatusUpdate function
-
-const handleStatusUpdate = async () => {
+  const handleStatusUpdate = async () => {
     setUpdating(true);
     try {
-        // Send order_id and item_status to update ALL items in the order
-        const response = await api.post(
-            '/branch/orders/status/update/',
-            {
-                order_id: orderId,  // ✅ Use order_id to update all items
-                item_status: selectedStatus
-            }
-        );
-        
-        if (response.data.success) {
-            Swal.fire({
-                icon: 'success',
-                title: 'Success',
-                text: response.data.message,
-                timer: 2000,
-                showConfirmButton: false
-            });
-            
-            fetchOrderDetail();
+      // Send order_id and item_status to update ALL items in the order
+      const response = await api.post(
+        '/branch/orders/status/update/',
+        {
+          order_id: orderId,  // ✅ Use order_id to update all items
+          item_status: selectedStatus
         }
-    } catch (error: any) {
-        console.error("Error updating status:", error);
+      );
+      
+      if (response.data.success) {
         Swal.fire({
-            icon: 'error',
-            title: 'Error',
-            text: error.response?.data?.message || 'Failed to update order status'
+          icon: 'success',
+          title: 'Success',
+          text: response.data.message,
+          timer: 2000,
+          showConfirmButton: false
         });
+        
+        fetchOrderDetail();
+      }
+    } catch (error: any) {
+      console.error("Error updating status:", error);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: error.response?.data?.message || 'Failed to update order status'
+      });
     } finally {
-        setUpdating(false);
+      setUpdating(false);
     }
-};
+  };
 
   const handleDeliveryServiceChange = (service: string) => {
     setDeliveryInfo({
@@ -577,160 +578,164 @@ const handleStatusUpdate = async () => {
                 </div>
               </div>
 
-              {/* Change Order Status */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-700 mb-4">Update Order Status</h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Order Status
-                    </label>
-                    <select
-                      value={selectedStatus}
-                      onChange={(e) => setSelectedStatus(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              {/* ✅ Change Order Status - Only visible if canEdit */}
+              {canEdit && (
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-700 mb-4">Update Order Status</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Order Status
+                      </label>
+                      <select
+                        value={selectedStatus}
+                        onChange={(e) => setSelectedStatus(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        disabled={updating}
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="processing">Packaging</option>
+                        <option value="shipped">Out for Delivery</option>
+                        <option value="delivered">Delivered</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="refunded">Returned</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={handleStatusUpdate}
                       disabled={updating}
+                      className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
                     >
-                      <option value="pending">Pending</option>
-                      <option value="confirmed">Confirmed</option>
-                      <option value="processing">Packaging</option>
-                      <option value="shipped">Out for Delivery</option>
-                      <option value="delivered">Delivered</option>
-                      <option value="cancelled">Cancelled</option>
-                      <option value="refunded">Returned</option>
-                    </select>
+                      {updating ? <><FaSpinner className="animate-spin" /> Updating...</> : 'Update Status'}
+                    </button>
                   </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ✅ Delivery Information - Only visible if canEdit */}
+          {canEdit && (
+            <div className="bg-white rounded-lg shadow-sm p-4 md:p-6">
+              <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center">
+                <FaTruck className="mr-2 text-blue-500" /> Delivery Information
+              </h3>
+
+              {/* Delivery Service Selection */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Service</label>
+                <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={handleStatusUpdate}
-                    disabled={updating}
-                    className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    onClick={() => handleDeliveryServiceChange("self")}
+                    className={`px-4 py-2 rounded-lg ${
+                      deliveryInfo.delivery_service === "self"
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
                   >
-                    {updating ? <><FaSpinner className="animate-spin" /> Updating...</> : 'Update Status'}
+                    Self Delivery
+                  </button>
+                  <button
+                    onClick={() => handleDeliveryServiceChange("courier")}
+                    className={`px-4 py-2 rounded-lg ${
+                      deliveryInfo.delivery_service === "courier"
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                  >
+                    Courier Service
                   </button>
                 </div>
               </div>
+
+              {deliveryInfo.delivery_service === "courier" ? (
+                // Courier Service Form
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Courier Name</label>
+                      <input
+                        type="text"
+                        value={deliveryInfo.courier_name || ""}
+                        onChange={(e) => setDeliveryInfo({ ...deliveryInfo, courier_name: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        placeholder="Enter courier name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Tracking ID</label>
+                      <input
+                        type="text"
+                        value={deliveryInfo.tracking_id || ""}
+                        onChange={(e) => setDeliveryInfo({ ...deliveryInfo, tracking_id: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        placeholder="Enter tracking ID"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Expected Delivery Date</label>
+                    <input
+                      type="date"
+                      value={deliveryInfo.expected_delivery_date || ""}
+                      onChange={(e) => setDeliveryInfo({ ...deliveryInfo, expected_delivery_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    />
+                  </div>
+                  <button
+                    onClick={handleDeliveryInfoUpdate}
+                    disabled={updating}
+                    className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    {updating ? 'Updating...' : 'Update Delivery Information'}
+                  </button>
+                </div>
+              ) : (
+                // Self Delivery Form
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Man Name</label>
+                      <input
+                        type="text"
+                        value={deliveryInfo.delivery_man_name || ""}
+                        onChange={(e) => setDeliveryInfo({ ...deliveryInfo, delivery_man_name: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        placeholder="Enter delivery man name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Man Phone</label>
+                      <input
+                        type="tel"
+                        value={deliveryInfo.delivery_man_phone || ""}
+                        onChange={(e) => setDeliveryInfo({ ...deliveryInfo, delivery_man_phone: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        placeholder="Enter phone number"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Expected Delivery Date</label>
+                    <input
+                      type="date"
+                      value={deliveryInfo.expected_delivery_date || ""}
+                      onChange={(e) => setDeliveryInfo({ ...deliveryInfo, expected_delivery_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    />
+                  </div>
+                  <button
+                    onClick={handleDeliveryInfoUpdate}
+                    disabled={updating}
+                    className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    {updating ? 'Updating...' : 'Update Delivery Information'}
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-
-          {/* Delivery Information */}
-          <div className="bg-white rounded-lg shadow-sm p-4 md:p-6">
-            <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center">
-              <FaTruck className="mr-2 text-blue-500" /> Delivery Information
-            </h3>
-
-            {/* Delivery Service Selection */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Service</label>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => handleDeliveryServiceChange("self")}
-                  className={`px-4 py-2 rounded-lg ${
-                    deliveryInfo.delivery_service === "self"
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  Self Delivery
-                </button>
-                <button
-                  onClick={() => handleDeliveryServiceChange("courier")}
-                  className={`px-4 py-2 rounded-lg ${
-                    deliveryInfo.delivery_service === "courier"
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  Courier Service
-                </button>
-              </div>
-            </div>
-
-            {deliveryInfo.delivery_service === "courier" ? (
-              // Courier Service Form
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Courier Name</label>
-                    <input
-                      type="text"
-                      value={deliveryInfo.courier_name || ""}
-                      onChange={(e) => setDeliveryInfo({ ...deliveryInfo, courier_name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                      placeholder="Enter courier name"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Tracking ID</label>
-                    <input
-                      type="text"
-                      value={deliveryInfo.tracking_id || ""}
-                      onChange={(e) => setDeliveryInfo({ ...deliveryInfo, tracking_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                      placeholder="Enter tracking ID"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Expected Delivery Date</label>
-                  <input
-                    type="date"
-                    value={deliveryInfo.expected_delivery_date || ""}
-                    onChange={(e) => setDeliveryInfo({ ...deliveryInfo, expected_delivery_date: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  />
-                </div>
-                <button
-                  onClick={handleDeliveryInfoUpdate}
-                  disabled={updating}
-                  className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  {updating ? 'Updating...' : 'Update Delivery Information'}
-                </button>
-              </div>
-            ) : (
-              // Self Delivery Form
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Man Name</label>
-                    <input
-                      type="text"
-                      value={deliveryInfo.delivery_man_name || ""}
-                      onChange={(e) => setDeliveryInfo({ ...deliveryInfo, delivery_man_name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                      placeholder="Enter delivery man name"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Man Phone</label>
-                    <input
-                      type="tel"
-                      value={deliveryInfo.delivery_man_phone || ""}
-                      onChange={(e) => setDeliveryInfo({ ...deliveryInfo, delivery_man_phone: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                      placeholder="Enter phone number"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Expected Delivery Date</label>
-                  <input
-                    type="date"
-                    value={deliveryInfo.expected_delivery_date || ""}
-                    onChange={(e) => setDeliveryInfo({ ...deliveryInfo, expected_delivery_date: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  />
-                </div>
-                <button
-                  onClick={handleDeliveryInfoUpdate}
-                  disabled={updating}
-                  className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  {updating ? 'Updating...' : 'Update Delivery Information'}
-                </button>
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
         {/* Right Column - Address and Customer Info */}

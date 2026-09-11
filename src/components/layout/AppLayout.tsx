@@ -431,7 +431,7 @@ const filteredMenuItems = React.useMemo(() => {
   if (!menuItems) return [];
 
   const isEmployee = user?.role === "employee";
-
+ 
   if (isEmployee) {
     const allowedKeys = new Set(permissions.filter(p => p.can_view).map(p => p.page_key));
     return menuItems

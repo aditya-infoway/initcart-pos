@@ -1,4 +1,4 @@
-// src/pages/PendingBarcodes.tsx (updated with pagination)
+// src/pages/PendingBarcodes.tsx (updated with pagination) old software opafe with all functionalities
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
