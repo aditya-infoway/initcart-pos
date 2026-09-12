@@ -17,6 +17,7 @@ import { FaRegCircleXmark } from "react-icons/fa6";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+import { usePermission } from "../../hooks/usePermissions";
 
 // Add this after the imports
 const safeNumber = (val: any): number => {
@@ -640,6 +641,7 @@ const EMPTY_GST: ItemGstValue = { basic: 0, tax: 0, cgst: 0, sgst: 0, igst: 0, n
 
 function OrderTracking() {
   const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
+  const { canAdd, canEdit, canDelete } = usePermission("/stockTransfer");
   const [allOrders, setAllOrders] = useState<BranchOrderListItem[]>([]);
   const [loadingAll, setLoadingAll] = useState(false);
   const [view, setView] = useState<"branches" | "list">("branches");
@@ -943,12 +945,12 @@ function OrderTracking() {
                             className="text-indigo-500 hover:text-indigo-700 transition-colors" title="View & Process">
                             <FaEye size={16} />
                           </button>
-                          {o.status === "pending" && (
-                            <button onClick={() => cancelOrder(o.id)}
-                              className="text-red-400 hover:text-red-600 transition-colors" title="Cancel Order">
-                              <FaRegCircleXmark size={16} />
-                            </button>
-                          )}
+{o.status === "pending" && canDelete && (
+  <button onClick={() => cancelOrder(o.id)}
+    className="text-red-400 hover:text-red-600 transition-colors" title="Cancel Order">
+    <FaRegCircleXmark size={16} />
+  </button>
+)}
                         </div>
                       </td>
                     </tr>
@@ -1251,11 +1253,13 @@ function OrderTracking() {
               className="px-5 py-2.5 border-2 border-red-200 text-red-500 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors">
               <FaTimes className="inline mr-1.5" size={11} /> Cancel Order
             </button>
-            <button onClick={processOrder} disabled={processing || activeItems.length === 0}
-              className="px-7 py-2.5 rounded-xl text-sm font-bold text-white shadow-md disabled:opacity-40 flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:shadow-lg">
-              <FaCheckDouble size={13} />
-              {processing ? "Processing..." : "Send Items (Create Transfer)"}
-            </button>
+{canAdd && (
+  <button onClick={processOrder} disabled={processing || activeItems.length === 0}
+    className="px-7 py-2.5 rounded-xl text-sm font-bold text-white shadow-md disabled:opacity-40 flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:shadow-lg">
+    <FaCheckDouble size={13} />
+    {processing ? "Processing..." : "Send Items (Create Transfer)"}
+  </button>
+)}
           </div>
         )}
       </div>
@@ -1273,9 +1277,9 @@ const MANUAL_STATUS_COLUMNS: StatusColumnConfig[] = [
 ];
 
 export default function StockTransfer() {
-
   const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
   const { user } = useAuthStore();
+  const { canAdd, canEdit, canDelete } = usePermission("/stockTransfer");
   const [mode, setMode] = useState<"manual" | "order_tracking">("manual");
 
   const [tab, setTab] = useState<"list" | "create">("list");
@@ -1674,15 +1678,15 @@ function updateRow(i: number, key: "quantity" | "rate" | "discountPercent", val:
               <p className="text-xs text-gray-400">Super Admin · {user?.username}</p>
             </div>
           </div>
-          {mode === "manual" && !detail && (
-            <button
-              onClick={() => { setTab(t => t === "create" ? "list" : "create"); resetForm(); }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all
-                ${tab === "list" ? "bg-gradient-to-r from-blue-700 to-blue-600 text-white shadow-md" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-            >
-              {tab === "list" ? <><FaPlus size={12} /> New Transfer</> : <><FaArrowLeft size={12} /> Back to List</>}
-            </button>
-          )}
+{mode === "manual" && !detail && canAdd && (
+  <button
+    onClick={() => { setTab(t => t === "create" ? "list" : "create"); resetForm(); }}
+    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all
+      ${tab === "list" ? "bg-gradient-to-r from-blue-700 to-blue-600 text-white shadow-md" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+  >
+    {tab === "list" ? <><FaPlus size={12} /> New Transfer</> : <><FaArrowLeft size={12} /> Back to List</>}
+  </button>
+)}
         </div>
 
         {/* MODE RADIO BUTTONS */}
