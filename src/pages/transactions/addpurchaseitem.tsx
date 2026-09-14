@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useRef } from "react";
-import { FaEye, FaSearch, FaFilter, FaTimes , FaFileExcel} from "react-icons/fa";
+import { FaEye, FaSearch, FaFilter, FaTimes , FaFileExcel, FaRobot} from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import api from "../../api/api";
 import * as XLSX from "xlsx";
 import { usePermission } from "../../hooks/usePermissions";
+import AIBillUploadModal from "../AI/AIBillUploadModal";
+import Swal from "sweetalert2";
 // ------------------ Common variant columns ------------------
 const COMMON_VARIANT_COLUMNS = [
   "itemName_name",
@@ -47,6 +49,8 @@ const Addpurchaseitem: React.FC = () => {
 
   // ✅ Pagination state (for filtered items)
   const [currentPage, setCurrentPage] = useState(1);
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
     // ✅ Add Export to Excel function
@@ -118,6 +122,9 @@ const Addpurchaseitem: React.FC = () => {
     
     toast.success(`Exported ${filteredItems.length} records successfully`);
   };
+
+  
+
 
   // ------------------ Fetch All Purchases (without pagination from API) ------------------
 const fetchItems = async () => {
@@ -303,6 +310,17 @@ const fetchItems = async () => {
             <FaFileExcel size={16} />
             Export Excel
           </button>
+
+
+{/*{canAdd && (
+  <button
+    onClick={() => setAiModalOpen(true)}
+    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow transition"
+  >
+    <FaRobot size={16} />
+    AI Bill Upload
+  </button>
+)}*/}
           {canAdd && (
           <button
             onClick={() => navigate("/purchases")}
@@ -311,6 +329,7 @@ const fetchItems = async () => {
             + Add Purchase
           </button>
           )}
+
         </div>
       </div>
 

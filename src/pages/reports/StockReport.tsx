@@ -581,13 +581,17 @@ const StockReport: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-center">
-                    <button
-                      onClick={() => navigate(`/stockDetail/${item.variantId}`)}
-                      className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition"
-                      title="View Stock History"
-                    >
-                      <FaEye />
-                    </button>
+<button
+  onClick={() => navigate(
+    selectedBranchId
+      ? `/stockDetail/${item.variantId}?branch_id=${selectedBranchId}`
+      : `/stockDetail/${item.variantId}`
+  )}
+  className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition"
+  title="View Stock History"
+>
+  <FaEye />
+</button>
                   </td>
                 </tr>
               ))

@@ -48,6 +48,10 @@ interface Branch {
     sundry_creditor_account_name?: string | null;
     created_by?: number;
     created_by_name?: string;
+    // ✅ NEW
+    gst_number?: string;
+    pan_number?: string;
+    pan_card?: string;
 
 }
 
@@ -71,6 +75,9 @@ interface BranchFormValues {
     status: "active" | "inactive";
     sundry_debitor_account: number | string;
     sundry_creditor_account: number | string;
+    // ✅ NEW — sirf 'franchise' business type me use hote hain
+    gst_number: string;
+    pan_number: string;
 }
 
 /* ---------------- VALIDATION SCHEMA ---------------- */
@@ -97,6 +104,18 @@ const BranchCreateSchema = Yup.object().shape({
     ifsc_code: Yup.string().required("IFSC code is required"),
     upi_id: Yup.string(),
     status: Yup.string().required("Status is required"),
+    // ✅ NEW — sirf 'franchise' ke liye required. 'branch' type me superadmin ka
+    // GST/PAN backend khud copy kar leta hai, isliye form me required nahi.
+    gst_number: Yup.string().when('ownership_type', {
+        is: 'franchise',
+        then: (schema) => schema.required("GST Number is required for Franchise"),
+        otherwise: (schema) => schema.notRequired(),
+    }),
+    pan_number: Yup.string().when('ownership_type', {
+        is: 'franchise',
+        then: (schema) => schema.required("PAN Number is required for Franchise"),
+        otherwise: (schema) => schema.notRequired(),
+    }),
 });
 
 // Update validation - password and country are optional
@@ -122,6 +141,17 @@ const BranchUpdateSchema = Yup.object().shape({
     ifsc_code: Yup.string().required("IFSC code is required"),
     upi_id: Yup.string(),
     status: Yup.string().required("Status is required"),
+    // ✅ NEW — sirf 'franchise' ke liye required on update bhi
+    gst_number: Yup.string().when('ownership_type', {
+        is: 'franchise',
+        then: (schema) => schema.required("GST Number is required for Franchise"),
+        otherwise: (schema) => schema.notRequired(),
+    }),
+    pan_number: Yup.string().when('ownership_type', {
+        is: 'franchise',
+        then: (schema) => schema.required("PAN Number is required for Franchise"),
+        otherwise: (schema) => schema.notRequired(),
+    }),
 });
 
 /* ---------------- INPUT COMPONENT ---------------- */
@@ -225,243 +255,236 @@ const ViewModal: React.FC<ViewModalProps> = ({ isOpen, onClose, branchId }) => {
         );
     }
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="bg-white w-[95%] sm:w-[90%] md:w-[850px] max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden">
-                {/* Header */}
-                <div className="sticky top-0 z-10 bg-gradient-to-r from-blue-700 to-blue-600 text-white px-6 py-4 flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-white/20 p-2 rounded-xl">
-                            <FaEye className="text-white text-lg" />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-bold">{branch.branch_name}</h2>
-                            <p className="text-blue-200 text-xs">Branch Details</p>
-                        </div>
+return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="bg-white w-[95%] sm:w-[90%] md:w-[850px] max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="sticky top-0 z-10 bg-gradient-to-r from-blue-700 to-blue-600 text-white px-6 py-4 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                    <div className="bg-white/20 p-2 rounded-xl">
+                        <FaEye className="text-white text-lg" />
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="hover:bg-white/20 rounded-xl p-2 transition-colors"
-                    >
-                        <FaTimesCircle size={24} />
-                    </button>
+                    <div>
+                        <h2 className="text-xl font-bold">{branch.branch_name}</h2>
+                        <p className="text-blue-200 text-xs">Branch Details</p>
+                    </div>
+                </div>
+                <button
+                    onClick={onClose}
+                    className="hover:bg-white/20 rounded-xl p-2 transition-colors"
+                >
+                    <FaTimesCircle size={24} />
+                </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)] space-y-4">
+                {/* Status Badge */}
+                <div className="flex items-center gap-3 mb-2">
+                    <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                        branch.status === "active"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-red-100 text-red-700"
+                    }`}>
+                        {branch.status === "active" ? "Active" : "Inactive"}
+                    </span>
+                    <span className="text-sm text-gray-400">
+                        Created: {branch.created_at ? new Date(branch.created_at).toLocaleDateString() : "N/A"}
+                    </span>
+                    {branch.updated_at && (
+                        <span className="text-sm text-gray-400">
+                            Updated: {new Date(branch.updated_at).toLocaleDateString()}
+                        </span>
+                    )}
                 </div>
 
-                {/* Content */}
-                <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)] space-y-4">
-                    {/* Status Badge */}
-                    <div className="flex items-center gap-3 mb-2">
-                        <span className={`px-3 py-1 rounded-full text-sm font-semibold ${branch.status === "active"
-                                ? "bg-emerald-100 text-emerald-700"
-                                : "bg-red-100 text-red-700"
-                            }`}>
-                            {branch.status === "active" ? "Active" : "Inactive"}
-                        </span>
-                        <span className="text-sm text-gray-400">
-                            Created: {branch.created_at ? new Date(branch.created_at).toLocaleDateString() : "N/A"}
-                        </span>
-                        {branch.updated_at && (
-                            <span className="text-sm text-gray-400">
-                                Updated: {new Date(branch.updated_at).toLocaleDateString()}
-                            </span>
-                        )}
+                {/* Branch Logo */}
+                {branch.branch_logo && (
+                    <div className="flex justify-center mb-4">
+                        <img
+                            src={getFullUrl(branch.branch_logo)}
+                            alt={branch.branch_name}
+                            className="h-24 w-24 object-cover rounded-full border-4 border-gray-200 shadow-md"
+                            onError={(e) => {
+                                (e.target as HTMLImageElement).src = "https://via.placeholder.com/96?text=No+Logo";
+                            }}
+                        />
                     </div>
+                )}
 
-                    {/* Branch Logo */}
-                    {branch.branch_logo && (
-                        <div className="flex justify-center mb-4">
-                            <img
-                                src={getFullUrl(branch.branch_logo)}
-                                alt={branch.branch_name}
-                                className="h-24 w-24 object-cover rounded-full border-4 border-gray-200 shadow-md"
-                                onError={(e) => {
-                                    (e.target as HTMLImageElement).src = "https://via.placeholder.com/96?text=No+Logo";
-                                }}
-                            />
+                {/* Basic Information */}
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                        <span className="w-1 h-5 bg-blue-600 rounded-full"></span>
+                        Basic Information
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaBuilding size={10} /> Branch Name
+                            </div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.branch_name}</div>
                         </div>
-                    )}
-
-                    {/* Basic Information */}
-                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                            <span className="w-1 h-5 bg-blue-600 rounded-full"></span>
-                            Basic Information
-                        </h3>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaBuilding size={10} /> Branch Name
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.branch_name}</div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide">Business Type</div>
+                            <div className="mt-1">
+                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold 
+                                    ${branch.ownership_type === 'franchise' 
+                                        ? 'bg-gray-100 text-gray-700' 
+                                        : 'bg-blue-100 text-blue-700'}`}
+                                >
+                                    {branch.ownership_type === 'franchise' ? 'Franchise' : 'Branch'}
+                                </span>
                             </div>
-
-                                    {/* ✅ Display Ownership Type with Badge */}
-        <div>
-            <div className="text-xs text-gray-400 uppercase tracking-wide">Business Type</div>
-            <div className="mt-1">
-                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold 
-                    ${branch.ownership_type === 'franchise' 
-                        ? 'bg-gray-100 text-gray-700' 
-                        : 'bg-blue-100 text-blue-700'}`}
-                >
-                    {branch.ownership_type === 'franchise' ? (
-                        <>
-                            <span className="mr-1"></span> Franchise
-                        </>
-                    ) : (
-                        <>
-                            <span className="mr-1"></span> Branch
-                        </>
-                    )}
-                </span>
-            </div>
-        </div>
-
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide">Linked Account</div>
-                                {branch.sundry_debitor_account_name || branch.sundry_creditor_account_name ? (
-                                    <div className="font-semibold text-gray-800 mt-1 flex items-center gap-2 flex-wrap">
-                                        <span>{branch.sundry_debitor_account_name || branch.sundry_creditor_account_name}</span>
-                                        <span
-                                            className={`px-2 py-0.5 rounded-full text-xs font-semibold ${branch.sundry_debitor_account_name
-                                                    ? "bg-blue-100 text-blue-700"
-                                                    : "bg-orange-100 text-orange-700"
-                                                }`}
-                                        >
-                                            {branch.sundry_debitor_account_name ? "Sundry Debitor" : "Sundry Creditor"}
-                                        </span>
-                                    </div>
-                                ) : (
-                                    <div className="font-semibold text-gray-400 mt-1">N/A</div>
-                                )}
-                            </div>
-
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide">Branch Type</div>
-                                <div className="mt-1">
-                                    <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
-                                        {getBranchTypeDisplay(branch.branch_type)}
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide">Linked Account</div>
+                            {branch.sundry_debitor_account_name || branch.sundry_creditor_account_name ? (
+                                <div className="font-semibold text-gray-800 mt-1 flex items-center gap-2 flex-wrap">
+                                    <span>{branch.sundry_debitor_account_name || branch.sundry_creditor_account_name}</span>
+                                    <span
+                                        className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                            branch.sundry_debitor_account_name
+                                                ? "bg-blue-100 text-blue-700"
+                                                : "bg-orange-100 text-orange-700"
+                                        }`}
+                                    >
+                                        {branch.sundry_debitor_account_name ? "Sundry Debitor" : "Sundry Creditor"}
                                     </span>
                                 </div>
-                            </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaUser size={10} /> Owner Name
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.owner_name || "N/A"}</div>
-                            </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaEnvelope size={10} /> Email
-                                </div>
-                                <div className="font-semibold text-gray-800 text-sm mt-1 truncate">{branch.email || "N/A"}</div>
-                            </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaPhone size={10} /> Phone
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.phone || "N/A"}</div>
+                            ) : (
+                                <div className="font-semibold text-gray-400 mt-1">N/A</div>
+                            )}
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide">Branch Type</div>
+                            <div className="mt-1">
+                                <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                                    {getBranchTypeDisplay(branch.branch_type)}
+                                </span>
                             </div>
                         </div>
-                    </div>
-
-                    {/* Address */}
-                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                            <span className="w-1 h-5 bg-green-600 rounded-full"></span>
-                            Address Details
-                        </h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="md:col-span-4">
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaMapMarkerAlt size={10} /> Address
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.address || "N/A"}</div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaUser size={10} /> Owner Name
                             </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaCity size={10} /> City
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.city || "N/A"}</div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.owner_name || "N/A"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaEnvelope size={10} /> Email
                             </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaFlag size={10} /> State
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.state || "N/A"}</div>
+                            <div className="font-semibold text-gray-800 text-sm mt-1 truncate">{branch.email || "N/A"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaPhone size={10} /> Phone
                             </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaFlag size={10} /> Country
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.country || "N/A"}</div>
-                            </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaCode size={10} /> Pincode
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.pincode || "N/A"}</div>
-                            </div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.phone || "N/A"}</div>
                         </div>
                     </div>
+                </div>
 
-                    {/* Bank Details */}
-                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                            <span className="w-1 h-5 bg-amber-600 rounded-full"></span>
-                            Bank Details
-                        </h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaUniversity size={10} /> Bank Name
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.bank_name || "N/A"}</div>
+                {/* Address */}
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                        <span className="w-1 h-5 bg-green-600 rounded-full"></span>
+                        Address Details
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="md:col-span-4">
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaMapMarkerAlt size={10} /> Address
                             </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaCreditCard size={10} /> Account Number
-                                </div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.account_number || "N/A"}</div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.address || "N/A"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaCity size={10} /> City
                             </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide">IFSC Code</div>
-                                <div className="font-semibold text-gray-800 font-mono text-sm mt-1">{branch.ifsc_code || "N/A"}</div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.city || "N/A"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaFlag size={10} /> State
                             </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide">UPI ID</div>
-                                <div className="font-semibold text-gray-800 mt-1">{branch.upi_id || "N/A"}</div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.state || "N/A"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaFlag size={10} /> Country
                             </div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.country || "N/A"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaCode size={10} /> Pincode
+                            </div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.pincode || "N/A"}</div>
                         </div>
                     </div>
+                </div>
 
-
-                    {/* Documents */}
-                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                            <span className="w-1 h-5 bg-purple-600 rounded-full"></span>
-                            Documents
-                        </h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaFilePdf size={10} /> License
-                                </div>
-                                <div className="mt-1">
-                                    {branch.licence_file ? (
-                                        <a
-                                            href={getFullUrl(branch.licence_file)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
-                                        >
-                                            <FaFileAlt size={12} /> View
-                                        </a>
-                                    ) : (
-                                        <span className="text-gray-400 text-sm">N/A</span>
-                                    )}
-                                </div>
+                {/* Bank Details */}
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                        <span className="w-1 h-5 bg-amber-600 rounded-full"></span>
+                        Bank Details
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaUniversity size={10} /> Bank Name
                             </div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.bank_name || "N/A"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaCreditCard size={10} /> Account Number
+                            </div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.account_number || "N/A"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide">IFSC Code</div>
+                            <div className="font-semibold text-gray-800 font-mono text-sm mt-1">{branch.ifsc_code || "N/A"}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide">UPI ID</div>
+                            <div className="font-semibold text-gray-800 mt-1">{branch.upi_id || "N/A"}</div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* ✅ DOCUMENTS SECTION — With GST & PAN Details */}
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                        <span className="w-1 h-5 bg-purple-600 rounded-full"></span>
+                        Documents & Tax Details
+                    </h3>
+                    
+                    {/* ✅ GST & PAN Numbers — Branch = Superadmin ka, Franchise = Apna */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4 p-3 bg-white rounded-lg border border-gray-200">
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide">GST Number</div>
+                            <div className="font-semibold text-gray-800 font-mono text-sm mt-1">
+                                {branch.gst_number || "N/A"}
+                                {branch.ownership_type === "branch" && branch.gst_number && (
+                                    <span className="ml-2 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">(Superadmin)</span>
+                                )}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide">PAN Number</div>
+                            <div className="font-semibold text-gray-800 font-mono text-sm mt-1">
+                                {branch.pan_number || "N/A"}
+                                {branch.ownership_type === "branch" && branch.pan_number && (
+                                    <span className="ml-2 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">(Superadmin)</span>
+                                )}
+                            </div>
+                        </div>
+                        
+                        {/* ✅ GST Certificate — SIRF FRANCHISE ke liye */}
+                        {branch.ownership_type === "franchise" && (
                             <div>
                                 <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
                                     <FaFilePdf size={10} /> GST Certificate
@@ -481,66 +504,91 @@ const ViewModal: React.FC<ViewModalProps> = ({ isOpen, onClose, branchId }) => {
                                     )}
                                 </div>
                             </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaIdCard size={10} /> ID Proof
-                                </div>
-                                <div className="mt-1">
-                                    {branch.id_proof ? (
-                                        <a
-                                            href={getFullUrl(branch.id_proof)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
-                                        >
-                                            <FaFileAlt size={12} /> View
-                                        </a>
-                                    ) : (
-                                        <span className="text-gray-400 text-sm">N/A</span>
-                                    )}
-                                </div>
+                        )}
+                    </div>
+
+                    {/* Other Documents */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaFilePdf size={10} /> License
                             </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                                    <FaImage size={10} /> Branch Logo
-                                </div>
-                                <div className="mt-1">
-                                    {branch.branch_logo ? (
-                                        <a
-                                            href={getFullUrl(branch.branch_logo)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
-                                        >
-                                            <FaImage size={12} /> View
-                                        </a>
-                                    ) : (
-                                        <span className="text-gray-400 text-sm">N/A</span>
-                                    )}
-                                </div>
+                            <div className="mt-1">
+                                {branch.licence_file ? (
+                                    <a
+                                        href={getFullUrl(branch.licence_file)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
+                                    >
+                                        <FaFileAlt size={12} /> View
+                                    </a>
+                                ) : (
+                                    <span className="text-gray-400 text-sm">N/A</span>
+                                )}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaIdCard size={10} /> ID Proof
+                            </div>
+                            <div className="mt-1">
+                                {branch.id_proof ? (
+                                    <a
+                                        href={getFullUrl(branch.id_proof)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
+                                    >
+                                        <FaFileAlt size={12} /> View
+                                    </a>
+                                ) : (
+                                    <span className="text-gray-400 text-sm">N/A</span>
+                                )}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                <FaImage size={10} /> Branch Logo
+                            </div>
+                            <div className="mt-1">
+                                {branch.branch_logo ? (
+                                    <a
+                                        href={getFullUrl(branch.branch_logo)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
+                                    >
+                                        <FaImage size={12} /> View
+                                    </a>
+                                ) : (
+                                    <span className="text-gray-400 text-sm">N/A</span>
+                                )}
                             </div>
                         </div>
                     </div>
+                </div>
 
-                    {/* Close Button */}
-                    <div className="flex justify-end pt-2">
-                        <button
-                            onClick={onClose}
-                            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors flex items-center gap-2"
-                        >
-                            <FaTimes size={14} /> Close
-                        </button>
-                    </div>
+                {/* Close Button */}
+                <div className="flex justify-end pt-2">
+                    <button
+                        onClick={onClose}
+                        className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors flex items-center gap-2"
+                    >
+                        <FaTimes size={14} /> Close
+                    </button>
                 </div>
             </div>
         </div>
-    );
+    </div>
+);
 };
 
 /* ---------------- MAIN COMPONENT ---------------- */
 const BranchMaster: React.FC = () => {
     const { canAdd, canEdit, canDelete } = usePermission("/branchMaster");
     const [branches, setBranches] = useState<Branch[]>([]);
+    const [superadminGST, setSuperadminGST] = useState({ gst_number: "", pan_number: "" });
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
     const [viewModalOpen, setViewModalOpen] = useState(false);
@@ -566,6 +614,7 @@ const BranchMaster: React.FC = () => {
         gst_certificate: null as File | null,
         branch_logo: null as File | null,
         id_proof: null as File | null,
+
     });
 
     // Fetch branches
@@ -639,6 +688,23 @@ useEffect(() => {
     useEffect(() => {
         fetchBranches(currentPage);
     }, [currentPage, pageSize]);
+useEffect(() => {
+    const fetchSuperadminTax = async () => {
+        try {
+            const res = await api.get("superadmin-tax-details/");
+            console.log("API Response:", res.data); // ✅ Debug ke liye
+            if (res.data.success) {
+                setSuperadminGST({
+                    gst_number: res.data.data.gst_number || "",
+                    pan_number: res.data.data.pan_number || "",
+                });
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+    fetchSuperadminTax();
+}, []);
 
     // Filter branches
     const filteredBranches = branches.filter((branch) => {
@@ -760,6 +826,7 @@ useEffect(() => {
             gst_certificate: null,
             branch_logo: null,
             id_proof: null,
+  
         });
         setModalOpen(true);
     };
@@ -775,6 +842,7 @@ useEffect(() => {
                     gst_certificate: null,
                     branch_logo: null,
                     id_proof: null,
+                    
                 });
                 setModalOpen(true);
             }
@@ -830,25 +898,29 @@ useEffect(() => {
     };
 
     // Submit handler
-    const handleSubmit = async (values: BranchFormValues, { resetForm }: any) => {
-        setIsSubmitting(true);
-        try {
-            const formData = new FormData();
+const handleSubmit = async (values: BranchFormValues, { resetForm }: any) => {
+    setIsSubmitting(true);
+    try {
+        const formData = new FormData();
 
-            // Add all form values
-            Object.keys(values).forEach((key) => {
-                const value = values[key as keyof BranchFormValues];
-                if (value !== null && value !== undefined && value !== "") {
-                    formData.append(key, value as string);
-                }
-            });
+        // Add all form values
+        Object.keys(values).forEach((key) => {
+            const value = values[key as keyof BranchFormValues];
+            if (value !== null && value !== undefined && value !== "") {
+                formData.append(key, value as string);
+            }
+        });
 
-            // Append files
-            if (fileUploads.licence_file) formData.append("licence_file", fileUploads.licence_file);
-            if (fileUploads.gst_certificate) formData.append("gst_certificate", fileUploads.gst_certificate);
-            if (fileUploads.branch_logo) formData.append("branch_logo", fileUploads.branch_logo);
-            if (fileUploads.id_proof) formData.append("id_proof", fileUploads.id_proof);
-
+        // Append files
+        if (fileUploads.licence_file) formData.append("licence_file", fileUploads.licence_file);
+        if (fileUploads.branch_logo) formData.append("branch_logo", fileUploads.branch_logo);
+        if (fileUploads.id_proof) formData.append("id_proof", fileUploads.id_proof);
+        
+        // ✅ GST Certificate — SIRF FRANCHISE ke liye bhejo
+        if (values.ownership_type === "franchise" && fileUploads.gst_certificate) {
+            formData.append("gst_certificate", fileUploads.gst_certificate);
+        }
+            
             const config = {
                 headers: { "Content-Type": "multipart/form-data" },
             };
@@ -873,6 +945,7 @@ useEffect(() => {
                 gst_certificate: null,
                 branch_logo: null,
                 id_proof: null,
+                
             });
             fetchBranches(currentPage);
         } catch (err: any) {
@@ -1197,27 +1270,32 @@ useEffect(() => {
                         </div>
 
                         <Formik
-                            initialValues={{
-                                branch_type: editingBranch?.branch_type || "fashion",
-                                ownership_type: editingBranch?.ownership_type || "branch",
-                                branch_name: editingBranch?.branch_name || "",
-                                owner_name: editingBranch?.owner_name || "",
-                                email: editingBranch?.email || "",
-                                phone: editingBranch?.phone || "",
-                                password: "",
-                                address: editingBranch?.address || "",
-                                city: editingBranch?.city || "",
-                                state: editingBranch?.state || "",
-                                country: editingBranch?.country || "",
-                                pincode: editingBranch?.pincode || "",
-                                bank_name: editingBranch?.bank_name || "",
-                                account_number: editingBranch?.account_number || "",
-                                ifsc_code: editingBranch?.ifsc_code || "",
-                                upi_id: editingBranch?.upi_id || "",
-                                status: editingBranch?.status || "active",
-                                sundry_debitor_account: editingBranch?.sundry_debitor_account ?? "",
-                                sundry_creditor_account: editingBranch?.sundry_creditor_account ?? "",
-                            }}
+initialValues={{
+    branch_type: editingBranch?.branch_type || "fashion",
+    ownership_type: editingBranch?.ownership_type || "branch",
+    branch_name: editingBranch?.branch_name || "",
+    owner_name: editingBranch?.owner_name || "",
+    email: editingBranch?.email || "",
+    phone: editingBranch?.phone || "",
+    password: "",
+    address: editingBranch?.address || "",
+    city: editingBranch?.city || "",
+    state: editingBranch?.state || "",
+    country: editingBranch?.country || "",
+    pincode: editingBranch?.pincode || "",
+    bank_name: editingBranch?.bank_name || "",
+    account_number: editingBranch?.account_number || "",
+    ifsc_code: editingBranch?.ifsc_code || "",
+    upi_id: editingBranch?.upi_id || "",
+    status: editingBranch?.status || "active",
+    sundry_debitor_account: editingBranch?.sundry_debitor_account ?? "",
+    sundry_creditor_account: editingBranch?.sundry_creditor_account ?? "",
+    // ✅ FIX: duplicate keys hata di — sirf ek hi definition, superadmin ka
+    // GST/PAN fallback ke saath (Branch type ke liye), Franchise ke liye
+    // editingBranch ka apna value
+    gst_number: editingBranch?.gst_number || superadminGST.gst_number || "",
+    pan_number: editingBranch?.pan_number || superadminGST.pan_number || "",
+}}
                             enableReinitialize={true}
                             // ✅ Use different validation schema based on edit mode
                             validationSchema={editingBranch ? BranchUpdateSchema : BranchCreateSchema}
@@ -1421,25 +1499,33 @@ useEffect(() => {
         <label className="text-sm font-medium block mb-1">Business Type *</label>
         <div className="flex gap-6 mt-1.5">
             <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                    type="radio"
-                    name="ownership_type"
-                    value="branch"
-                    checked={values.ownership_type === "branch"}
-                    onChange={() => setFieldValue("ownership_type", "branch")}
-                    className="w-4 h-4 text-blue-600 focus:ring-blue-500"
-                />
+ <input
+    type="radio"
+    name="ownership_type"
+    value="branch"
+    checked={values.ownership_type === "branch"}
+    onChange={() => {
+        setFieldValue("ownership_type", "branch");
+        setFieldValue("gst_number", superadminGST.gst_number);  // ✅ Ye line
+        setFieldValue("pan_number", superadminGST.pan_number);  // ✅ Ye line
+    }}
+    className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+/>
                 <span className="text-sm font-medium text-gray-700">Branch</span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                    type="radio"
-                    name="ownership_type"
-                    value="franchise"
-                    checked={values.ownership_type === "franchise"}
-                    onChange={() => setFieldValue("ownership_type", "franchise")}
-                    className="w-4 h-4 text-blue-600 focus:ring-blue-500"
-                />
+<input
+    type="radio"
+    name="ownership_type"
+    value="franchise"
+    checked={values.ownership_type === "franchise"}
+    onChange={() => {
+        setFieldValue("ownership_type", "franchise");
+        setFieldValue("gst_number", "");  // ✅ Empty karo
+        setFieldValue("pan_number", "");  // ✅ Empty karo
+    }}
+    className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+/>
                 <span className="text-sm font-medium text-gray-700">Franchise</span>
             </label>
         </div>
@@ -1448,6 +1534,7 @@ useEffect(() => {
         )}
     </div>
 </div>
+
 
                                     <hr className="border-t-2 border-dashed border-blue-300 my-2" />
 
@@ -1723,24 +1810,7 @@ useEffect(() => {
                                             )}
                                         </div>
 
-                                        <div>
-                                            <label className="text-sm font-medium block mb-1">GST Certificate</label>
-                                            <input
-                                                type="file"
-                                                name="gst_certificate"
-                                                accept=".pdf,.jpg,.jpeg,.png"
-                                                onChange={(e) => {
-                                                    const file = e.currentTarget.files?.[0] || null;
-                                                    handleFileChange("gst_certificate", file);
-                                                }}
-                                                className="w-full border p-2 rounded border-gray-300"
-                                            />
-                                            {editingBranch?.gst_certificate && (
-                                                <div className="text-xs text-blue-600 mt-1">
-                                                    Current: <a href={getFullUrl(editingBranch.gst_certificate)} target="_blank" rel="noopener">View</a>
-                                                </div>
-                                            )}
-                                        </div>
+
 
                                         <div>
                                             <label className="text-sm font-medium block mb-1">ID Proof {!editingBranch && "*"}</label>
@@ -1786,6 +1856,113 @@ useEffect(() => {
                                             )}
                                         </div>
                                     </div>
+                                    {/* ✅ NEW — GST / PAN fields — SIRF Franchise ke liye dikhte hain.
+     'Branch' select hone par ye poori section hi hide rehti hai,
+     kyunki superadmin ka GST/PAN backend khud copy kar deta hai. */}
+{/* ✅ GST / PAN Section — Branch = Read-only (Superadmin ka), Franchise = Editable */}
+<div className="border border-indigo-200 bg-indigo-50/50 rounded-lg p-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        
+        {values.ownership_type === "branch" ? (
+            // 🔵 BRANCH — Read-only fields (Superadmin ka GST/PAN auto-filled)
+            <>
+                <div>
+                    <label className="text-sm font-medium block mb-1">
+                        GST Number
+                    </label>
+                    <input
+                        type="text"
+                        value={values.gst_number || "N/A"}
+                        readOnly
+                        disabled
+                        className="w-full border p-2 rounded bg-gray-100 text-gray-700 font-mono cursor-not-allowed"
+                    />
+                    
+                </div>
+                <div>
+                    <label className="text-sm font-medium block mb-1">
+                        PAN Number
+                    </label>
+                    <input
+                        type="text"
+                        value={values.pan_number || "N/A"}
+                        readOnly
+                        disabled
+                        className="w-full border p-2 rounded bg-gray-100 text-gray-700 font-mono cursor-not-allowed"
+                    />
+           
+                </div>
+            </>
+        ) : (
+            // 🟢 FRANCHISE — Editable fields (empty, user can type)
+            <>
+                <div>
+                    <label className="text-sm font-medium block mb-1">GST Number *</label>
+                    <input
+                        type="text"
+                        name="gst_number"
+                        placeholder="e.g. 24AAAAA0000A1Z5"
+                        value={values.gst_number}
+                        onChange={(e) => setFieldValue("gst_number", e.target.value.toUpperCase())}
+                        onBlur={handleBlur}
+                        maxLength={15}
+                        className={`w-full border p-2 rounded uppercase font-mono ${
+                            touched.gst_number && errors.gst_number
+                                ? "border-red-500"
+                                : "border-gray-300"
+                        }`}
+                    />
+                    {touched.gst_number && errors.gst_number && (
+                        <div className="text-red-500 text-xs mt-1">{errors.gst_number}</div>
+                    )}
+                </div>
+                <div>
+                    <label className="text-sm font-medium block mb-1">PAN Number *</label>
+                    <input
+                        type="text"
+                        name="pan_number"
+                        placeholder="e.g. ABCDE1234F"
+                        value={values.pan_number}
+                        onChange={(e) => setFieldValue("pan_number", e.target.value.toUpperCase())}
+                        onBlur={handleBlur}
+                        maxLength={10}
+                        className={`w-full border p-2 rounded uppercase font-mono ${
+                            touched.pan_number && errors.pan_number
+                                ? "border-red-500"
+                                : "border-gray-300"
+                        }`}
+                    />
+                    {touched.pan_number && errors.pan_number && (
+                        <div className="text-red-500 text-xs mt-1">{errors.pan_number}</div>
+                    )}
+                </div>
+                
+                {/* ✅ GST Certificate Upload — Sirf Franchise */}
+                <div className="md:col-span-2">
+                    <label className="text-sm font-medium block mb-1">GST Certificate</label>
+                    <input
+                        type="file"
+                        name="gst_certificate"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={(e) => {
+                            const file = e.currentTarget.files?.[0] || null;
+                            handleFileChange("gst_certificate", file);
+                        }}
+                        className="w-full border p-2 rounded border-gray-300"
+                    />
+                    {editingBranch?.gst_certificate && (
+                        <div className="text-xs text-blue-600 mt-1">
+                            Current: <a href={getFullUrl(editingBranch.gst_certificate)} target="_blank" rel="noopener">View</a>
+                            {" — leave blank to keep current file"}
+                        </div>
+                    )}
+                    <div className="text-xs text-gray-400 mt-1">Upload GST Certificate (optional)</div>
+                </div>
+            </>
+        )}
+        
+    </div>
+</div>
 
                                     <hr className="border-t-2 border-dashed border-blue-300 my-2" />
 

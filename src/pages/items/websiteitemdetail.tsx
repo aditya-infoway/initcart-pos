@@ -14,7 +14,7 @@ import api from '../../api/api';
 interface Variant {
   id: number;
   purchasePrice: number;
-  salesPrice: number;
+  salesPrice: number; 
   mrp: number;
   barcode: string;
   opStock: number;

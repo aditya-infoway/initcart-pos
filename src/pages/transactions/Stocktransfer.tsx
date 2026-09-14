@@ -2,14 +2,14 @@
 // UPDATED — GST Summary only (table me sirf Rate × Qty = Amount)
 // GST breakup table me nahi, sirf neeche summary card me show hoga
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useAuthStore } from "../../store/authStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FaSearch, FaTrash, FaCheckCircle, FaBox, FaTimes,
   FaArrowLeft, FaExchangeAlt, FaEye, FaPlus,
   FaWarehouse, FaShippingFast, FaClipboardList,
-  FaTimesCircle, FaCheckDouble,
+  FaTimesCircle, FaCheckDouble, FaBarcode,
 } from "react-icons/fa";
 import { MdClose, MdSwapHoriz } from "react-icons/md";
 import { HiOutlineDocumentDuplicate } from "react-icons/hi";
@@ -17,6 +17,7 @@ import { FaRegCircleXmark } from "react-icons/fa6";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+import { usePermission } from "../../hooks/usePermissions";
 
 // Add this after the imports
 const safeNumber = (val: any): number => {
@@ -72,6 +73,7 @@ interface FormItem {
   from_variant_label: string;
   quantity: number;
   rate: string;
+  discountPercent: string;
   max_stock: number;
   size?: string | null;
   color?: string | null;
@@ -523,6 +525,96 @@ const SelectItemsModal: React.FC<SelectItemsModalProps> = ({
 };
 
 // ════════════════════════════════════════════════════════════
+// STOCK TRANSFER BARCODE SCANNER
+// Barcode scan hote hi variant dhoondh ke seedha item add ho jayega
+// (jaise Purchase Entry me hota hai)
+// ════════════════════════════════════════════════════════════
+interface StockBarcodeScannerProps {
+  myItems: ItemWithVariants[];
+  toBranchId: string;
+  onItemFound: (item: ItemWithVariants, variant: VariantOption) => void;
+}
+
+const StockTransferBarcodeScanner: React.FC<StockBarcodeScannerProps> = ({
+  myItems, toBranchId, onItemFound,
+}) => {
+  const [barcodeValue, setBarcodeValue] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => ref.current?.focus(), 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  const handleScan = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+
+    if (!toBranchId) {
+      toast.error("Pehle destination branch select karo");
+      setBarcodeValue("");
+      ref.current?.focus();
+      return;
+    }
+
+    setScanning(true);
+
+    const flat = flattenItems(myItems);
+    const match = flat.find(
+      ({ variant }) =>
+        variant.barcode &&
+        variant.barcode.toLowerCase() === trimmed.toLowerCase()
+    );
+
+    if (match) {
+      onItemFound(match.item, match.variant);
+    } else {
+      toast.error(`Barcode "${trimmed}" se koi item nahi mila`);
+    }
+
+    setBarcodeValue("");
+    setScanning(false);
+    ref.current?.focus();
+  };
+
+return (
+  <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg border border-blue-200">
+    <FaBarcode className="text-blue-500 text-sm flex-shrink-0" />
+    <input
+      ref={ref}
+      type="text"
+      value={barcodeValue}
+      onChange={(e) => setBarcodeValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          handleScan(barcodeValue);
+        }
+      }}
+      placeholder="Scan barcode..."
+      className="flex-1 px-3 py-1.5 border border-blue-200 rounded-md focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-xs font-mono bg-white min-w-0"
+      autoComplete="off"
+      disabled={scanning}
+    />
+    {scanning ? (
+      <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+    ) : (
+      <button
+        type="button"
+        onClick={() => handleScan(barcodeValue)}
+        disabled={!barcodeValue.trim()}
+        className="bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 transition flex items-center gap-1 text-xs disabled:opacity-50 flex-shrink-0"
+      >
+        <FaBarcode size={12} />
+        Scan
+      </button>
+    )}
+  </div>
+);
+};
+
+// ════════════════════════════════════════════════════════════
 // ORDER TRACKING SECTION
 // ✅ UPDATED — GST ab order REQUEST time par calculate/show nahi hoti.
 //    Superadmin jab items ko adjust karke SEND/PROCESS karta hai, tabhi
@@ -549,6 +641,7 @@ const EMPTY_GST: ItemGstValue = { basic: 0, tax: 0, cgst: 0, sgst: 0, igst: 0, n
 
 function OrderTracking() {
   const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
+  const { canAdd, canEdit, canDelete } = usePermission("/stockTransfer");
   const [allOrders, setAllOrders] = useState<BranchOrderListItem[]>([]);
   const [loadingAll, setLoadingAll] = useState(false);
   const [view, setView] = useState<"branches" | "list">("branches");
@@ -852,12 +945,12 @@ function OrderTracking() {
                             className="text-indigo-500 hover:text-indigo-700 transition-colors" title="View & Process">
                             <FaEye size={16} />
                           </button>
-                          {o.status === "pending" && (
-                            <button onClick={() => cancelOrder(o.id)}
-                              className="text-red-400 hover:text-red-600 transition-colors" title="Cancel Order">
-                              <FaRegCircleXmark size={16} />
-                            </button>
-                          )}
+{o.status === "pending" && canDelete && (
+  <button onClick={() => cancelOrder(o.id)}
+    className="text-red-400 hover:text-red-600 transition-colors" title="Cancel Order">
+    <FaRegCircleXmark size={16} />
+  </button>
+)}
                         </div>
                       </td>
                     </tr>
@@ -1160,11 +1253,13 @@ function OrderTracking() {
               className="px-5 py-2.5 border-2 border-red-200 text-red-500 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors">
               <FaTimes className="inline mr-1.5" size={11} /> Cancel Order
             </button>
-            <button onClick={processOrder} disabled={processing || activeItems.length === 0}
-              className="px-7 py-2.5 rounded-xl text-sm font-bold text-white shadow-md disabled:opacity-40 flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:shadow-lg">
-              <FaCheckDouble size={13} />
-              {processing ? "Processing..." : "Send Items (Create Transfer)"}
-            </button>
+{canAdd && (
+  <button onClick={processOrder} disabled={processing || activeItems.length === 0}
+    className="px-7 py-2.5 rounded-xl text-sm font-bold text-white shadow-md disabled:opacity-40 flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:shadow-lg">
+    <FaCheckDouble size={13} />
+    {processing ? "Processing..." : "Send Items (Create Transfer)"}
+  </button>
+)}
           </div>
         )}
       </div>
@@ -1182,9 +1277,9 @@ const MANUAL_STATUS_COLUMNS: StatusColumnConfig[] = [
 ];
 
 export default function StockTransfer() {
-
   const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
   const { user } = useAuthStore();
+  const { canAdd, canEdit, canDelete } = usePermission("/stockTransfer");
   const [mode, setMode] = useState<"manual" | "order_tracking">("manual");
 
   const [tab, setTab] = useState<"list" | "create">("list");
@@ -1329,6 +1424,7 @@ export default function StockTransfer() {
         from_variant_label: variant.variant_label,
         quantity: quantity,
         rate: String(branchPrice),
+        discountPercent: "0",
         max_stock: variant.current_stock,
         size: variant.size,
         color: variant.color,
@@ -1348,25 +1444,141 @@ export default function StockTransfer() {
     showMsg(`${newItems.length} variant(s) added`, "success");
   }
 
+  // ✅ Barcode scan hote hi ye function call hota hai
+  async function handleBarcodeItemFound(item: ItemWithVariants, variant: VariantOption) {
+    if (!form.to_branch_id) {
+      showMsg("Select destination branch first", "error");
+      return;
+    }
+    if (variant.current_stock <= 0) {
+      showMsg("Item out of stock", "warning");
+      return;
+    }
+
+    const vid = String(variant.variant_id);
+    const existingIndex = form.items.findIndex(i => i.from_variant_id === vid);
+
+    // Agar item already list me hai -> quantity +1 kar do (max stock tak)
+    if (existingIndex !== -1) {
+      const row = form.items[existingIndex];
+      const newQty = Math.min(row.max_stock, Number(row.quantity) + 1);
+      updateRow(existingIndex, "quantity", newQty);
+      showMsg(`Quantity updated: ${item.item_name}`, "success");
+      return;
+    }
+
+    // Naya item hai -> handleConfirm ko call karo (wahi jo modal se add karta hai)
+    await handleConfirm([{ item, variant, quantity: 1 }]);
+  }
+
   function removeRow(i: number) { 
     setForm(f => ({ ...f, items: f.items.filter((_, idx) => idx !== i) })); 
   }
 
-  function updateRow(i: number, key: "quantity" | "rate", val: string | number) {
-    setForm(f => {
-      const items = [...f.items];
-      if (key === "quantity") {
-        let n = Number(val);
-        if (isNaN(n)) n = 0;
-        const clampedQty = Math.min(Math.max(0, n), items[i].max_stock);
-        items[i] = { ...items[i], quantity: clampedQty };
+  
+
+// ✅ Helper — tax slab string ("18%") se numeric percent nikalne ke liye
+const parseTaxPercent = (taxSlab?: string): number => {
+  if (!taxSlab) return 0;
+  const n = parseFloat(taxSlab.replace("%", ""));
+  return isNaN(n) ? 0 : n;
+};
+
+// ✅ UPDATED updateRow — ab discount/qty/rate change hote hi GST turant,
+// locally (bina API call ke) recalculate hoti hai, taaki koi galat number
+// flash na ho. onBlur wala recalcItemGst() backend-reconciliation ke liye
+// waise hi rehne do — usme koi change nahi.
+function updateRow(i: number, key: "quantity" | "rate" | "discountPercent", val: string | number) {
+  setForm(f => {
+    const items = [...f.items];
+    const item = items[i];
+
+    let quantity = item.quantity;
+    let rate = parseFloat(item.rate || "0");
+    let discountPercent = Number(item.discountPercent || 0);
+
+    if (key === "quantity") {
+      let n = Number(val);
+      if (isNaN(n)) n = 0;
+      quantity = Math.min(Math.max(0, n), item.max_stock);
+    } else if (key === "rate") {
+      rate = isNaN(Number(val)) ? 0 : Number(val);
+    } else {
+      let n = Number(val);
+      if (isNaN(n) || n < 0) n = 0;
+      if (n > 100) n = 100;
+      discountPercent = n;
+    }
+
+    // ── Instant local GST estimate (rate is tax-inclusive, so amount = net) ──
+    const discountedRate = rate - (rate * discountPercent) / 100;
+    const taxPercent = parseTaxPercent(item.taxSlab);
+    const basicPerUnit = taxPercent > 0 ? discountedRate / (1 + taxPercent / 100) : discountedRate;
+    const taxPerUnit = discountedRate - basicPerUnit;
+
+    // Purana CGST:SGST:IGST split-ratio preserve karo (discount se ratio nahi badalta)
+    const prevTax = item.taxPerUnit || 0;
+    const cgstPerUnit = prevTax > 0 ? taxPerUnit * ((item.cgstPerUnit || 0) / prevTax) : 0;
+    const sgstPerUnit = prevTax > 0 ? taxPerUnit * ((item.sgstPerUnit || 0) / prevTax) : 0;
+    const igstPerUnit = prevTax > 0
+      ? taxPerUnit * ((item.igstPerUnit || 0) / prevTax)
+      : (cgstPerUnit === 0 && sgstPerUnit === 0 ? taxPerUnit : 0); // fallback jab pehli baar ratio pata nahi
+
+    items[i] = {
+      ...item,
+      quantity,
+      rate: key === "rate" ? String(rate) : item.rate,
+      discountPercent: key === "discountPercent" ? String(discountPercent) : item.discountPercent,
+      basicPerUnit,
+      taxPerUnit,
+      cgstPerUnit,
+      sgstPerUnit,
+      igstPerUnit,
+      netPerUnit: discountedRate,
+    };
+    return { ...f, items };
+  });
+}
+
+  // ✅ NEW — Discount change hone ke baad, discounted price par GST re-calculate karo (backend se)
+  async function recalcItemGst(idx: number) {
+    const item = form.items[idx];
+    if (!item || !form.to_branch_id) return;
+    const qty = Number(item.quantity) || 1;
+    const discountPercent = Number(item.discountPercent || 0);
+    try {
+      const res = await api.post("stock-transfer-item-tax/", {
+        from_variant_id: parseInt(item.from_variant_id),
+        to_branch_id: parseInt(form.to_branch_id),
+        quantity: qty,
+        discount_percent: discountPercent,
+      });
+      setForm(f => {
+        const items = [...f.items];
+        if (!items[idx]) return f;
+        items[idx] = {
+          ...items[idx],
+          basicPerUnit: (res.data.basic_amount || 0) / qty,
+          taxPerUnit: (res.data.tax_amount || 0) / qty,
+          cgstPerUnit: (res.data.cgst || 0) / qty,
+          sgstPerUnit: (res.data.sgst || 0) / qty,
+          igstPerUnit: (res.data.igst || 0) / qty,
+          netPerUnit: (res.data.net_amount || 0) / qty,
+        };
         return { ...f, items };
-      } else {
-        const newRate = isNaN(Number(val)) ? 0 : Number(val);
-        items[i] = { ...items[i], rate: String(newRate) };
-        return { ...f, items };
-      }
-    });
+      });
+    } catch (err) {
+      console.error("Discount GST recalculation failed:", err);
+      showMsg("Could not recalculate GST for discount", "error");
+    }
+  }
+
+  //  NEW — Discounted amount (Rate - Discount) × Qty — "Amount" column ke liye
+  function getDiscountedAmount(item: FormItem): number {
+    const rate = parseFloat(item.rate || "0");
+    const disc = Number(item.discountPercent || 0);
+    const discountedRate = rate - (rate * disc) / 100;
+    return discountedRate * Number(item.quantity || 0);
   }
 
   function resetForm() {
@@ -1390,6 +1602,7 @@ export default function StockTransfer() {
           from_variant_id: parseInt(r.from_variant_id),
           quantity: parseInt(String(r.quantity)),
           rate: parseFloat(r.rate || "0"),
+          discount_percent: parseFloat(r.discountPercent || "0"),
         })),
       });
       if (res.data.success) { showMsg("Transfer created!", "success"); setTab("list"); resetForm(); loadAllManualTransfers(); }
@@ -1423,10 +1636,15 @@ export default function StockTransfer() {
     } catch { showMsg("Error loading details", "error"); }
   }
 
-  // ✅ Totals - sirf GST summary ke liye
+  //Totals - sirf GST summary ke liye
   const totals = {
     qty: form.items.reduce((a, b) => a + Number(b.quantity || 0), 0),
-    value: form.items.reduce((a, b) => a + Number(b.quantity || 0) * parseFloat(b.rate || "0"), 0),
+    value: form.items.reduce((a, b) => {
+      const rate = parseFloat(b.rate || "0");
+      const disc = Number(b.discountPercent || 0);
+      const discountedRate = rate - (rate * disc) / 100;
+      return a + discountedRate * Number(b.quantity || 0);
+    }, 0),
     basic: form.items.reduce((a, b) => a + (b.basicPerUnit || 0) * (b.quantity || 0), 0),
     tax: form.items.reduce((a, b) => a + (b.taxPerUnit || 0) * (b.quantity || 0), 0),
     cgst: form.items.reduce((a, b) => a + (b.cgstPerUnit || 0) * (b.quantity || 0), 0),
@@ -1460,15 +1678,15 @@ export default function StockTransfer() {
               <p className="text-xs text-gray-400">Super Admin · {user?.username}</p>
             </div>
           </div>
-          {mode === "manual" && !detail && (
-            <button
-              onClick={() => { setTab(t => t === "create" ? "list" : "create"); resetForm(); }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all
-                ${tab === "list" ? "bg-gradient-to-r from-blue-700 to-blue-600 text-white shadow-md" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-            >
-              {tab === "list" ? <><FaPlus size={12} /> New Transfer</> : <><FaArrowLeft size={12} /> Back to List</>}
-            </button>
-          )}
+{mode === "manual" && !detail && canAdd && (
+  <button
+    onClick={() => { setTab(t => t === "create" ? "list" : "create"); resetForm(); }}
+    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all
+      ${tab === "list" ? "bg-gradient-to-r from-blue-700 to-blue-600 text-white shadow-md" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+  >
+    {tab === "list" ? <><FaPlus size={12} /> New Transfer</> : <><FaArrowLeft size={12} /> Back to List</>}
+  </button>
+)}
         </div>
 
         {/* MODE RADIO BUTTONS */}
@@ -1696,18 +1914,53 @@ export default function StockTransfer() {
                   )}
                 </div>
 
+
+
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="px-5 py-4 border-b flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <FaBox className="text-blue-600 text-sm" />
-                      <span className="font-bold text-gray-800">Items</span>
-                      {form.items.length > 0 && <span className="bg-blue-600 text-white text-xs font-bold px-2.5 py-0.5 rounded-full">{form.items.length}</span>}
-                    </div>
-                    <button onClick={() => { if (!form.to_branch_id) { showMsg("Select destination first", "error"); return; } setItemModalOpen(true); }}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-600 to-green-600 shadow-md">
-                      <MdSwapHoriz size={16} /> Select Items
-                    </button>
-                  </div>
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+  <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+
+    {/* Left */}
+    <div className="flex items-center gap-2">
+      <FaBox className="text-blue-600 text-sm" />
+
+      <span className="font-bold text-gray-800">
+        Items
+      </span>
+
+      {form.items.length > 0 && (
+        <span className="bg-blue-600 text-white text-xs font-bold px-2.5 py-0.5 rounded-full">
+          {form.items.length}
+        </span>
+      )}
+    </div>
+
+    {/* Right */}
+    <div className="flex items-center gap-3">
+
+      <StockTransferBarcodeScanner
+        myItems={myItems}
+        toBranchId={form.to_branch_id}
+        onItemFound={handleBarcodeItemFound}
+      />
+
+      <button
+        onClick={() => {
+          if (!form.to_branch_id) {
+            showMsg("Select destination first", "error");
+            return;
+          }
+          setItemModalOpen(true);
+        }}
+        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-600 to-green-600 shadow-md"
+      >
+        <MdSwapHoriz size={16} />
+        Select Items
+      </button>
+
+    </div>
+  </div>
+</div>
 
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[900px]">
@@ -1721,6 +1974,7 @@ export default function StockTransfer() {
                           <th className="px-4 py-3 text-center border-r border-blue-500">GST%</th>
                           <th className="px-4 py-3 text-center border-r border-blue-500">Max Stock</th>
                           <th className="px-4 py-3 text-center w-24 border-r border-blue-500">Qty</th>
+                          <th className="px-4 py-3 text-center w-20 border-r border-blue-500">Disc%</th>
                           <th className="px-4 py-3 text-right border-r border-blue-500">Rate (₹)</th>
                           <th className="px-4 py-3 text-right border-r border-blue-500">Amount (₹)</th>
                           <th className="px-4 py-3 text-center w-12">Del</th>
@@ -1728,14 +1982,14 @@ export default function StockTransfer() {
                       </thead>
                       <tbody>
                         {form.items.length === 0 ? (
-                          <tr><td colSpan={11} className="py-16 text-center text-gray-400">
+                          <tr><td colSpan={12} className="py-16 text-center text-gray-400">
                             <MdSwapHoriz className="text-5xl text-gray-200 mx-auto mb-3" />
                             No items added yet
                           </td></tr>
                         ) : form.items.map((item, idx) => {
                           const lowStock = Number(item.quantity) > item.max_stock;
                           const isZeroQty = Number(item.quantity) === 0;
-                          const amount = Number(item.quantity || 0) * parseFloat(item.rate || "0");
+                          const amount = getDiscountedAmount(item);
                           return (
                             <motion.tr key={item.from_variant_id + idx}
                               initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
@@ -1756,12 +2010,20 @@ export default function StockTransfer() {
                               <td className="px-4 py-3 text-center border-r border-gray-200">
                                 <input type="number" min={0} max={item.max_stock} value={item.quantity}
                                   onChange={e => updateRow(idx, "quantity", e.target.value === "" ? 0 : parseInt(e.target.value))}
+                                  onBlur={() => recalcItemGst(idx)}
                                   className={`w-20 border-2 rounded-lg px-2 py-1.5 text-sm text-center font-semibold
                                     ${lowStock ? "border-red-400" : isZeroQty ? "border-amber-400" : "border-gray-200"}`} />
+                              </td>
+                              <td className="px-4 py-3 text-center border-r border-gray-200">
+                                <input type="number" min={0} max={100} step="0.01" value={item.discountPercent ?? "0"}
+                                  onChange={e => updateRow(idx, "discountPercent", e.target.value)}
+                                  onBlur={() => recalcItemGst(idx)}
+                                  className="w-16 border-2 border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center font-semibold" />
                               </td>
                               <td className="px-4 py-3 text-right border-r border-gray-200">
                                 <input type="number" min={0} value={item.rate}
                                   onChange={e => updateRow(idx, "rate", e.target.value)}
+                                  onBlur={() => recalcItemGst(idx)}
                                   className="w-24 border-2 border-gray-200 rounded-lg px-2 py-1.5 text-sm text-right" />
                               </td>
                               <td className="px-4 py-3 text-right font-semibold border-r border-gray-200">₹{amount.toFixed(2)}</td>
@@ -1781,6 +2043,7 @@ export default function StockTransfer() {
                             <td className="border-r border-blue-500" />
                             <td className="border-r border-blue-500" />
                             <td className="px-4 py-3 text-center border-r border-blue-500">{totals.qty}</td>
+                            <td className="border-r border-blue-500" />
                             <td colSpan={2} className="px-4 py-3 text-right border-r border-blue-500">₹{totals.value.toFixed(2)}</td>
                             <td />
                           </tr>

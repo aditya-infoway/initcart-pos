@@ -25,17 +25,18 @@ const PAGE_ALLOWED_ACTIONS: Record<string, AllowedActions> = {
   "/AddItems":             { can_view: true, can_add: true,  can_edit: true,  can_delete: true },  // Add Items
   "/WebItems":             { can_view: true, can_add: true,  can_edit: true,  can_delete: true },  // Website Items
   "/PendingBarcodes":      { can_view: true, can_add: true,  can_edit: true,  can_delete: false }, // Item Barcodes
-  "/Orders":                { can_view: true, can_add: false, can_edit: false, can_delete: false }, // Orders
+  "/Orders":                { can_view: true, can_add: false, can_edit: true, can_delete: false }, // Orders
   "/createGroup":           { can_view: true, can_add: true,  can_edit: true,  can_delete: true },  // Group
   "/ExcelImportExport":     { can_view: true, can_add: true,  can_edit: false, can_delete: false }, // Item Import
 
   // ── Stock related ───────────────────────
   "/stockReturnverification":     { can_view: true, can_add: false, can_edit: false, can_delete: false }, // Stock Return Verification
-  "/b2bstockReturnverification":  { can_view: true, can_add: false, can_edit: false, can_delete: false }, // B2B Stock Returns
-  "/stockTransfer":                { can_view: true, can_add: true,  can_edit: false, can_delete: false }, // Stock Transfer
+  "/b2bstockReturnverification":  { can_view: true, can_add: true, can_edit: true, can_delete: true }, // B2B Stock Returns
+  "/stockTransfer":                { can_view: true, can_add: true,  can_edit: true, can_delete: true }, // Stock Transfer
 
   // ── purchase ─────────────────────────────
   "/Addpurchaseitem":    { can_view: true, can_add: true,  can_edit: false, can_delete: false }, // Purchase Entry
+  "/purchaseimport":    { can_view: true, can_add: true,  can_edit: false, can_delete: false },
   "/purchaseReturnList": { can_view: true, can_add: true,  can_edit: false, can_delete: true },  // Purchase Return
 
   // ── sales ────────────────────────────────

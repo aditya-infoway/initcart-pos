@@ -1,4 +1,4 @@
-// src/pages/PendingBarcodes.tsx (updated with pagination)
+// src/pages/PendingBarcodes.tsx (updated with pagination) old software opafe with all functionalities
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
@@ -1076,7 +1076,7 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
             {barcodeUpdateSuccess.has(v.variant_id) && (
                 <span className="text-green-500 text-xs font-medium">✓</span>
             )}
-        </div>
+        </div>  
     )}
 </td>
                           </tr>

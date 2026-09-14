@@ -5,7 +5,8 @@ import React, { useState, useEffect } from "react";
 import {
   FaUserTie, FaEnvelope, FaPhone, FaStore, FaMapMarkerAlt,
   FaCity, FaMapPin, FaCreditCard, FaFileAlt, FaCalendarAlt,
-  FaImage, FaGlobe, FaEdit, FaSave, FaTimes, FaEye, FaEyeSlash
+  FaImage, FaGlobe, FaEdit, FaSave, FaTimes, FaEye, FaEyeSlash,
+  FaIdCard
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
@@ -37,6 +38,10 @@ interface BranchProfile {
   created_at: string;
   updated_at: string;
   branch_code?: string;
+  // ✅ NEW
+  gst_number?: string;
+  pan_number?: string;
+  pan_card?: string;
 }
 
 interface LocationOption {
@@ -112,6 +117,12 @@ const Profile: React.FC = () => {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [savingLogo, setSavingLogo] = useState<boolean>(false);
+
+  // ── ✅ NEW: Superadmin GST / PAN Details (master doc — 'branch' type ke liye yahi copy hota hai) ──
+  const [isEditingTax, setIsEditingTax] = useState<boolean>(false);
+  const [taxData, setTaxData] = useState({ gst_number: "", pan_number: "" });
+  const [panCardFile, setPanCardFile] = useState<File | null>(null);
+  const [savingTax, setSavingTax] = useState<boolean>(false);
 
   //  Check if current user is Superadmin
   const isSuperAdmin = () => {
@@ -202,6 +213,7 @@ const Profile: React.FC = () => {
   };
 
   const logoUrl = getFullMediaUrl(branchData?.branch_logo);
+  const panCardUrl = getFullMediaUrl(branchData?.pan_card);
 
   // ---- Edit mode: load countries, then pre-select existing values ----
   const handleEdit = async () => {
@@ -356,6 +368,64 @@ const Profile: React.FC = () => {
       toast.error(err.message || "Failed to update logo");
     } finally {
       setSavingLogo(false);
+    }
+  };
+
+  // ── ✅ NEW: GST / PAN handlers (superadmin master document) ──
+  const handleEditTax = () => {
+    setIsEditingTax(true);
+    setTaxData({
+      gst_number: branchData?.gst_number || "",
+      pan_number: branchData?.pan_number || "",
+    });
+    setPanCardFile(null);
+  };
+
+  const handleCancelTax = () => {
+    setIsEditingTax(false);
+    setPanCardFile(null);
+  };
+
+  const handlePanCardSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPanCardFile(file);
+  };
+
+  const handleSaveTax = async () => {
+    if (!taxData.gst_number.trim()) {
+      toast.error("GST Number is required");
+      return;
+    }
+    if (!taxData.pan_number.trim()) {
+      toast.error("PAN Number is required");
+      return;
+    }
+    setSavingTax(true);
+    try {
+      const formData = new FormData();
+      formData.append("gst_number", taxData.gst_number.trim().toUpperCase());
+      formData.append("pan_number", taxData.pan_number.trim().toUpperCase());
+      if (panCardFile) {
+        formData.append("pan_card", panCardFile);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/pos/auth/me/`, {
+        method: "PATCH",
+        headers: { "Authorization": `Bearer ${accessToken}` },
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.message || "Failed to update GST/PAN details");
+
+      setBranchData(data.data);
+      setIsEditingTax(false);
+      setPanCardFile(null);
+      toast.success("GST & PAN details updated successfully!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update GST/PAN details");
+    } finally {
+      setSavingTax(false);
     }
   };
 
@@ -985,6 +1055,108 @@ const Profile: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* ✅ NEW — SUPERADMIN-ONLY: GST & PAN Details (master doc) */}
+        {isSuperAdminUser && (
+          <div className="bg-white p-6 rounded-xl shadow-md mb-6">
+            <div className="flex justify-between items-center mb-6 border-b pb-2">
+              <h3 className="text-2xl font-semibold text-gray-800 flex items-center gap-2">
+                <FaIdCard className="text-blue-600" /> GST & PAN Details
+              </h3>
+              {!isEditingTax && (
+                <button onClick={handleEditTax}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+                  <FaEdit size={14} /> Edit
+                </button>
+              )}
+              {isEditingTax && (
+                <div className="flex gap-2">
+                  <button onClick={handleCancelTax} className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition">
+                    <FaTimes size={14} /> Cancel
+                  </button>
+                  <button onClick={handleSaveTax} disabled={savingTax} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50">
+                    <FaSave size={14} /> {savingTax ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* GST Number */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-600">GST Number</label>
+                {isEditingTax ? (
+                  <input
+                    type="text"
+                    value={taxData.gst_number}
+                    onChange={(e) => setTaxData(p => ({ ...p, gst_number: e.target.value.toUpperCase() }))}
+                    maxLength={15}
+                    placeholder="e.g. 24AAAAA0000A1Z5"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md uppercase font-mono focus:ring-2 focus:ring-blue-500"
+                  />
+                ) : (
+                  <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800 font-mono">
+                    {branchData.gst_number || "Not specified"}
+                  </div>
+                )}
+              </div>
+
+              {/* PAN Number */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-600">PAN Number</label>
+                {isEditingTax ? (
+                  <input
+                    type="text"
+                    value={taxData.pan_number}
+                    onChange={(e) => setTaxData(p => ({ ...p, pan_number: e.target.value.toUpperCase() }))}
+                    maxLength={10}
+                    placeholder="e.g. ABCDE1234F"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md uppercase font-mono focus:ring-2 focus:ring-blue-500"
+                  />
+                ) : (
+                  <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-800 font-mono">
+                    {branchData.pan_number || "Not specified"}
+                  </div>
+                )}
+              </div>
+
+              {/* PAN Card Upload */}
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium text-gray-600">PAN Card</label>
+                {isEditingTax ? (
+                  <div>
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      onChange={handlePanCardSelect}
+                      className="w-full border border-gray-300 rounded-md p-2"
+                    />
+                    {panCardFile && (
+                      <p className="text-xs text-gray-500 mt-1">Selected: {panCardFile.name}</p>
+                    )}
+                    {!panCardFile && panCardUrl && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        Leave blank to keep current PAN card —{" "}
+                        <a href={panCardUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">View current</a>
+                      </p>
+                    )}
+                  </div>
+                ) : panCardUrl ? (
+                  <a href={panCardUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm font-medium">
+                    <FaFileAlt size={14} /> View PAN Card
+                  </a>
+                ) : (
+                  <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-3 text-gray-400">
+                    Not uploaded
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ✅ SUPERADMIN-ONLY: Branch Panel Login Password (decoupled from superadmin panel) */}
         {isSuperAdminUser && (

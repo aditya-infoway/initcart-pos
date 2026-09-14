@@ -469,6 +469,7 @@ const CashPayment: React.FC = () => {
   const [showBillModal, setShowBillModal] = useState(false);
   const [billType, setBillType] = useState<string>('');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [isSuperAdminOrEmployee, setIsSuperAdminOrEmployee] = useState(false);  
 
   // ✅ PERMISSIONS
   const { canAdd } = usePermission("/Cash-Payment");
@@ -484,9 +485,15 @@ const CashPayment: React.FC = () => {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-  useEffect(() => {
-    setIsSuperAdmin(getUserRole() === "superadmin");
-  }, []);
+// ─── useEffect ───
+useEffect(() => {
+  const role = getUserRole();
+  const isSA = role === "superadmin";
+  const isEmp = role === "employee";
+  
+  setIsSuperAdmin(isSA);
+  setIsSuperAdminOrEmployee(isSA || isEmp);   // ✅ NEW
+}, []);
 
   // Add Export to Excel function
   const exportToExcel = () => {
@@ -1026,88 +1033,67 @@ const CashPayment: React.FC = () => {
                 return (
                   <>
                     <Form className="p-6 max-h-[70vh] overflow-y-auto space-y-4">
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium mb-2">Payment Type</label>
-                        <div className="flex gap-4 flex-wrap">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              value="manual"
-                              checked={values.paymentType === "manual"}
-                              onChange={() => {
-                                setFieldValue("paymentType", "manual");
-                                setFieldValue("billNo", "");
-                                setFieldValue("selectedBill", null);
-                                setFieldValue("opAccount", null);
-                              }}
-                            />
-                            <span>Manual</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              value="salesReturn"
-                              checked={values.paymentType === "salesReturn"}
-                              onChange={() => {
-                                setFieldValue("paymentType", "salesReturn");
-                                setFieldValue("billNo", "");
-                                setFieldValue("selectedBill", null);
-                                setFieldValue("opAccount", null);
-                              }}
-                            />
-                            <span>Sales Return</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              value="purchaseEntry"
-                              checked={values.paymentType === "purchaseEntry"}
-                              onChange={() => {
-                                setFieldValue("paymentType", "purchaseEntry");
-                                setFieldValue("billNo", "");
-                                setFieldValue("selectedBill", null);
-                                setFieldValue("opAccount", null);
-                              }}
-                            />
-                            <span>Purchase Entry</span>
-                          </label>
-                          {/* Stock Received, only for non-superadmin branches */}
-                          {!isSuperAdmin && (
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                value="stockReceived"
-                                checked={values.paymentType === "stockReceived"}
-                                onChange={() => {
-                                  setFieldValue("paymentType", "stockReceived");
-                                  setFieldValue("billNo", "");
-                                  setFieldValue("selectedBill", null);
-                                  setFieldValue("opAccount", null);
-                                }}
-                              />
-                              <span>Stock Received</span>
-                            </label>
-                          )}
-                          {/* Stock Return refund, superadmin only */}
-                          {isSuperAdmin && (
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                value="stockReturn"
-                                checked={values.paymentType === "stockReturn"}
-                                onChange={() => {
-                                  setFieldValue("paymentType", "stockReturn");
-                                  setFieldValue("billNo", "");
-                                  setFieldValue("selectedBill", null);
-                                  setFieldValue("opAccount", null);
-                                }}
-                              />
-                              <span>Stock Return</span>
-                            </label>
-                          )}
-                        </div>
-                      </div>
+{/* Radio Buttons - Payment Type */}
+<div className="mb-4">
+  <label className="block text-sm font-medium mb-2">Payment Type</label>
+  <div className="flex gap-4 flex-wrap">
+    <label className="flex items-center gap-2">
+      <input type="radio" value="manual" checked={values.paymentType === "manual"} onChange={() => {
+        setFieldValue("paymentType", "manual");
+        setFieldValue("billNo", "");
+        setFieldValue("selectedBill", null);
+        setFieldValue("opAccount", null);
+      }} />
+      <span>Manual</span>
+    </label>
+    
+    <label className="flex items-center gap-2">
+      <input type="radio" value="salesReturn" checked={values.paymentType === "salesReturn"} onChange={() => {
+        setFieldValue("paymentType", "salesReturn");
+        setFieldValue("billNo", "");
+        setFieldValue("selectedBill", null);
+        setFieldValue("opAccount", null);
+      }} />
+      <span>Sales Return</span>
+    </label>
+    
+    <label className="flex items-center gap-2">
+      <input type="radio" value="purchaseEntry" checked={values.paymentType === "purchaseEntry"} onChange={() => {
+        setFieldValue("paymentType", "purchaseEntry");
+        setFieldValue("billNo", "");
+        setFieldValue("selectedBill", null);
+        setFieldValue("opAccount", null);
+      }} />
+      <span>Purchase Entry</span>
+    </label>
 
+    {/* ✅ Stock Received - Sirf normal branch users (superadmin/employee nahi) */}
+    {!isSuperAdminOrEmployee && (
+      <label className="flex items-center gap-2">
+        <input type="radio" value="stockReceived" checked={values.paymentType === "stockReceived"} onChange={() => {
+          setFieldValue("paymentType", "stockReceived");
+          setFieldValue("billNo", "");
+          setFieldValue("selectedBill", null);
+          setFieldValue("opAccount", null);
+        }} />
+        <span>Stock Received</span>
+      </label>
+    )}
+
+    {/* ✅ Stock Return refund - Superadmin OR Employee (donon ko dikhe) */}
+    {isSuperAdminOrEmployee && (
+      <label className="flex items-center gap-2">
+        <input type="radio" value="stockReturn" checked={values.paymentType === "stockReturn"} onChange={() => {
+          setFieldValue("paymentType", "stockReturn");
+          setFieldValue("billNo", "");
+          setFieldValue("selectedBill", null);
+          setFieldValue("opAccount", null);
+        }} />
+        <span>Stock Return</span>
+      </label>
+    )}
+  </div>
+</div>
                       {(values.paymentType === "salesReturn" || values.paymentType === "purchaseEntry") && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <div className="flex gap-2 items-end">
