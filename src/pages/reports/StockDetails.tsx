@@ -1,13 +1,13 @@
 // src/pages/StockDetail.tsx
 // Route: /stock-detail/:variantId
-// Uses react-router-dom useParams & useNavigate
+// Uses react-router-dom useParams, useNavigate & useSearchParams
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/api";
 import { FaArrowLeft, FaPrint, FaBoxOpen, FaFileExcel } from "react-icons/fa";
 import * as XLSX from "xlsx";
-import { toast } from "react-toastify"; 
+import { toast } from "react-toastify";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,11 +65,16 @@ const StockDetail: React.FC = () => {
   const { variantId } = useParams<{ variantId: string }>();
   const navigate = useNavigate();
 
+  // ✅ ADD: read branch_id from URL query (passed by Stock Report page)
+  const [searchParams] = useSearchParams();
+  const branchIdFromUrl = searchParams.get("branch_id") || "";
+
   // ── state ────────────────────────────────────────────────────────────────
   const [history, setHistory] = useState<StockHistoryEntry[]>([]);
   const [itemName, setItemName] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   // ✅ Add Export to Excel function with complete calculations
   const exportToExcel = () => {
     if (history.length === 0) {
@@ -117,7 +122,7 @@ const exportData = history.map((row, index) => ({
 
     // Create worksheet
     const ws = XLSX.utils.json_to_sheet(exportData);
-    
+
     // Set column widths
 ws["!cols"] = [
       { wch: 6 },   // SR No
@@ -185,27 +190,31 @@ ws["!cols"] = [
     // Create workbook and download
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `Stock_History_${itemName || variantId}`);
-    
+
     // Generate filename with current date
     const fileName = `Stock_History_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, fileName);
-    
+
     toast.success(`Exported ${history.length} records with complete stock summary`);
-  }; 
+  };
+
   // ── client-side pagination ────────────────────────────────────────────────
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
   // ── fetch history ─────────────────────────────────────────────────────────
+  // ✅ FIX: send BOTH `variant_id` and `branch_id` as query params
   const fetchHistory = useCallback(async () => {
     if (!variantId) return;
     setLoading(true);
     setError("");
     try {
-      // item_id is required by backend — we pass variantId as item_id too
-      // because the route is /stock-history/<item_id>/?variant_id=<variantId>
+      const params = new URLSearchParams();
+      params.set("variant_id", variantId);          // ✅ backend iske bina 400 deta hai
+      if (branchIdFromUrl) params.set("branch_id", branchIdFromUrl);   // ✅ employee ke liye
+
       const res = await api.get(
-        `stock-history/${variantId}/?variant_id=${variantId}`,
+        `stock-history/${variantId}/?${params}`,
         { headers: authHeader() }
       );
       const data: StockHistoryEntry[] = Array.isArray(res.data) ? res.data : [];
@@ -219,7 +228,7 @@ ws["!cols"] = [
     } finally {
       setLoading(false);
     }
-  }, [variantId]);
+  }, [variantId, branchIdFromUrl]);
 
   useEffect(() => {
     fetchHistory();
@@ -470,7 +479,7 @@ const rows = history
                         {isOutgoing ? "-" : isIncoming ? "+" : ""}
                         {fmt(Math.abs(row.qty))}
                       </td>
-                      
+
 
                       <td className="p-2 border border-gray-100 text-right text-gray-600">
                         {row.billAmount > 0 ? `₹${fmt(row.billAmount)}` : "—"}

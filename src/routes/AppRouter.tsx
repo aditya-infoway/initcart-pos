@@ -131,7 +131,7 @@ const AppRouter = () => (
         <Route path="/dayBook" element={<DayBook/>}/>
         <Route path="/outStandingReport" element={<OutstandingReport/>}/>
         <Route path="/duePaymentReport" element={<DuePaymentReport/>}/>
-        <Route path="/ledger-detail/:accountId" element={<LedgerDetail />} />
+        <Route path="/ledger-detail/:id" element={<LedgerDetail />} />
         <Route path="/stockDetail/:variantId" element={<StockDetail/>}/>
         <Route path="/stockTransfer" element={<StockTransfer/>}/>
         <Route path="/stock-verification" element={<StockVerification />} />

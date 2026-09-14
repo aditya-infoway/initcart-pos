@@ -1,9 +1,9 @@
 // src/pages/LedgerDetail.tsx
-// Route: /ledger-detail/:accountId
+// Route: /ledger-detail/:id
 // Uses react-router-dom useParams & useNavigate
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/api";
 import { FaArrowLeft, FaPrint, FaFileExcel } from "react-icons/fa";
 import * as XLSX from "xlsx";
@@ -90,8 +90,13 @@ const PAGE_SIZES = [15, 25, 50, 100, 200];
 // ─── main component ───────────────────────────────────────────────────────────
 
 const LedgerDetail: React.FC = () => {
-  const { accountId } = useParams<{ accountId: string }>();
+  // ✅ FIX: use `id`
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
+  // ✅ FIX: read branch_id from URL query (passed by Ledger Report page)
+  const [searchParams] = useSearchParams();
+  const branchIdFromUrl = searchParams.get("branch_id") || "";
 
   // ── server data ──────────────────────────────────────────────────────────
   const [ledgerData, setLedgerData] = useState<LedgerData | null>(null);
@@ -107,83 +112,87 @@ const LedgerDetail: React.FC = () => {
   const [pageSize, setPageSize] = useState(25);
 
   // Add this function inside LedgerDetail component
-const exportToExcel = () => {
-  if (!ledgerData) {
-    toast.warning("No data to export");
-    return;
-  }
-
-  // Prepare main data for export
-  const exportData = ledgerData.ledger.map((row, index) => ({
-    "SR No": index + 1,
-    "Date": row.date || "-",
-    "Voucher No": row.voucher || "-",
-    "Type": row.type,
-    "Particulars": row.particulars,
-    "Debit (Dr)": row.debit > 0 ? row.debit.toFixed(2) : "-",
-    "Credit (Cr)": row.credit > 0 ? row.credit.toFixed(2) : "-",
-    "Balance": `${fmt(row.balance)} ${row.balance_dr_cr}`,
-  }));
-
-  // Create worksheet
-  const ws = XLSX.utils.json_to_sheet(exportData);
-  
-  ws["!cols"] = [
-    { wch: 6 }, { wch: 12 }, { wch: 15 }, { wch: 10 }, 
-    { wch: 35 }, { wch: 15 }, { wch: 15 }, { wch: 18 }
-  ];
-
-  // Add summary section
-  const summaryStartRow = exportData.length + 3;
-  const summaryData = [
-    [],
-    ["=".repeat(15)],
-    ["📊 LEDGER SUMMARY REPORT"],
-    ["=".repeat(15)],
-    [],
-    [`Account Name: ${ledgerData.account}`],
-    [`Group: ${ledgerData.group}`],
-    [`Date Range: ${dateFrom || "All"} to ${dateTo || "All"}`],
-    [],
-    ["-" .repeat(15)],
-    ["Opening Balance:", `${fmt(ledgerData.opening_balance)} ${ledgerData.opening_dr_cr}`],
-    ["Total Debit:", fmt(ledgerData.total_debit)],
-    ["Total Credit:", fmt(ledgerData.total_credit)],
-    ["Closing Balance:", `${fmt(ledgerData.closing_balance)} ${ledgerData.closing_dr_cr}`],
-    [],
-    ["=".repeat(15)],
-    [`Generated on: ${new Date().toLocaleString()}`],
-  ];
-
-  summaryData.forEach((row, idx) => {
-    const rowNum = summaryStartRow + idx;
-    if (Array.isArray(row)) {
-      ws[`A${rowNum + 1}`] = { t: 's', v: row[0] || "" };
-      if (row[1]) ws[`B${rowNum + 1}`] = { t: 's', v: row[1] };
-    } else if (typeof row === 'string') {
-      ws[`A${rowNum + 1}`] = { t: 's', v: row };
+  const exportToExcel = () => {
+    if (!ledgerData) {
+      toast.warning("No data to export");
+      return;
     }
-  });
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, `Ledger_${ledgerData.account}`);
-  XLSX.writeFile(wb, `Ledger_${ledgerData.account}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-  toast.success(`Exported ${ledgerData.ledger.length} entries successfully`);
-};
+    // Prepare main data for export
+    const exportData = ledgerData.ledger.map((row, index) => ({
+      "SR No": index + 1,
+      "Date": row.date || "-",
+      "Voucher No": row.voucher || "-",
+      "Type": row.type,
+      "Particulars": row.particulars,
+      "Debit (Dr)": row.debit > 0 ? row.debit.toFixed(2) : "-",
+      "Credit (Cr)": row.credit > 0 ? row.credit.toFixed(2) : "-",
+      "Balance": `${fmt(row.balance)} ${row.balance_dr_cr}`,
+    }));
+
+    // Create worksheet
+    const ws = XLSX.utils.json_to_sheet(exportData);
+
+    ws["!cols"] = [
+      { wch: 6 }, { wch: 12 }, { wch: 15 }, { wch: 10 },
+      { wch: 35 }, { wch: 15 }, { wch: 15 }, { wch: 18 }
+    ];
+
+    // Add summary section
+    const summaryStartRow = exportData.length + 3;
+    const summaryData = [
+      [],
+      ["=".repeat(15)],
+      ["📊 LEDGER SUMMARY REPORT"],
+      ["=".repeat(15)],
+      [],
+      [`Account Name: ${ledgerData.account}`],
+      [`Group: ${ledgerData.group}`],
+      [`Date Range: ${dateFrom || "All"} to ${dateTo || "All"}`],
+      [],
+      ["-".repeat(15)],
+      ["Opening Balance:", `${fmt(ledgerData.opening_balance)} ${ledgerData.opening_dr_cr}`],
+      ["Total Debit:", fmt(ledgerData.total_debit)],
+      ["Total Credit:", fmt(ledgerData.total_credit)],
+      ["Closing Balance:", `${fmt(ledgerData.closing_balance)} ${ledgerData.closing_dr_cr}`],
+      [],
+      ["=".repeat(15)],
+      [`Generated on: ${new Date().toLocaleString()}`],
+    ];
+
+    summaryData.forEach((row, idx) => {
+      const rowNum = summaryStartRow + idx;
+      if (Array.isArray(row)) {
+        ws[`A${rowNum + 1}`] = { t: 's', v: row[0] || "" };
+        if (row[1]) ws[`B${rowNum + 1}`] = { t: 's', v: row[1] };
+      } else if (typeof row === 'string') {
+        ws[`A${rowNum + 1}`] = { t: 's', v: row };
+      }
+    });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Ledger_${ledgerData.account}`);
+    XLSX.writeFile(wb, `Ledger_${ledgerData.account}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success(`Exported ${ledgerData.ledger.length} entries successfully`);
+  };
 
   // ── fetch ledger ─────────────────────────────────────────────────────────
   const fetchLedger = useCallback(
     async (df = dateFrom, dt = dateTo) => {
-      if (!accountId) return;
+      // ✅ FIX: use `id`
+      if (!id) return;
       setLoading(true);
       setError("");
       try {
         const params = new URLSearchParams();
         if (df) params.set("date_from", df);
         if (dt) params.set("date_to", dt);
+        // ✅ FIX: send branch_id from URL (employee ke liye zaroori)
+        if (branchIdFromUrl) params.set("branch_id", branchIdFromUrl);
 
+        // ✅ FIX: use `id`
         const res = await api.get<LedgerData>(
-          `ledger-history/${accountId}/?${params}`,
+          `ledger-history/${id}/?${params}`,
           { headers: authHeader() }
         );
         setLedgerData(res.data);
@@ -195,13 +204,14 @@ const exportToExcel = () => {
         setLoading(false);
       }
     },
-    [accountId, dateFrom, dateTo]
+    // ✅ FIX: use `id` and branchIdFromUrl in deps
+    [id, dateFrom, dateTo, branchIdFromUrl]
   );
 
   useEffect(() => {
     fetchLedger("", "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId]);
+  }, [id, branchIdFromUrl]);
 
   // ── apply date filter ─────────────────────────────────────────────────────
   const applyFilter = () => {

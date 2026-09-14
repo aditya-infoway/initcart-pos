@@ -301,13 +301,17 @@ const LedgerReport: React.FC = () => {
                     </span>
                   </td>
                   <td className="p-3 border border-gray-100">
-                    <button
-                      onClick={() => navigate(`/ledger-detail/${acc.id}`)}
-                      className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition"
-                      title="View Ledger"
-                    >
-                      <FaEye />
-                    </button>
+<button
+  onClick={() => navigate(
+    selectedBranchId
+      ? `/ledger-detail/${acc.id}?branch_id=${selectedBranchId}`
+      : `/ledger-detail/${acc.id}`
+  )}
+  className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition"
+  title="View Ledger"
+>
+  <FaEye />
+</button>
                   </td>
                 </tr>
               ))
