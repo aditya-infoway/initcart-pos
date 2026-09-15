@@ -1,6 +1,9 @@
 // src/pages/superadmin/StockTransfer.tsx
 // UPDATED — GST Summary only (table me sirf Rate × Qty = Amount)
 // GST breakup table me nahi, sirf neeche summary card me show hoga
+// + NEW: HOLD / RESUME feature for in-progress manual transfers
+//   (localStorage based — branch + items save hote hain "Hold" par,
+//    aur "Hold List" se wapas resume kiye ja sakte hain)
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useAuthStore } from "../../store/authStore";
@@ -10,6 +13,7 @@ import {
   FaArrowLeft, FaExchangeAlt, FaEye, FaPlus,
   FaWarehouse, FaShippingFast, FaClipboardList,
   FaTimesCircle, FaCheckDouble, FaBarcode,
+  FaPause, FaRedoAlt, FaBoxOpen,
 } from "react-icons/fa";
 import { MdClose, MdSwapHoriz } from "react-icons/md";
 import { HiOutlineDocumentDuplicate } from "react-icons/hi";
@@ -123,6 +127,17 @@ interface TransferDetail extends TransferListItem {
 }
 type MsgType = "success" | "error" | "warning";
 
+// ── NEW: Held Transfer type (localStorage) ─────────────────────────────────────
+interface HeldTransfer {
+  hold_id: string;
+  to_branch_id: string;
+  to_branch_name: string;
+  transfer_date: string;
+  note: string;
+  items: FormItem[];
+  held_at: string; // display timestamp
+}
+
 // ── New: Order Tracking types ─────────────────────────────────────────────────
 interface BranchOrderListItem {
   id: number;
@@ -232,6 +247,28 @@ function flattenItems(items: ItemWithVariants[]) {
   const out: { item: ItemWithVariants; variant: VariantOption }[] = [];
   items.forEach(item => item.variants.forEach(v => out.push({ item, variant: v })));
   return out;
+}
+
+// ── NEW: Held Transfers localStorage helpers ────────────────────────────────────
+const HOLD_STORAGE_KEY = "stock_transfer_holds";
+
+function getHeldTransfersFromStorage(): HeldTransfer[] {
+  try {
+    const raw = localStorage.getItem(HOLD_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHeldTransfersToStorage(holds: HeldTransfer[]) {
+  try {
+    localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(holds));
+  } catch (err) {
+    console.error("Could not save held transfers to localStorage:", err);
+  }
 }
 
 // NEW: fetch ALL pages of stock-transfers
@@ -516,6 +553,84 @@ const SelectItemsModal: React.FC<SelectItemsModalProps> = ({
                   <FaCheckCircle className="inline mr-2" />Add {selectedCount} Variant{selectedCount !== 1 ? "s" : ""}
                 </button>
               </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+// ════════════════════════════════════════════════════════════
+// HOLD LIST MODAL (NEW)
+// Ye modal "Hold" button se saved held transfers ki list dikhata hai.
+// User kisi bhi held entry ko "Resume" karke wapas Create page par
+// (branch + items ke saath) le aa sakta hai, ya "Delete" kar sakta hai.
+// ════════════════════════════════════════════════════════════
+interface HoldListModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  holds: HeldTransfer[];
+  onResume: (hold: HeldTransfer) => void;
+  onDelete: (hold_id: string) => void;
+}
+
+const HoldListModal: React.FC<HoldListModalProps> = ({ isOpen, onClose, holds, onResume, onDelete }) => {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+            className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden m-4"
+            style={{ maxHeight: "calc(100vh - 32px)" }}
+          >
+            <div className="flex justify-between items-center px-6 py-4 bg-gradient-to-r from-amber-600 to-amber-500">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/20 p-2 rounded-xl"><FaClipboardList className="text-white text-xl" /></div>
+                <div>
+                  <h3 className="text-white font-bold text-lg">Held Transfers</h3>
+                  <p className="text-amber-100 text-xs mt-0.5">Resume a held transfer to continue exactly where you left off</p>
+                </div>
+              </div>
+              <button onClick={onClose} className="hover:bg-white/20 rounded-xl p-2 text-white"><MdClose size={22} /></button>
+            </div>
+
+            <div className="overflow-auto p-6" style={{ maxHeight: "calc(100vh - 200px)" }}>
+              {holds.length === 0 ? (
+                <div className="py-16 text-center text-gray-400">
+                  <FaBoxOpen className="text-4xl text-gray-200 mx-auto mb-3" />
+                  No held transfers yet
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {holds.map(hold => (
+                    <div key={hold.hold_id}
+                      className="border border-gray-200 rounded-xl p-4 flex items-center justify-between hover:bg-amber-50/40 transition-colors">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-gray-800 flex items-center gap-2">
+                          <FaWarehouse className="text-gray-300 flex-shrink-0" size={13} />
+                          <span className="truncate">{hold.to_branch_name || "—"}</span>
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">
+                          {hold.items.length} item{hold.items.length !== 1 ? "s" : ""} · Held on {hold.held_at}
+                          {hold.note && <span className="ml-2 italic">· "{hold.note}"</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button onClick={() => onResume(hold)}
+                          className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-emerald-600 to-emerald-500 flex items-center gap-1.5">
+                          <FaRedoAlt size={11} /> Resume
+                        </button>
+                        <button onClick={() => onDelete(hold.hold_id)}
+                          className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors" title="Delete held transfer">
+                          <FaTrash size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </motion.div>
         </div>
@@ -1294,6 +1409,10 @@ export default function StockTransfer() {
     to_branch_id: "", transfer_date: new Date().toISOString().slice(0, 10), note: "", items: [],
   });
 
+  // ── NEW: Hold / Resume state ──────────────────────────────────────────────
+  const [heldTransfers, setHeldTransfers] = useState<HeldTransfer[]>([]);
+  const [holdListOpen, setHoldListOpen] = useState(false);
+
   const [manualView, setManualView] = useState<"branches" | "list">("branches");
   const [manualAllTransfers, setManualAllTransfers] = useState<TransferListItem[]>([]);
   const [manualLoadingAll, setManualLoadingAll] = useState(false);
@@ -1308,6 +1427,11 @@ export default function StockTransfer() {
       setManualBranchFilter(null);
     }
   }, [mode]);
+
+  // ── NEW: load held transfers from localStorage once on mount ──────────────
+  useEffect(() => {
+    setHeldTransfers(getHeldTransfersFromStorage());
+  }, []);
 
   useEffect(() => {
     if (form.to_branch_id) {
@@ -1584,6 +1708,57 @@ function updateRow(i: number, key: "quantity" | "rate" | "discountPercent", val:
   function resetForm() {
     setForm({ to_branch_id: "", transfer_date: new Date().toISOString().slice(0, 10), note: "", items: [] });
     setDestBranchDetails(null);
+  }
+
+  // ── NEW: Hold current in-progress transfer (branch + items) to localStorage ──
+  function handleHoldTransfer() {
+    if (!form.to_branch_id) { showMsg("Select destination branch first", "error"); return; }
+    if (!form.items.length) { showMsg("Add at least one item to hold", "error"); return; }
+
+    const hold: HeldTransfer = {
+      hold_id: `hold_${Date.now()}`,
+      to_branch_id: form.to_branch_id,
+      to_branch_name: destBranchName,
+      transfer_date: form.transfer_date,
+      note: form.note,
+      items: form.items,
+      held_at: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
+    };
+
+    const existing = getHeldTransfersFromStorage();
+    const updated = [hold, ...existing];
+    saveHeldTransfersToStorage(updated);
+    setHeldTransfers(updated);
+
+    showMsg("Transfer held! Resume it anytime from Hold List.", "success");
+    resetForm();
+    setTab("list");
+  }
+
+  // ── NEW: Resume a held transfer back into the create form ────────────────────
+  function handleResumeHold(hold: HeldTransfer) {
+    setForm({
+      to_branch_id: hold.to_branch_id,
+      transfer_date: hold.transfer_date,
+      note: hold.note,
+      items: hold.items,
+    });
+
+    const remaining = getHeldTransfersFromStorage().filter(h => h.hold_id !== hold.hold_id);
+    saveHeldTransfersToStorage(remaining);
+    setHeldTransfers(remaining);
+
+    setHoldListOpen(false);
+    setTab("create");
+    showMsg("Held transfer resumed", "success");
+  }
+
+  // ── NEW: Delete a held transfer permanently ───────────────────────────────
+  function handleDeleteHold(hold_id: string) {
+    if (!confirm("Delete this held transfer?")) return;
+    const remaining = getHeldTransfersFromStorage().filter(h => h.hold_id !== hold_id);
+    saveHeldTransfersToStorage(remaining);
+    setHeldTransfers(remaining);
   }
 
   async function createTransfer() {
@@ -2091,10 +2266,27 @@ function updateRow(i: number, key: "quantity" | "rate" | "discountPercent", val:
                   </div>
                 )}
 
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 flex items-center gap-3 justify-end">
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 flex items-center gap-3 justify-end flex-wrap">
                   <div className="mr-auto text-sm text-gray-500">
                     {form.items.length > 0 ? <><span className="font-semibold">{form.items.length} variants</span>{form.to_branch_id && <span className="ml-2 text-gray-400">→ {destBranchName}</span>}</> : "No items selected"}
                   </div>
+
+                  {/* NEW: Hold List button — held transfers ki list yahan se khulti hai */}
+                  <button onClick={() => { setHeldTransfers(getHeldTransfersFromStorage()); setHoldListOpen(true); }}
+                    className="relative px-5 py-2.5 border-2 border-indigo-200 text-indigo-600 rounded-xl text-sm font-medium hover:bg-indigo-50 flex items-center gap-2">
+                    <FaClipboardList size={13} /> Hold List
+                    {heldTransfers.length > 0 && (
+                      <span className="bg-indigo-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{heldTransfers.length}</span>
+                    )}
+                  </button>
+
+                  {/* NEW: Hold button — current branch + items ko save karke form reset kar deta hai */}
+                  <button onClick={handleHoldTransfer}
+                    disabled={!form.items.length || !form.to_branch_id}
+                    className="px-5 py-2.5 border-2 border-amber-300 text-amber-600 rounded-xl text-sm font-semibold hover:bg-amber-50 disabled:opacity-40 flex items-center gap-2">
+                    <FaPause size={12} /> Hold
+                  </button>
+
                   <button onClick={() => { setTab("list"); resetForm(); }}
                     className="px-5 py-2.5 border-2 border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 font-medium">
                     <FaTimes className="inline mr-1.5" size={11} /> Cancel
@@ -2118,6 +2310,15 @@ function updateRow(i: number, key: "quantity" | "rate" | "discountPercent", val:
 
       <SelectItemsModal isOpen={itemModalOpen} onClose={() => setItemModalOpen(false)}
         myItems={myItems} selectedVariantIds={selectedVariantIds} onConfirm={handleConfirm} />
+
+      {/* NEW: Hold List modal */}
+      <HoldListModal
+        isOpen={holdListOpen}
+        onClose={() => setHoldListOpen(false)}
+        holds={heldTransfers}
+        onResume={handleResumeHold}
+        onDelete={handleDeleteHold}
+      />
     </div>
   );
 }

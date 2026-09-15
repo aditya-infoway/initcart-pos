@@ -30,7 +30,7 @@ const generateBarcodeNumber = (): string => {
 };
 
 const validationSchema = Yup.object({
-  itemName: Yup.string().max(50, "Max 50 chars").required("Required"),
+  itemName: Yup.string().max(150, "Max 150 chars").required("Required"),
   brand: Yup.string(),
   category: Yup.string(),
   items: Yup.array().of(
