@@ -2,6 +2,7 @@
 // B2B SALES — Superadmin to Franchise branch stock "sell"
 // Difference from Stock Transfer: Stock is deducted immediately on creation
 // (Verification is only for franchise branch stock ADD — B2BSalesVerify.tsx)
+// + HOLD / RESUME feature (localStorage based, same pattern as Stock Transfer)
 
 import React, { useEffect, useRef, useState } from "react";
 import { Formik, Form, useField } from "formik";
@@ -10,13 +11,45 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   FaCheckCircle, FaBarcode, FaSearch, FaTrash, FaSave, FaTimes,
   FaShoppingCart, FaStore, FaBox, FaCalendarAlt, FaFileInvoice, FaEdit,
-  FaArrowLeft,
+  FaArrowLeft, FaPause, FaPlay, FaListUl, FaClock,
 } from "react-icons/fa";
 import { HiOutlineDocumentText } from "react-icons/hi";
 import { MdClose } from "react-icons/md";
 import api from "../../api/api";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
+
+// ─── Hold Storage Types & Helpers ─────────────────────────────────────
+interface HeldSale {
+  holdId: string;
+  heldAt: string;           // ISO timestamp
+  sale_date: string;
+  to_branch_id: number;
+  to_branch_name: string;
+  note: string;
+  items: any[];
+}
+
+const HOLDS_STORAGE_KEY = "b2b_sales_holds";
+
+const loadHolds = (): HeldSale[] => {
+  try {
+    const raw = localStorage.getItem(HOLDS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveHolds = (holds: HeldSale[]) => {
+  try {
+    localStorage.setItem(HOLDS_STORAGE_KEY, JSON.stringify(holds));
+  } catch (e) {
+    console.error("Failed to save holds", e);
+  }
+};
 
 // ─── Empty item template ──────────────────────────────────────────────
 const emptyCurrentItem = {
@@ -199,7 +232,6 @@ const BarcodeScannerInput: React.FC<{
 
     setScanning(true);
     try {
-      // ===== STEP 1: local (already-fetched) list mein dhundo =====
       const localMatch = flatItems.find(
         (item) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
       );
@@ -217,8 +249,7 @@ const BarcodeScannerInput: React.FC<{
         return;
       }
 
-      // ===== STEP 2: local mein nahi mila -> backend se dhundo =====
-      const res = await api.get(  
+      const res = await api.get(
         `b2b-sales/my-branch-items/?query=${encodeURIComponent(trimmed)}`
       );
       const nested = res.data.data || [];
@@ -374,7 +405,7 @@ const ItemsTable = ({ items, onDelete, totals }: any) => (
 // ─── Main Component ────────────────────────────────────────────────────
 const B2BSales: React.FC = () => {
   const navigate = useNavigate();
-
+  const resumeHandlerRef = useRef<((hold: HeldSale) => void) | null>(null);
   const [addedItems, setAddedItems] = useState<any[]>([]);
   const [idCounter, setIdCounter] = useState<number>(1);
 
@@ -394,11 +425,20 @@ const B2BSales: React.FC = () => {
   const [savedSaleNo, setSavedSaleNo] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
 
+  // ── HOLD feature state ──
+  const [holds, setHolds] = useState<HeldSale[]>([]);
+  const [showHoldListModal, setShowHoldListModal] = useState(false);
+
   const initialValues = {
     sale_date: today,
     to_branch_id: 0,
     note: "",
   };
+
+  // ── Load holds on mount ──
+  useEffect(() => {
+    setHolds(loadHolds());
+  }, []);
 
   // ── Fetch superadmin's own items, flatten for barcode/search ──
   useEffect(() => {
@@ -432,22 +472,22 @@ const B2BSales: React.FC = () => {
   }, []);
 
   // ── Fetch next sale number preview ──
-useEffect(() => {
-  api.get("b2b-sales/next-number/")
-    .then((res) => {
-      if (res.data.success) setNextSaleNo(res.data.sale_no);
-    })
-    .catch(() => setNextSaleNo("—"));
-}, []);
+  useEffect(() => {
+    api.get("b2b-sales/next-number/")
+      .then((res) => {
+        if (res.data.success) setNextSaleNo(res.data.sale_no);
+      })
+      .catch(() => setNextSaleNo("—"));
+  }, []);
 
-// ── Fetch franchise branches (list + details, dono ke liye) ──
-useEffect(() => {
-  setBranchesLoading(true);
-  api.get("b2b-sales/franchise-branches/")
-    .then((res) => setFranchiseBranches(res.data.data || []))
-    .catch(() => toast.error("Failed to load franchise branches"))
-    .finally(() => setBranchesLoading(false));
-}, []);
+  // ── Fetch franchise branches ──
+  useEffect(() => {
+    setBranchesLoading(true);
+    api.get("b2b-sales/franchise-branches/")
+      .then((res) => setFranchiseBranches(res.data.data || []))
+      .catch(() => toast.error("Failed to load franchise branches"))
+      .finally(() => setBranchesLoading(false));
+  }, []);
 
   // ── Live GST calc for current item row ──
   useEffect(() => {
@@ -553,6 +593,84 @@ useEffect(() => {
     };
   };
 
+  // ══════════════════════════════════════════════════════════════════
+  // HOLD FEATURE HANDLERS
+  // ══════════════════════════════════════════════════════════════════
+  const handleHold = (values: typeof initialValues, resetForm: () => void) => {
+    if (!values.to_branch_id) {
+      toast.error("Please select destination branch before holding");
+      return;
+    }
+    if (addedItems.length === 0) {
+      toast.error("Add at least one item before holding");
+      return;
+    }
+
+    const branch = franchiseBranches.find((b) => b.id === Number(values.to_branch_id));
+    const newHold: HeldSale = {
+      holdId: `HOLD-${Date.now()}`,
+      heldAt: new Date().toISOString(),
+      sale_date: values.sale_date,
+      to_branch_id: Number(values.to_branch_id),
+      to_branch_name: branch?.branch_name || `Branch #${values.to_branch_id}`,
+      note: values.note || "",
+      items: addedItems,
+    };
+
+    const updated = [newHold, ...holds];
+    setHolds(updated);
+    saveHolds(updated);
+
+    // Reset the form
+    setAddedItems([]);
+    setIdCounter(1);
+    setCurrentItem({ ...emptyCurrentItem });
+    setCurrentItemErrors({});
+    resetForm();
+
+    toast.success("Sale held successfully! Find it in Hold List.");
+    setShowHoldListModal(true);
+  };
+
+  const handleResumeHold = (hold: HeldSale, setFieldValue: (f: string, v: any) => void) => {
+    setFieldValue("sale_date", hold.sale_date);
+    setFieldValue("to_branch_id", hold.to_branch_id);
+    setFieldValue("note", hold.note || "");
+
+    // Restore items with fresh ids
+    const restoredItems = hold.items.map((it, idx) => ({ ...it, id: idx + 1 }));
+    setAddedItems(restoredItems);
+    setIdCounter(restoredItems.length + 1);
+    setSelectedToBranchId(hold.to_branch_id);
+
+    // Remove from hold list
+    const updated = holds.filter((h) => h.holdId !== hold.holdId);
+    setHolds(updated);
+    saveHolds(updated);
+
+    setShowHoldListModal(false);
+    toast.success("Held sale resumed!");
+  };
+
+  const handleDeleteHold = (holdId: string) => {
+    const updated = holds.filter((h) => h.holdId !== holdId);
+    setHolds(updated);
+    saveHolds(updated);
+    toast.success("Hold removed");
+  };
+
+  const formatHoldTime = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString("en-IN", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+    } catch {
+      return iso;
+    }
+  };
+
   const handleSubmit = async (values: typeof initialValues) => {
     if (addedItems.length === 0) { toast.error("At least one item is required"); return; }
     if (!values.to_branch_id) { toast.error("Select destination franchise branch"); return; }
@@ -579,9 +697,9 @@ useEffect(() => {
         setCurrentItem({ ...emptyCurrentItem });
         setShowConfirmModal(true);
 
-       api.get("b2b-sales/next-number/")
-      .then((r) => { if (r.data.success) setNextSaleNo(r.data.sale_no); })
-      .catch(() => {});  
+        api.get("b2b-sales/next-number/")
+          .then((r) => { if (r.data.success) setNextSaleNo(r.data.sale_no); })
+          .catch(() => {});
       }
     } catch (error: any) {
       const errs = error.response?.data?.errors;
@@ -615,15 +733,22 @@ useEffect(() => {
         </div>
 
         <Formik initialValues={initialValues} validationSchema={validationSchema} onSubmit={handleSubmit}>
-          {({ values, setFieldValue }) => {
-            useEffect(() => {
-              setSelectedToBranchId(Number(values.to_branch_id) || 0);
-            }, [values.to_branch_id]);
+{({ values, setFieldValue, resetForm }) => {
+  // ✅ NEW: branch sync (useEffect ki jagah)
+  const currentBranchId = Number(values.to_branch_id) || 0;
+  if (currentBranchId !== selectedToBranchId) {
+    setTimeout(() => setSelectedToBranchId(currentBranchId), 0);
+  }
 
-            const totals = calculateTotals(addedItems);
+  // ✅ NEW: resume handler register karo
+  resumeHandlerRef.current = (hold: HeldSale) => {
+    handleResumeHold(hold, setFieldValue);
+  };
+
+  const totals = calculateTotals(addedItems);
             const selectedBranchDetails = franchiseBranches.find(
-  (b) => b.id === selectedToBranchId
-) || null;
+              (b) => b.id === selectedToBranchId
+            ) || null;
 
             return (
               <Form
@@ -650,12 +775,11 @@ useEffect(() => {
                   </div>
 
                   {/* ── Selected Branch Details (blue box) ── */}
-{selectedBranchDetails && (
-  <BranchDetailsCard branch={selectedBranchDetails} />
-)}
+                  {selectedBranchDetails && (
+                    <BranchDetailsCard branch={selectedBranchDetails} />
+                  )}
 
                   {/* ── Barcode Scanner ── */}
-{/* ── Barcode Scanner ── */}
                   <BarcodeScannerInput
                     flatItems={flatItems}
                     toBranchId={selectedToBranchId}
@@ -827,6 +951,18 @@ useEffect(() => {
                     >
                       <FaTrash /> Clear All
                     </button>
+
+                    {/* ── HOLD button ── */}
+                    <button
+                      type="button"
+                      onClick={() => handleHold(values, resetForm)}
+                      disabled={addedItems.length === 0 || !values.to_branch_id}
+                      className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition flex items-center gap-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Save this draft and continue later"
+                    >
+                      <FaPause /> Hold
+                    </button>
+
                     <button
                       type="submit"
                       disabled={submitting}
@@ -841,6 +977,22 @@ useEffect(() => {
                     >
                       List
                     </button>
+
+                    {/* ── HOLD LIST button ── */}
+                    <button
+                      type="button"
+                      onClick={() => setShowHoldListModal(true)}
+                      className="relative px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition flex items-center gap-2 text-sm"
+                      title="View held sales"
+                    >
+                      <FaListUl /> Hold List
+                      {holds.length > 0 && (
+                        <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                          {holds.length}
+                        </span>
+                      )}
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => navigate(-1)}
@@ -968,6 +1120,126 @@ useEffect(() => {
             );
           }}
         </Formik>
+
+        {/* ── HOLD LIST MODAL ── */}
+        <AnimatePresence>
+          {showHoldListModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-2">
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden max-h-[90vh] flex flex-col"
+              >
+                <div className="flex justify-between items-center px-4 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white">
+                  <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <FaListUl /> Held Sales ({holds.length})
+                  </h3>
+                  <button
+                    onClick={() => setShowHoldListModal(false)}
+                    className="hover:bg-white/20 rounded-lg p-1 transition"
+                  >
+                    <MdClose size={24} />
+                  </button>
+                </div>
+
+                <div className="p-4 overflow-y-auto">
+                  {holds.length === 0 ? (
+                    <div className="text-center py-16 text-gray-400">
+                      <FaPause className="inline text-4xl mb-3 text-gray-300" />
+                      <p className="text-base">No held sales yet</p>
+                      <p className="text-xs mt-1">
+                        Add items and click <b>Hold</b> to save a draft
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {holds.map((h) => (
+                        <div
+                          key={h.holdId}
+                          className="border border-gray-200 rounded-xl p-4 hover:border-indigo-300 hover:shadow-md transition bg-gray-50"
+                        >
+                          <div className="flex flex-wrap justify-between items-start gap-3">
+                            <div className="flex-1 min-w-[200px]">
+                              <div className="flex items-center gap-2 mb-1">
+                                <FaStore className="text-indigo-600 text-sm" />
+                                <span className="font-semibold text-gray-800">
+                                  {h.to_branch_name}
+                                </span>
+                                <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                                  {h.items.length} item{h.items.length > 1 ? "s" : ""}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+                                <span className="flex items-center gap-1">
+                                  <FaClock className="text-[10px]" /> {formatHoldTime(h.heldAt)}
+                                </span>
+                                <span>Sale Date: {h.sale_date}</span>
+                                {h.note && <span className="italic truncate max-w-[200px]">"{h.note}"</span>}
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+<button
+  type="button"
+  onClick={() => {
+    // ✅ NEW: ref se handler call karo
+    if (resumeHandlerRef.current) {
+      resumeHandlerRef.current(h);
+    } else {
+      toast.error("Resume handler not ready. Please try again.");
+    }
+  }}
+  className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-1 text-xs"
+>
+  <FaPlay size={10} /> Resume
+</button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteHold(h.holdId)}
+                                className="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition flex items-center gap-1 text-xs"
+                              >
+                                <FaTrash size={10} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Items preview */}
+                          <div className="mt-3 pt-3 border-t border-gray-200">
+                            <div className="flex flex-wrap gap-1.5">
+                              {h.items.slice(0, 5).map((it: any, i: number) => (
+                                <span
+                                  key={i}
+                                  className="text-[11px] bg-white border border-gray-200 rounded px-2 py-0.5 text-gray-600"
+                                >
+                                  {it.itemName} × {it.quantity}
+                                </span>
+                              ))}
+                              {h.items.length > 5 && (
+                                <span className="text-[11px] text-gray-500 px-2 py-0.5">
+                                  +{h.items.length - 5} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-center p-4 border-t bg-gray-50">
+                  <button
+                    type="button"
+                    onClick={() => setShowHoldListModal(false)}
+                    className="px-8 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
+                  >
+                    Close
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* ── Confirmation Modal ── */}
         <AnimatePresence>
