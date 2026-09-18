@@ -72,6 +72,7 @@ import EmployeePermissions from "../pages/Employees/EmployeePermissions";
 import AIPurchaseBill from "../pages/AI/AIPurchaseBill";
 import PurchaseExcelImportExport from "../pages/transactions/PurchaseExcelImportExport_1";
 import MyBranches from "../pages/accounts/MyBranches";
+import B2BSalesExcelImportExport from "../pages/transactions/B2BSalesExcelImportExport";
 
 
 
@@ -153,6 +154,7 @@ const AppRouter = () => (
         <Route path="/b2bsales" element={<B2BSalesList/>}/>
         <Route path="/b2bsalescreate" element={<B2BSales/>}/>
         <Route path="/b2bpurchaseverify" element={<B2BSalesVerify/>}/>
+        <Route path="/b2bexcelimportexport" element={<B2BSalesExcelImportExport/>}/>
         
         <Route path="/allEmployees" element={<EmployeeList/>}/>
         <Route path="/Employees" element={<EmployeeForm/>}/>
