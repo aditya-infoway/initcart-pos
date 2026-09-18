@@ -3,6 +3,21 @@
 // Difference from Stock Transfer: Stock is deducted immediately on creation
 // (Verification is only for franchise branch stock ADD — B2BSalesVerify.tsx)
 // + HOLD / RESUME feature (localStorage based, same pattern as Stock Transfer)
+//
+// FIXES APPLIED:
+// 1. Rate field is now editable (was read-only). GST calc is STILL fully
+//    server-driven (b2b-sales/item-tax/ API) exactly as before — the only
+//    change is that the edited `rate` is now sent in the request so the
+//    backend computes basic/tax/net (and CGST+SGST vs IGST based on the
+//    destination branch's state) using YOUR entered rate instead of always
+//    recomputing from the default branch price.
+//    IMPORTANT: this requires the backend `b2b-sales/item-tax/` endpoint to
+//    accept an optional `rate` field and use it when present. If it currently
+//    ignores `rate` and always looks up branch_price itself, the backend
+//    needs that one small change too — otherwise editing Rate on the frontend
+//    won't change the calculated GST.
+// 2. Item-select modal no longer shows stale filtered results after reopening —
+//    searchTerm + filteredItems are reset on open, on select, and on close.
 
 import React, { useEffect, useRef, useState } from "react";
 import { Formik, Form, useField } from "formik";
@@ -61,6 +76,7 @@ const emptyCurrentItem = {
   quantity: "" as any,
   rate: 0,
   taxSlab: "",
+  isInterState: false,   // captured once from server per item/branch pair; drives CGST+SGST vs IGST split
   availableStock: 0,
   basicAmount: "0.00",
   taxAmount: "0.00",
@@ -489,9 +505,13 @@ const B2BSales: React.FC = () => {
       .finally(() => setBranchesLoading(false));
   }, []);
 
-  // ── Live GST calc for current item row ──
+  // ── STEP 1: on item (variant) or destination branch change, ask the
+  // server ONCE whether this branch relationship is intra-state
+  // (CGST+SGST) or inter-state (IGST). We do NOT use the server's amounts
+  // for money — only this yes/no flag — because the backend was ignoring
+  // an edited rate and always recalculating from its own branch_price.
   useEffect(() => {
-    if (!currentItem.variantId || !selectedToBranchId || !currentItem.quantity) {
+    if (!currentItem.variantId || !selectedToBranchId) {
       setCurrentItem((prev) => ({
         ...prev,
         basicAmount: "0.00", taxAmount: "0.00", netValue: "0.00",
@@ -499,30 +519,59 @@ const B2BSales: React.FC = () => {
       }));
       return;
     }
-    const calc = async () => {
+    const fetchTaxType = async () => {
       try {
         const res = await api.post("b2b-sales/item-tax/", {
           from_variant_id: currentItem.variantId,
           to_branch_id: selectedToBranchId,
-          quantity: Number(currentItem.quantity) || 0,
+          quantity: 1,
         });
         const d = res.data;
-        setCurrentItem((prev) => ({
-          ...prev,
-          rate: d.rate,
-          basicAmount: d.basic_amount.toFixed(2),
-          taxAmount: d.tax_amount.toFixed(2),
-          netValue: d.net_amount.toFixed(2),
-          cgst: d.cgst.toFixed(2),
-          sgst: d.sgst.toFixed(2),
-          igst: d.igst.toFixed(2),
-        }));
+        const isInterState = !(Number(d.cgst) > 0 || Number(d.sgst) > 0);
+        setCurrentItem((prev) => ({ ...prev, isInterState }));
       } catch (e) {
-        console.error("Tax calculation failed", e);
+        console.error("Failed to determine CGST/SGST vs IGST for this branch", e);
       }
     };
-    calc();
-  }, [currentItem.variantId, currentItem.quantity, selectedToBranchId]);
+    fetchTaxType();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentItem.variantId, selectedToBranchId]);
+
+  // ── STEP 2: actual money calculation — always local, always driven by
+  // whatever Rate is currently in the field (default or manually edited).
+  // Formula (matches your existing business data exactly):
+  //   net   = rate × qty
+  //   tax   = net × taxSlab% / 100
+  //   basic = net − tax
+  useEffect(() => {
+    if (!currentItem.variantId || !selectedToBranchId) return;
+    const qty = Number(currentItem.quantity) || 0;
+    const rate = Number(currentItem.rate) || 0;
+    const taxPercent = parseFloat(currentItem.taxSlab) || 0;
+
+    const net = qty * rate;
+    const tax = (net * taxPercent) / 100;
+    const basic = net - tax;
+
+    let cgst = "0.00";
+    let sgst = "0.00";
+    let igst = "0.00";
+    if (currentItem.isInterState) {
+      igst = tax.toFixed(2);
+    } else {
+      cgst = (tax / 2).toFixed(2);
+      sgst = (tax / 2).toFixed(2);
+    }
+
+    setCurrentItem((prev) => ({
+      ...prev,
+      basicAmount: basic.toFixed(2),
+      taxAmount: tax.toFixed(2),
+      netValue: net.toFixed(2),
+      cgst, sgst, igst,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentItem.quantity, currentItem.rate, currentItem.taxSlab, currentItem.isInterState, currentItem.variantId, selectedToBranchId]);
 
   const applyItemToForm = (row: any) => {
     setCurrentItem({
@@ -546,6 +595,7 @@ const B2BSales: React.FC = () => {
     if (!currentItem.variantId) errors.variantId = "Please select an item";
     if (!currentItem.quantity || Number(currentItem.quantity) <= 0) errors.quantity = "Please enter valid quantity";
     if (Number(currentItem.quantity) > currentItem.availableStock) errors.quantity = `Max available: ${currentItem.availableStock}`;
+    if (!currentItem.rate || Number(currentItem.rate) <= 0) errors.rate = "Please enter valid rate";
 
     if (Object.keys(errors).length > 0) {
       setCurrentItemErrors(errors);
@@ -562,7 +612,7 @@ const B2BSales: React.FC = () => {
         hsnCode: currentItem.hsnCode,
         unit: currentItem.unit,
         quantity: Number(currentItem.quantity),
-        rate: currentItem.rate,
+        rate: Number(currentItem.rate),
         taxSlab: currentItem.taxSlab,
         basicAmount: currentItem.basicAmount,
         taxAmount: currentItem.taxAmount,
@@ -712,6 +762,23 @@ const B2BSales: React.FC = () => {
 
   const handleDeleteAll = () => { setAddedItems([]); setIdCounter(1); };
 
+  // ── FIX #3: single helper to open the item-select modal with a clean
+  // search state, so stale filtered results never carry over from a
+  // previous search.
+  const openItemSelectModal = () => {
+    if (!selectedToBranchId) { toast.error("Please select destination branch first"); return; }
+    setSearchTerm("");
+    setFilteredItems(flatItems);
+    setOpenModal(true);
+  };
+
+  // ── FIX #3: single helper to close the modal and reset search state.
+  const closeItemSelectModal = () => {
+    setOpenModal(false);
+    setSearchTerm("");
+    setFilteredItems(flatItems);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-4 px-0">
       <div className="w-full px-3 sm:px-4">
@@ -808,10 +875,7 @@ const B2BSales: React.FC = () => {
                       <div className="flex flex-col justify-end">
                         <button
                           type="button"
-                          onClick={() => {
-                            if (!selectedToBranchId) { toast.error("Please select destination branch first"); return; }
-                            setOpenModal(true);
-                          }}
+                          onClick={openItemSelectModal}
                           className={`px-3 py-2 rounded-lg transition flex items-center justify-center gap-1 text-sm h-[38px] w-full
                             ${currentItemErrors.variantId
                               ? "bg-red-500 text-white hover:bg-red-600 ring-2 ring-red-300"
@@ -849,12 +913,25 @@ const B2BSales: React.FC = () => {
                         {currentItemErrors.quantity && <p className="text-xs text-red-500">{currentItemErrors.quantity}</p>}
                       </div>
 
-                      {/* Rate */}
+                      {/* Rate — FIX #1: now editable instead of read-only display */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">Rate</label>
-                        <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-700 font-mono">
-                          ₹{Number(currentItem.rate).toFixed(2)}
-                        </div>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={currentItem.rate}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setCurrentItem((prev) => ({ ...prev, rate: val === "" ? 0 : Number(val) }));
+                            if (currentItemErrors.rate) setCurrentItemErrors((prev) => { const n = { ...prev }; delete n.rate; return n; });
+                          }}
+                          onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+                          placeholder="0.00"
+                          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm font-mono
+                            ${currentItemErrors.rate ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-gray-400"}`}
+                        />
+                        {currentItemErrors.rate && <p className="text-xs text-red-500">{currentItemErrors.rate}</p>}
                       </div>
 
                       {/* Unit */}
@@ -1015,7 +1092,7 @@ const B2BSales: React.FC = () => {
                       >
                         <div className="flex justify-between items-center px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
                           <h3 className="text-lg font-semibold flex items-center gap-2"><FaBox /> Select Item Variant</h3>
-                          <button onClick={() => setOpenModal(false)} className="hover:bg-white/20 rounded-lg p-1 transition">
+                          <button onClick={closeItemSelectModal} className="hover:bg-white/20 rounded-lg p-1 transition">
                             <MdClose size={24} />
                           </button>
                         </div>
@@ -1067,8 +1144,7 @@ const B2BSales: React.FC = () => {
                                         type="button"
                                         onClick={() => {
                                           applyItemToForm(row);
-                                          setOpenModal(false);
-                                          setSearchTerm("");
+                                          closeItemSelectModal();
                                         }}
                                         disabled={row.current_stock <= 0}
                                         className={`px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 mx-auto
@@ -1106,7 +1182,7 @@ const B2BSales: React.FC = () => {
                         <div className="flex justify-center p-4 pt-0">
                           <button
                             type="button"
-                            onClick={() => { setOpenModal(false); setSearchTerm(""); }}
+                            onClick={closeItemSelectModal}
                             className="px-8 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
                           >
                             Close

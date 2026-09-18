@@ -204,6 +204,7 @@ export const menuItems: MenuCategory[] = [
           { name: "Sales Entry & Report", to: "/Addsalesitem" },
           { name: "Sales Entry2", to: "/salesentry2" },
           { name: "B2B Sales", to: "/b2bsales" },
+          { name: "Import - B2B Sales", to: "/b2bexcelimportexport" },
           
           { name: "Sales Return & Report", to: "/salesReturnList" },
         ],
@@ -494,7 +495,7 @@ if (isSuperAdmin) {
     
 if (isBranchOrVendor) {
   const { branch } = useAuthStore.getState(); 
-  const isFranchise = branch?.ownership_type === "franchise";   // 🔧 confirm this field name in your authStore
+  const isFranchise = branch?.ownership_type === "franchise";
 
   return menuItems
     .map(category => ({
@@ -504,9 +505,14 @@ if (isBranchOrVendor) {
           if (item.title === "Master" && item.submenu) {
             return { ...item, submenu: item.submenu.filter(sub => sub.name !== "Branch Master") };
           }
-          if (item.title === "sales" && item.submenu) {
-            return { ...item, submenu: item.submenu.filter(sub => sub.name !== "B2B Sales") };
-          }
+if (item.title === "sales" && item.submenu) {
+  return {
+    ...item,
+    submenu: item.submenu.filter(
+      sub => sub.name !== "B2B Sales" && sub.name !== "Import - B2B Sales"
+    ),
+  };
+}
           return item;
         })
         .filter(item =>
