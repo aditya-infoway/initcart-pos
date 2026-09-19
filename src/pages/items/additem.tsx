@@ -84,6 +84,9 @@ const AddItems: React.FC = () => {
   const [filteredItems, setFilteredItems] = useState<Item[]>([]);
   const [variants, setVariants] = useState<Variant[]>([]);
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
+  const [priceHistory, setPriceHistory] = useState<any[] | null>(null);
+  const [priceHistoryVariantLabel, setPriceHistoryVariantLabel] = useState<string>("");
+  const [loadingPriceHistory, setLoadingPriceHistory] = useState(false);
   const [branchType, setBranchType] = useState<string | null>(null);
   const [branchFields, setBranchFields] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -252,6 +255,25 @@ const AddItems: React.FC = () => {
     } catch (err) {
       console.error("Failed to fetch variants:", err);
       toast.error("Failed to fetch variants");
+    }
+  };
+
+    /* ------------------ Fetch Purchase Price History ------------------ */
+  const handleViewPriceHistory = async (variantId: number, label: string) => {
+    setLoadingPriceHistory(true);
+    setPriceHistoryVariantLabel(label);
+    setPriceHistory([]);
+    try {
+      const res = await api.get(`items-variant-price-history/?variant=${variantId}`, {
+        headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` },
+      });
+      setPriceHistory(res.data.history || []);
+    } catch (err) {
+      console.error("Failed to fetch price history:", err);
+      toast.error("Failed to fetch price history");
+      setPriceHistory([]);
+    } finally {
+      setLoadingPriceHistory(false);
     }
   };
 
@@ -706,12 +728,13 @@ const AddItems: React.FC = () => {
                         {col.replace(/([A-Z])/g, ' $1').trim().toUpperCase()}
                       </th>
                     ))}
+                    <th className="border p-2">PRICE HISTORY</th>
                   </tr>
                 </thead>
                 <tbody>
                   {variants.length === 0 ? (
                     <tr>
-                      <td colSpan={modalColumns.length + 1} className="text-center p-4 text-gray-500">
+                      <td colSpan={modalColumns.length + 2} className="text-center p-4 text-gray-500">
                         No variants found
                       </td>
                     </tr>
@@ -724,6 +747,14 @@ const AddItems: React.FC = () => {
                             {v[col]?.toString() || "-"}
                           </td>
                         ))}
+                        <td className="border p-2 text-center">
+                          <button
+                            onClick={() => handleViewPriceHistory(Number(v.id), `${v.size || ""} ${v.color || ""}`.trim() || `Variant #${v.id}`)}
+                            className="text-blue-600 hover:text-blue-800 text-xs font-medium underline"
+                          >
+                            View
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -733,6 +764,74 @@ const AddItems: React.FC = () => {
             <div className="flex justify-center py-4">
               <button
                 onClick={() => setSelectedItem(null)}
+                className="bg-green-600 text-white px-10 py-2 rounded-md hover:bg-green-700"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Price History Modal */}
+      {priceHistory !== null && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex justify-center items-start pt-20 z-[60]">
+          <div className="bg-white w-11/12 md:w-2/3 lg:w-1/2 rounded-xl shadow-2xl p-5">
+            <div className="flex justify-between items-center border-b pb-2 mb-4">
+              <h2 className="text-lg font-semibold text-blue-700">
+                Purchase Price History — {priceHistoryVariantLabel}
+              </h2>
+              <button
+                onClick={() => setPriceHistory(null)}
+                className="text-red-500 text-xl hover:text-red-700"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="overflow-x-auto max-h-[60vh]">
+              {loadingPriceHistory ? (
+                <div className="flex justify-center items-center p-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gradient-to-r from-blue-600 to-blue-500 text-white sticky top-0">
+                    <tr>
+                      <th className="p-2 border">Date</th>
+                      <th className="p-2 border">Old Price</th>
+                      <th className="p-2 border">New Price</th>
+                      <th className="p-2 border">Source</th>
+                      <th className="p-2 border">Reference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {priceHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="text-center p-4 text-gray-500">
+                          No price changes recorded yet
+                        </td>
+                      </tr>
+                    ) : (
+                      priceHistory.map((h) => (
+                        <tr key={h.id} className="hover:bg-gray-50">
+                          <td className="border p-2 whitespace-nowrap">
+                            {new Date(h.changed_at).toLocaleString()}
+                          </td>
+                          <td className="border p-2">{h.old_price === null ? "—" : `₹${Number(h.old_price).toFixed(2)}`}</td>
+                          <td className="border p-2 font-medium">₹{Number(h.new_price).toFixed(2)}</td>
+                          <td className="border p-2">{h.source}</td>
+                          <td className="border p-2">{h.reference || "-"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="flex justify-center py-4">
+              <button
+                onClick={() => setPriceHistory(null)}
                 className="bg-green-600 text-white px-10 py-2 rounded-md hover:bg-green-700"
               >
                 OK
