@@ -169,6 +169,16 @@ export const menuItems: MenuCategory[] = [
     {
     items: [
       {
+        title: "Import - Stock Transfer",
+        icon: <FaExchangeAlt size={20} />,
+        to: "/stocktransferexcel",
+        submenu: [],
+      },
+    ],
+  },
+    {
+    items: [
+      {
         title: "B2B Stock Transfer",
         icon: <FaExchangeAlt size={20} />,
         submenu: [
@@ -466,7 +476,7 @@ if (isSuperAdmin) {
       ...category,
       items: category.items
 
-        // 👇 YE NAYA BLOCK ADD KARO
+        // YE NAYA BLOCK ADD KARO
         .map(item => {
           if (item.title === "purchase" && item.submenu) {
             return {
@@ -517,11 +527,12 @@ if (item.title === "sales" && item.submenu) {
         })
         .filter(item =>
           item.title !== "Stock Transfer" &&
+          item.title !== "Import - Stock Transfer" &&
           item.title !== "Stock Return Verification" &&
           item.title !== "B2B Stock Returns" &&
           item.title !== "Scheme Offers" &&
           item.title !== "Employee Management" &&
-          (item.title !== "My Branches" || isFranchise)   // ✅ NEW — only franchises see this
+          (item.title !== "My Branches" || isFranchise)
         )
     }))
     .filter(category => category.items.length > 0);

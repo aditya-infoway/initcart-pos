@@ -1,11 +1,19 @@
+// src/pages/StockReport.tsx
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import api from "../../api/api";
-import { FaEye, FaSearch, FaFilter, FaTimes, FaFileExcel } from "react-icons/fa";
+import {
+  FaEye,
+  FaSearch,
+  FaFilter,
+  FaTimes,
+  FaFileExcel,
+} from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { toast } from "react-toastify";
 import { useAuthStore } from "../../store/authStore";
 
+// ─── Branch-type specific variant fields ─────────────────────────────────────
 const VARIANT_BY_BRANCH: Record<string, string[]> = {
   fashion: ["size", "color"],
   electronics: ["size", "color", "srno", "warrantydate"],
@@ -41,23 +49,25 @@ const StockReport: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuthStore();
-  
-  const isSuperAdmin = user?.role === 'superadmin';
-  const isEmployee = user?.role === 'employee';
-  
-  // ✅ EXACT SAME LOGIC AS ExcelImportExport.tsx
-  // Employee ko bhi branch filter dikhega (same as superadmin)
+
+  const isSuperAdmin = user?.role === "superadmin";
+  const isEmployee = user?.role === "employee";
+
+  // Employee bhi branch selector dekh sakta hai (ExcelImportExport jaisa)
   const canViewAllBranches = isSuperAdmin || isEmployee;
-  
+
   const [branchType, setBranchType] = useState<string | null>(null);
   const [allItems, setAllItems] = useState<StockItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<StockItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [branches, setBranches] = useState<{id: number, branch_name: string}[]>([]);
+  const [branches, setBranches] = useState<
+    { id: number; branch_name: string }[]
+  >([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
-  const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
-  
+  const [selectedBranchName, setSelectedBranchName] =
+    useState<string>("My Branch");
+
   // Pagination - client side
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
@@ -74,7 +84,7 @@ const StockReport: React.FC = () => {
     maxStock: "",
   });
 
-  // ✅ Branch type fetch
+  // ── Fetch branch type ────────────────────────────────────────────────────
   useEffect(() => {
     const fetchBranchType = async () => {
       try {
@@ -88,7 +98,7 @@ const StockReport: React.FC = () => {
     fetchBranchType();
   }, []);
 
-  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  // ── Fetch branches ───────────────────────────────────────────────────────
   useEffect(() => {
     if (canViewAllBranches) {
       fetchBranches();
@@ -104,24 +114,21 @@ const StockReport: React.FC = () => {
     }
   }
 
-  // ✅ Stock data fetch
+  // ── Stock data fetch ─────────────────────────────────────────────────────
   const fetchStockData = async (branchId?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const branchParam = branchId || selectedBranchId;
+      const branchParam = branchId ?? selectedBranchId;
       const url = branchParam
         ? `stock-report/?page=1&page_size=10000&branch_id=${branchParam}`
         : `stock-report/?page=1&page_size=10000`;
       const res = await api.get(url);
 
       let items: any[] = [];
-
-      if (res.data?.results) {
-        items = res.data.results;
-      } else if (Array.isArray(res.data)) {
-        items = res.data;
-      } else {
+      if (res.data?.results) items = res.data.results;
+      else if (Array.isArray(res.data)) items = res.data;
+      else {
         console.warn("Unknown response format:", res.data);
         items = [];
       }
@@ -146,13 +153,16 @@ const StockReport: React.FC = () => {
         created_by_superadmin: item.created_by_superadmin || false,
       }));
 
-      console.log(`✅ Total items loaded: ${mappedItems.length}`);
       setAllItems(mappedItems);
       setFilteredItems(mappedItems);
       setCurrentPage(1);
     } catch (err: any) {
       console.error("Stock fetch error:", err);
-      const msg = err.response?.data?.error || err.message || "Failed to load stock data";
+      const msg =
+        err.response?.data?.error ||
+        err.response?.data?.detail ||
+        err.message ||
+        "Failed to load stock data";
       setError(msg);
       toast.error(msg);
       setAllItems([]);
@@ -162,19 +172,21 @@ const StockReport: React.FC = () => {
     }
   };
 
-  // Initial fetch
+  // ── Initial fetch ────────────────────────────────────────────────────────
   useEffect(() => {
     fetchStockData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Refresh when navigating back
+  // ── Refresh when navigating back ─────────────────────────────────────────
   useEffect(() => {
     if (location.state?.refresh) {
       fetchStockData();
     }
-  }, [location]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
-  // Client-side filtering
+  // ── Client-side filtering ────────────────────────────────────────────────
   useEffect(() => {
     let filtered = [...allItems];
 
@@ -193,40 +205,47 @@ const StockReport: React.FC = () => {
 
     if (filters.brand) {
       filtered = filtered.filter(
-        (item) => item.brand?.name?.toLowerCase() === filters.brand.toLowerCase()
+        (item) =>
+          item.brand?.name?.toLowerCase() === filters.brand.toLowerCase()
       );
     }
     if (filters.category) {
       filtered = filtered.filter(
-        (item) => item.category?.name?.toLowerCase() === filters.category.toLowerCase()
+        (item) =>
+          item.category?.name?.toLowerCase() === filters.category.toLowerCase()
       );
     }
     if (filters.subCategory) {
       filtered = filtered.filter(
-        (item) => item.subCategory?.name?.toLowerCase() === filters.subCategory.toLowerCase()
+        (item) =>
+          item.subCategory?.name?.toLowerCase() ===
+          filters.subCategory.toLowerCase()
       );
     }
     if (filters.subSubCategory) {
       filtered = filtered.filter(
-        (item) => item.subSubCategory?.name?.toLowerCase() === filters.subSubCategory.toLowerCase()
+        (item) =>
+          item.subSubCategory?.name?.toLowerCase() ===
+          filters.subSubCategory.toLowerCase()
       );
     }
     if (filters.minStock !== "") {
       const min = parseFloat(filters.minStock);
-      if (!isNaN(min)) filtered = filtered.filter((item) => item.current_stock >= min);
+      if (!isNaN(min))
+        filtered = filtered.filter((item) => item.current_stock >= min);
     }
     if (filters.maxStock !== "") {
       const max = parseFloat(filters.maxStock);
-      if (!isNaN(max)) filtered = filtered.filter((item) => item.current_stock <= max);
+      if (!isNaN(max))
+        filtered = filtered.filter((item) => item.current_stock <= max);
     }
 
     setFilteredItems(filtered);
     setCurrentPage(1);
   }, [searchTerm, filters, allItems]);
 
-  // Pagination - client side
+  // ── Pagination ───────────────────────────────────────────────────────────
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
-
   const paginatedItems = filteredItems.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize
@@ -241,31 +260,40 @@ const StockReport: React.FC = () => {
 
   function handleBranchChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const val = e.target.value;
-    const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
+    const name =
+      branches.find((b) => String(b.id) === val)?.branch_name || "My Branch";
     setSelectedBranchId(val);
     setSelectedBranchName(name);
     fetchStockData(val);
   }
 
-  // Unique filter options
+  // ── Unique filter options ────────────────────────────────────────────────
   const uniqueBrands = useMemo(
     () => [...new Set(allItems.map((i) => i.brand?.name).filter(Boolean))].sort(),
     [allItems]
   );
   const uniqueCategories = useMemo(
-    () => [...new Set(allItems.map((i) => i.category?.name).filter(Boolean))].sort(),
+    () =>
+      [...new Set(allItems.map((i) => i.category?.name).filter(Boolean))].sort(),
     [allItems]
   );
   const uniqueSubCategories = useMemo(
-    () => [...new Set(allItems.map((i) => i.subCategory?.name).filter(Boolean))].sort(),
+    () =>
+      [
+        ...new Set(allItems.map((i) => i.subCategory?.name).filter(Boolean)),
+      ].sort(),
     [allItems]
   );
   const uniqueSubSubCategories = useMemo(
-    () => [...new Set(allItems.map((i) => i.subSubCategory?.name).filter(Boolean))].sort(),
+    () =>
+      [
+        ...new Set(allItems.map((i) => i.subSubCategory?.name).filter(Boolean)),
+      ].sort(),
     [allItems]
   );
 
-  const hasActiveFilters = () => Object.values(filters).some((v) => v !== "");
+  const hasActiveFilters = () =>
+    Object.values(filters).some((v) => v !== "");
 
   const clearFilters = () => {
     setFilters({
@@ -278,7 +306,7 @@ const StockReport: React.FC = () => {
     });
   };
 
-  // Export Excel
+  // ── Export Excel ─────────────────────────────────────────────────────────
   const exportToExcel = () => {
     if (filteredItems.length === 0) {
       toast.warning("No data to export");
@@ -308,7 +336,10 @@ const StockReport: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Stock Report");
-    XLSX.writeFile(wb, `Stock_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(
+      wb,
+      `Stock_Report_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
     toast.success(`Exported ${filteredItems.length} records`);
   };
 
@@ -344,36 +375,45 @@ const StockReport: React.FC = () => {
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-700 to-blue-500 text-white p-4 rounded-xl shadow-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight drop-shadow-md">Stock Report</h1>
+          <h1 className="text-2xl font-bold tracking-tight drop-shadow-md">
+            Stock Report
+          </h1>
           <p className="text-blue-100 text-sm mt-0.5">
-            {/* ✅ Branch name show karo agar canViewAllBranches true hai */}
             {canViewAllBranches && selectedBranchName && (
               <span className="font-semibold">{selectedBranchName} · </span>
             )}
             Total: {allItems.length} variants
-            {allItems.length !== filteredItems.length && ` | Filtered: ${filteredItems.length}`}
+            {allItems.length !== filteredItems.length &&
+              ` | Filtered: ${filteredItems.length}`}
           </p>
         </div>
-        
-        {/* ✅ Branch Filter - Sirf canViewAllBranches wale ko dikhe (Superadmin + Employee) */}
+
         {canViewAllBranches && (
           <div className="flex items-center gap-2 mt-3 sm:mt-0">
-            <label className="text-blue-100 text-sm font-medium whitespace-nowrap">Branch:</label>
+            <label className="text-blue-100 text-sm font-medium whitespace-nowrap">
+              Branch:
+            </label>
             <select
               value={selectedBranchId}
               onChange={handleBranchChange}
               className="bg-white/20 text-white border border-white/30 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-white/50 focus:outline-none min-w-[180px]"
             >
-              <option value="" className="text-gray-800 bg-white">My Branch (Main)</option>
-              {branches.map(b => (
-                <option key={b.id} value={String(b.id)} className="text-gray-800 bg-white">
+              <option value="" className="text-gray-800 bg-white">
+                My Branch (Main)
+              </option>
+              {branches.map((b) => (
+                <option
+                  key={b.id}
+                  value={String(b.id)}
+                  className="text-gray-800 bg-white"
+                >
                   {b.branch_name}
                 </option>
               ))}
             </select>
           </div>
         )}
-        
+
         <div className="flex gap-2">
           <button
             onClick={exportToExcel}
@@ -391,7 +431,7 @@ const StockReport: React.FC = () => {
         </div>
       </div>
 
-      {/* Search & Filter Bar - Same as before */}
+      {/* Search & Filter Bar */}
       <div className="mt-4 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
         <div className="flex flex-wrap gap-3 items-center">
           <div className="relative flex-1 min-w-[200px] max-w-md">
@@ -441,49 +481,78 @@ const StockReport: React.FC = () => {
           )}
         </div>
 
-        {/* Filter Panel */}
         {showFilters && (
           <div className="mt-4 pt-4 border-t border-gray-200 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { label: "Brand", key: "brand" as keyof FilterOptions, options: uniqueBrands },
-              { label: "Category", key: "category" as keyof FilterOptions, options: uniqueCategories },
-              { label: "Sub Category", key: "subCategory" as keyof FilterOptions, options: uniqueSubCategories },
-              { label: "Sub Sub Category", key: "subSubCategory" as keyof FilterOptions, options: uniqueSubSubCategories },
+              {
+                label: "Brand",
+                key: "brand" as keyof FilterOptions,
+                options: uniqueBrands,
+              },
+              {
+                label: "Category",
+                key: "category" as keyof FilterOptions,
+                options: uniqueCategories,
+              },
+              {
+                label: "Sub Category",
+                key: "subCategory" as keyof FilterOptions,
+                options: uniqueSubCategories,
+              },
+              {
+                label: "Sub Sub Category",
+                key: "subSubCategory" as keyof FilterOptions,
+                options: uniqueSubSubCategories,
+              },
             ].map(({ label, key, options }) => (
               <div key={key}>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {label}
+                </label>
                 <select
                   value={filters[key]}
-                  onChange={(e) => setFilters((prev) => ({ ...prev, [key]: e.target.value }))}
+                  onChange={(e) =>
+                    setFilters((prev) => ({ ...prev, [key]: e.target.value }))
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">All {label}s</option>
                   {options.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
                   ))}
                 </select>
               </div>
             ))}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Min Stock</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Min Stock
+              </label>
               <input
                 type="number"
                 min="0"
                 placeholder="Min"
                 value={filters.minStock}
-                onChange={(e) => setFilters((prev) => ({ ...prev, minStock: e.target.value }))}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, minStock: e.target.value }))
+                }
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Max Stock</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Max Stock
+              </label>
               <input
                 type="number"
                 min="0"
                 placeholder="Max"
                 value={filters.maxStock}
-                onChange={(e) => setFilters((prev) => ({ ...prev, maxStock: e.target.value }))}
+                onChange={(e) =>
+                  setFilters((prev) => ({ ...prev, maxStock: e.target.value }))
+                }
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -502,23 +571,50 @@ const StockReport: React.FC = () => {
         <table className="w-full text-sm text-left text-gray-800">
           <thead className="bg-gradient-to-r from-indigo-100 to-gray-200 sticky top-0 z-10">
             <tr>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">#</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">Item Name</th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                #
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                Item Name
+              </th>
               {branchFields.map((field) => (
-                <th key={field} className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                <th
+                  key={field}
+                  className="p-3 font-semibold text-indigo-900 whitespace-nowrap"
+                >
                   {field.replace("_", " ").toUpperCase()}
                 </th>
               ))}
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">HSN</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">Unit</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">Brand</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">Category</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">Sub Cat.</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">Sub Sub Cat.</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">P.Price</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">S.Price</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">Stock</th>
-              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap text-center">Action</th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                HSN
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                Unit
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                Brand
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                Category
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                Sub Cat.
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                Sub Sub Cat.
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                P.Price
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                S.Price
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap">
+                Stock
+              </th>
+              <th className="p-3 font-semibold text-indigo-900 whitespace-nowrap text-center">
+                Action
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -551,16 +647,31 @@ const StockReport: React.FC = () => {
                     )}
                   </td>
                   {branchFields.map((field) => (
-                    <td key={field} className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">
+                    <td
+                      key={field}
+                      className="px-3 py-2 border-r border-gray-100 whitespace-nowrap"
+                    >
                       {item[field] || "-"}
                     </td>
                   ))}
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">{item.hsnCode || "-"}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">{item.unit || "-"}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">{item.brand?.name || "-"}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">{item.category?.name || "-"}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">{item.subCategory?.name || "-"}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">{item.subSubCategory?.name || "-"}</td>
+                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">
+                    {item.hsnCode || "-"}
+                  </td>
+                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">
+                    {item.unit || "-"}
+                  </td>
+                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">
+                    {item.brand?.name || "-"}
+                  </td>
+                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">
+                    {item.category?.name || "-"}
+                  </td>
+                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">
+                    {item.subCategory?.name || "-"}
+                  </td>
+                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">
+                    {item.subSubCategory?.name || "-"}
+                  </td>
                   <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap">
                     ₹{Number(item.purchasePrice || 0).toFixed(2)}
                   </td>
@@ -581,17 +692,19 @@ const StockReport: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-center">
-<button
-  onClick={() => navigate(
-    selectedBranchId
-      ? `/stockDetail/${item.variantId}?branch_id=${selectedBranchId}`
-      : `/stockDetail/${item.variantId}`
-  )}
-  className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition"
-  title="View Stock History"
->
-  <FaEye />
-</button>
+                    <button
+                      onClick={() =>
+                        navigate(
+                          selectedBranchId
+                            ? `/stockDetail/${item.variantId}?branch_id=${selectedBranchId}`
+                            : `/stockDetail/${item.variantId}`
+                        )
+                      }
+                      className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition"
+                      title="View Stock History"
+                    >
+                      <FaEye />
+                    </button>
                   </td>
                 </tr>
               ))
@@ -605,7 +718,8 @@ const StockReport: React.FC = () => {
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-600">
-              {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filteredItems.length)} of{" "}
+              {(currentPage - 1) * pageSize + 1}–
+              {Math.min(currentPage * pageSize, filteredItems.length)} of{" "}
               {filteredItems.length}
             </span>
             <select
@@ -617,7 +731,9 @@ const StockReport: React.FC = () => {
               className="px-2 py-1 border border-gray-300 rounded text-sm"
             >
               {[10, 15, 25, 50, 100].map((s) => (
-                <option key={s} value={s}>{s} per page</option>
+                <option key={s} value={s}>
+                  {s} per page
+                </option>
               ))}
             </select>
           </div>
@@ -637,15 +753,24 @@ const StockReport: React.FC = () => {
 
             {(() => {
               const maxVisible = 5;
-              let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+              let start = Math.max(
+                1,
+                currentPage - Math.floor(maxVisible / 2)
+              );
               let end = Math.min(totalPages, start + maxVisible - 1);
-              if (end - start + 1 < maxVisible) start = Math.max(1, end - maxVisible + 1);
-              return Array.from({ length: end - start + 1 }, (_, i) => start + i).map((page) => (
+              if (end - start + 1 < maxVisible)
+                start = Math.max(1, end - maxVisible + 1);
+              return Array.from(
+                { length: end - start + 1 },
+                (_, i) => start + i
+              ).map((page) => (
                 <button
                   key={page}
                   onClick={() => handlePageChange(page)}
                   className={`px-3 py-1 border rounded text-sm transition ${
-                    currentPage === page ? "bg-blue-600 text-white" : "bg-gray-100 hover:bg-gray-200"
+                    currentPage === page
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 hover:bg-gray-200"
                   }`}
                 >
                   {page}

@@ -32,7 +32,8 @@ const PAGE_ALLOWED_ACTIONS: Record<string, AllowedActions> = {
   // ── Stock related ───────────────────────
   "/stockReturnverification":     { can_view: true, can_add: false, can_edit: false, can_delete: false }, // Stock Return Verification
   "/b2bstockReturnverification":  { can_view: true, can_add: true, can_edit: true, can_delete: true }, // B2B Stock Returns
-  "/stockTransfer":                { can_view: true, can_add: true,  can_edit: true, can_delete: true }, // Stock Transfer
+  "/stockTransfer":               { can_view: true, can_add: true,  can_edit: true, can_delete: true }, // Stock Transfer
+  "/stockTransferExcel":          { can_view: true, can_add: true,  can_edit: false, can_delete: false }, // stock transfer import 
 
   // ── purchase ─────────────────────────────
   "/Addpurchaseitem":    { can_view: true, can_add: true,  can_edit: false, can_delete: false }, // Purchase Entry
@@ -43,6 +44,7 @@ const PAGE_ALLOWED_ACTIONS: Record<string, AllowedActions> = {
   "/Addsalesitem":     { can_view: true, can_add: true,  can_edit: false, can_delete: false }, // Sales Entry & Report
   "/salesentry2":       { can_view: true, can_add: false, can_edit: false, can_delete: false }, // Sales Entry2
   "/b2bsales":           { can_view: true, can_add: true,  can_edit: false, can_delete: false }, // B2B Sales
+  "/b2bexcelimportexport": { can_view: true, can_add: true,  can_edit: false, can_delete: false }, //import-  B2B Sales
   "/salesReturnList":    { can_view: true, can_add: true, can_edit: false, can_delete: true },  // Sales Return & Report
 
   // ── payment ──────────────────────────────

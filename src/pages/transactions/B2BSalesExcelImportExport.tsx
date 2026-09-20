@@ -93,7 +93,7 @@ const downloadErrorReportPdf = (errors: string[]) => {
 const B2BSalesExcelImportExport: React.FC = () => {
   const navigate = useNavigate();
   // ✅ same permission gate as the rest of the B2B Sales module
-  const { canAdd } = usePermission("/b2bsales");
+  const { canAdd } = usePermission("/b2bexcelimportexport");
 
   const [franchises, setFranchises] = useState<FranchiseBranch[]>([]);
   const [loadingFranchises, setLoadingFranchises] = useState(true);
