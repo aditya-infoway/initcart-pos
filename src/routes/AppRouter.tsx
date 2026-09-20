@@ -73,6 +73,7 @@ import AIPurchaseBill from "../pages/AI/AIPurchaseBill";
 import PurchaseExcelImportExport from "../pages/transactions/PurchaseExcelImportExport_1";
 import MyBranches from "../pages/accounts/MyBranches";
 import B2BSalesExcelImportExport from "../pages/transactions/B2BSalesExcelImportExport";
+import StockTransferExcelImportExport from "../pages/transactions/StockTransferExcelImportExport";
 
 
 
@@ -164,6 +165,8 @@ const AppRouter = () => (
         <Route path="/aipurchasebill" element={<AIPurchaseBill/>}/>
         <Route path="/purchaseimport" element={<PurchaseExcelImportExport/>}/>
         <Route path="/myBranches" element={<MyBranches />} />
+      
+<Route path="/stocktransferexcel" element={<StockTransferExcelImportExport />} />
 
       </Route>
 

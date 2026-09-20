@@ -212,7 +212,7 @@ const ViewModal: React.FC<ViewModalProps> = ({ isOpen, onClose, branchId }) => {
     const getFullUrl = (url: string | undefined) => {
         if (!url) return "#";
         if (url.startsWith("http")) return url;
-        return `https://api.initcart.com${url}`;
+        return `http://localhost:8000${url}`;
     };
 
     const getBranchTypeDisplay = (type: string) => {
@@ -755,7 +755,7 @@ useEffect(() => {
     const getFullUrl = (url: string | undefined) => {
         if (!url) return "#";
         if (url.startsWith("http")) return url;
-        return `https://api.initcart.com${url}`;
+        return `http://localhost:8000${url}`;
     };
 
     // Get branch type display

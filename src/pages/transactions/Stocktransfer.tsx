@@ -2342,16 +2342,35 @@ function DetailView({ detail, onBack, onComplete, onCancel }: {
   detail: TransferDetail; onBack: () => void;
   onComplete: (id: number) => void; onCancel: (id: number) => void;
 }) {
-  // Calculate totals including GST
-  const totalBasic = detail.items?.reduce((sum, i) => sum + safeNumber((i as any).basic_amount), 0) || 0;
-  const totalTax = detail.items?.reduce((sum, i) => sum + safeNumber((i as any).tax_amount), 0) || 0;
-  const totalNet = detail.items?.reduce((sum, i) => sum + safeNumber((i as any).net_amount), 0) || 0;
-  const totalCgst = detail.items?.reduce((sum, i) => sum + safeNumber((i as any).cgst), 0) || 0;
-  const totalSgst = detail.items?.reduce((sum, i) => sum + safeNumber((i as any).sgst), 0) || 0;
-  const totalIgst = detail.items?.reduce((sum, i) => sum + safeNumber((i as any).igst), 0) || 0;
-
-  const hasGst = detail.items?.some(i => safeNumber((i as any).basic_amount) > 0) || false;
-
+  const items = detail.items || [];
+ 
+  // ── Per-item helpers (Rate × Qty, Discount, Amount after discount) ──
+  const getGross = (i: any): number => safeNumber(i.quantity) * safeNumber(i.rate);
+  const getDiscountPercent = (i: any): number => safeNumber(i.discount_percent);
+  const getDiscountAmount = (i: any): number => {
+    const stored = safeNumber(i.discount_amount);
+    if (stored > 0) return stored;
+    const pct = getDiscountPercent(i);          // fallback agar sirf % saved ho
+    return pct > 0 ? (getGross(i) * pct) / 100 : 0;
+  };
+  const getAmount = (i: any): number => getGross(i) - getDiscountAmount(i);
+ 
+  // ── Amount / Discount totals ──
+  const totalGross = items.reduce((sum, i) => sum + getGross(i), 0);
+  const totalDiscount = items.reduce((sum, i) => sum + getDiscountAmount(i), 0);
+  const totalAfterDiscount = totalGross - totalDiscount;
+  const hasDiscount = totalDiscount > 0;
+ 
+  // ── GST totals (backend ne discounted price par calculate karke save kiye hain) ──
+  const totalBasic = items.reduce((sum, i) => sum + safeNumber((i as any).basic_amount), 0);
+  const totalTax = items.reduce((sum, i) => sum + safeNumber((i as any).tax_amount), 0);
+  const totalNet = items.reduce((sum, i) => sum + safeNumber((i as any).net_amount), 0);
+  const totalCgst = items.reduce((sum, i) => sum + safeNumber((i as any).cgst), 0);
+  const totalSgst = items.reduce((sum, i) => sum + safeNumber((i as any).sgst), 0);
+  const totalIgst = items.reduce((sum, i) => sum + safeNumber((i as any).igst), 0);
+ 
+  const hasGst = items.some(i => safeNumber((i as any).basic_amount) > 0);
+ 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
       className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
@@ -2377,44 +2396,84 @@ function DetailView({ detail, onBack, onComplete, onCancel }: {
             </div>
           ))}
         </div>
-
+ 
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="w-full text-sm min-w-[700px]">
+          <table className="w-full text-sm min-w-[800px]">
             <thead className="bg-gray-50 border-b text-xs text-gray-500">
               <tr>
                 <th className="px-4 py-3 text-left border-r border-gray-200">Item</th>
                 <th className="px-4 py-3 text-left border-r border-gray-200">Variant</th>
                 <th className="px-4 py-3 text-center border-r border-gray-200">Qty</th>
                 <th className="px-4 py-3 text-right border-r border-gray-200">Rate (₹)</th>
+                <th className="px-4 py-3 text-center border-r border-gray-200">Disc %</th>
                 <th className="px-4 py-3 text-right">Amount (₹)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {detail.items?.map((item, idx) => (
-                <tr key={item.id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50/30"}>
-                  <td className="px-4 py-3 font-semibold text-gray-800 border-r border-gray-100">{item.from_item_detail?.item_name}</td>
-                  <td className="px-4 py-3 border-r border-gray-100">
-                    <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg">{item.from_item_detail?.variant_info}</span>
-                  </td>
-                  <td className="px-4 py-3 text-center font-semibold border-r border-gray-100">{item.quantity}</td>
-                  <td className="px-4 py-3 text-right font-mono border-r border-gray-100">₹{item.rate}</td>
-                  <td className="px-4 py-3 text-right font-semibold">₹{(item.quantity * item.rate).toFixed(2)}</td>
-                </tr>
-              ))}
+              {items.map((item, idx) => {
+                const discPct = getDiscountPercent(item);
+                const discAmt = getDiscountAmount(item);
+                const rowHasDiscount = discAmt > 0;
+                return (
+                  <tr key={item.id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50/30"}>
+                    <td className="px-4 py-3 font-semibold text-gray-800 border-r border-gray-100">{item.from_item_detail?.item_name}</td>
+                    <td className="px-4 py-3 border-r border-gray-100">
+                      <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg">{item.from_item_detail?.variant_info}</span>
+                    </td>
+                    <td className="px-4 py-3 text-center font-semibold border-r border-gray-100">{item.quantity}</td>
+                    <td className="px-4 py-3 text-right font-mono border-r border-gray-100">₹{safeNumber(item.rate).toFixed(2)}</td>
+                    <td className="px-4 py-3 text-center border-r border-gray-100">
+                      {rowHasDiscount ? (
+                        <div className="leading-tight">
+                          <span className="inline-block bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-lg text-xs font-bold">
+                            {discPct > 0 ? `${Number(discPct.toFixed(2))}%` : "—"}
+                          </span>
+                          <div className="text-[11px] text-emerald-600 mt-0.5">− ₹{discAmt.toFixed(2)}</div>
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {rowHasDiscount && (
+                        <div className="text-[11px] text-gray-400 line-through font-normal">₹{getGross(item).toFixed(2)}</div>
+                      )}
+                      ₹{getAmount(item).toFixed(2)}
+                    </td>
+                  </tr>
+                );
+              })}
               <tr className="bg-gray-100 font-bold border-t">
-                <td colSpan={3} className="px-4 py-3 text-right border-r">Total:</td>
-                <td className="px-4 py-3 text-right border-r">₹{detail.items?.reduce((sum, i) => sum + i.quantity * i.rate, 0)?.toFixed(2) || "0.00"}</td>
-                <td />
+                <td colSpan={5} className="px-4 py-3 text-right border-r">
+                  {hasDiscount ? "Total (after discount):" : "Total:"}
+                </td>
+                <td className="px-4 py-3 text-right">₹{totalAfterDiscount.toFixed(2)}</td>
               </tr>
             </tbody>
           </table>
         </div>
-
-        {/* GST Summary Card - ONLY TOTAL GST */}
-        {hasGst && (
+ 
+        {/* GST Summary Card — discount minus hone ke baad ka poora breakup */}
+        {(hasGst || hasDiscount) && (
           <div className="mt-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
             <h4 className="text-sm font-semibold text-gray-700 mb-3">GST Summary</h4>
             <div className="space-y-1 text-sm">
+              {hasDiscount && (
+                <>
+                  <div className="flex justify-between py-1.5 border-b border-blue-100">
+                    <span className="text-gray-600">Total Amount (Rate × Qty)</span>
+                    <span className="font-medium">₹ {totalGross.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between py-1.5 border-b border-blue-100">
+                    <span className="text-emerald-700">Discount (−)</span>
+                    <span className="font-medium text-emerald-700">− ₹ {totalDiscount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between py-1.5 border-b-2 border-blue-200 font-semibold">
+                    <span className="text-gray-700">Amount after Discount</span>
+                    <span>₹ {totalAfterDiscount.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between py-1.5 border-b border-blue-100">
                 <span className="text-gray-600">Total Basic Amount</span>
                 <span className="font-medium">₹ {totalBasic.toFixed(2)}</span>
@@ -2447,7 +2506,7 @@ function DetailView({ detail, onBack, onComplete, onCancel }: {
             </div>
           </div>
         )}
-
+ 
         {detail.status === "pending" && (
           <div className="flex gap-3 mt-5">
             <button onClick={() => onComplete(detail.id)}
@@ -2464,3 +2523,4 @@ function DetailView({ detail, onBack, onComplete, onCancel }: {
     </motion.div>
   );
 }
+ 

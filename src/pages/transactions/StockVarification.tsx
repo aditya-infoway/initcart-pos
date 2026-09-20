@@ -483,6 +483,23 @@ if (selectedTransfer) {
 // ════════════════════════════════════════════════════════════
 // DETAIL VIEW COMPONENT
 // ════════════════════════════════════════════════════════════
+ 
+// ── Per-item helpers (Rate × Qty, Discount, Amount after discount) ──
+type VerifyItem = TransferItemDetail & {
+  discount_percent?: number | string;
+  discount_amount?: number | string;
+};
+ 
+const getItemGross = (i: VerifyItem): number => safeNumber(i.quantity) * safeNumber(i.rate);
+const getItemDiscountPercent = (i: VerifyItem): number => safeNumber(i.discount_percent);
+const getItemDiscount = (i: VerifyItem): number => {
+  const stored = safeNumber(i.discount_amount);
+  if (stored > 0) return stored;
+  const pct = getItemDiscountPercent(i);        // fallback agar sirf % aaya ho
+  return pct > 0 ? (getItemGross(i) * pct) / 100 : 0;
+};
+const getItemAmount = (i: VerifyItem): number => getItemGross(i) - getItemDiscount(i);
+ 
 interface DetailViewProps {
   transferId: number;
   detail: TransferDetail | null;
@@ -495,7 +512,7 @@ interface DetailViewProps {
   onVerifyAll: (transferId: number) => void;
   onBack: () => void;
 }
-
+ 
 function DetailView({
   transferId,
   detail,
@@ -508,10 +525,15 @@ function DetailView({
   onVerifyAll,
   onBack,
 }: DetailViewProps) {
-  // ✅ GST Totals — same pattern as Stock Transfer create page
+  // ✅ Totals — amount, discount aur GST (backend ne discounted price par GST save kiya hai)
   const gstTotals = useMemo(() => {
-    const items = detail?.items || [];
+    const items = (detail?.items || []) as VerifyItem[];
+    const gross = items.reduce((a, b) => a + getItemGross(b), 0);
+    const discount = items.reduce((a, b) => a + getItemDiscount(b), 0);
     return {
+      gross,
+      discount,
+      afterDiscount: gross - discount,
       basic: items.reduce((a, b) => a + safeNumber(b.basic_amount), 0),
       tax: items.reduce((a, b) => a + safeNumber(b.tax_amount), 0),
       cgst: items.reduce((a, b) => a + safeNumber(b.cgst), 0),
@@ -520,11 +542,12 @@ function DetailView({
       net: items.reduce((a, b) => a + safeNumber(b.net_amount), 0),
     };
   }, [detail]);
-
+ 
   const hasGst = (detail?.items || []).some(
     (i) => safeNumber(i.basic_amount) > 0
   );
-
+  const hasDiscount = gstTotals.discount > 0;
+ 
   if (loading || !detail) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -535,11 +558,11 @@ function DetailView({
       </div>
     );
   }
-
+ 
   const pendingItems = detail.items.filter((i) => !i.is_stock_updated);
   const verifiedItems = detail.items.filter((i) => i.is_stock_updated);
   const allVerified = pendingItems.length === 0;
-
+ 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-4">
@@ -564,7 +587,7 @@ function DetailView({
               </span>
             )}
           </div>
-
+ 
           {/* Branch Info Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
@@ -601,7 +624,7 @@ function DetailView({
                 </div>
               </div>
             </div>
-
+ 
             <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
@@ -640,7 +663,7 @@ function DetailView({
             </div>
           </div>
         </div>
-
+ 
         {/* Website Display Toggle + Verify All */}
         {!allVerified && (
           <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-wrap items-center gap-4 justify-between">
@@ -663,11 +686,11 @@ function DetailView({
                   <div className="text-sm font-semibold text-gray-700">
                     Website Display
                   </div>
-
+ 
                 </div>
               </label>
             </div>
-
+ 
             <button
               onClick={() => onVerifyAll(transferId)}
               disabled={verifyingAll || pendingItems.length === 0}
@@ -678,7 +701,7 @@ function DetailView({
             </button>
           </div>
         )}
-
+ 
         {/* Items Table */}
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <div className="px-5 py-3.5 border-b bg-gray-50 flex items-center gap-2">
@@ -695,9 +718,9 @@ function DetailView({
               </span>
             )}
           </div>
-
+ 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="w-full text-sm min-w-[1100px]">
               <thead className="bg-gradient-to-r from-emerald-700 to-emerald-500 text-white">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs border-r border-emerald-500">
@@ -724,7 +747,13 @@ function DetailView({
                   <th className="px-4 py-3 text-right text-xs border-r border-emerald-500">
                    purchase 
                   </th>
-
+                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">
+                    Disc %
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs border-r border-emerald-500">
+                    Amount (₹)
+                  </th>
+ 
                   <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">
                     Status
                   </th>
@@ -732,7 +761,12 @@ function DetailView({
                 </tr>
               </thead>
               <tbody>
-                {detail.items.map((item, idx) => (
+                {detail.items.map((item, idx) => {
+                  const vItem = item as VerifyItem;
+                  const discPct = getItemDiscountPercent(vItem);
+                  const discAmt = getItemDiscount(vItem);
+                  const rowHasDiscount = discAmt > 0;
+                  return (
                   <motion.tr
                     key={item.id}
                     initial={{ opacity: 0 }}
@@ -773,9 +807,31 @@ function DetailView({
                         {item.quantity}
                       </span>
                     </td>
-
+ 
                     <td className="px-4 py-3 text-right text-xs font-mono font-semibold text-indigo-700 border-r border-gray-200">
                       ₹{item.branch_price?.toFixed(2)}
+                    </td>
+                    <td className="px-4 py-3 text-center border-r border-gray-200">
+                      {rowHasDiscount ? (
+                        <div className="leading-tight">
+                          <span className="inline-block bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-lg text-xs font-bold">
+                            {discPct > 0 ? `${Number(discPct.toFixed(2))}%` : "—"}
+                          </span>
+                          <div className="text-[11px] text-emerald-600 mt-0.5">
+                            − ₹{discAmt.toFixed(2)}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs font-mono font-semibold text-gray-800 border-r border-gray-200">
+                      {rowHasDiscount && (
+                        <div className="text-[11px] text-gray-400 line-through font-normal">
+                          ₹{getItemGross(vItem).toFixed(2)}
+                        </div>
+                      )}
+                      ₹{getItemAmount(vItem).toFixed(2)}
                     </td>
                     <td className="px-4 py-3 text-center border-r border-gray-200">
                       {item.is_stock_updated ? (
@@ -813,11 +869,12 @@ function DetailView({
                       )}
                     </td>
                   </motion.tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
-
+ 
           {/* Summary Footer */}
           <div className="px-5 py-4 border-t bg-gray-50 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-4 text-sm">
@@ -842,15 +899,31 @@ function DetailView({
             )}
           </div>
         </div>
-
-        {/* ✅ GST Summary card — Transfer create karte waqt jo dikhti thi, wahi ab yaha bhi */}
-        {hasGst && (
+ 
+        {/* ✅ GST Summary card — discount minus hone ke baad ka poora breakup */}
+        {(hasGst || hasDiscount) && (
           <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl shadow-sm p-6 border border-emerald-200">
             <div className="flex items-center gap-2 mb-4">
               <HiOutlineDocumentText className="text-emerald-600" />
               <h3 className="text-sm font-semibold text-gray-800">GST Summary</h3>
             </div>
             <div className="space-y-1 text-sm">
+              {hasDiscount && (
+                <>
+                  <div className="flex justify-between py-1.5 border-b border-emerald-100">
+                    <span className="text-gray-600">Total Amount (Rate × Qty)</span>
+                    <span className="font-medium">₹ {gstTotals.gross.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between py-1.5 border-b border-emerald-100">
+                    <span className="text-emerald-700">Discount (−)</span>
+                    <span className="font-medium text-emerald-700">− ₹ {gstTotals.discount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between py-1.5 border-b-2 border-emerald-200 font-semibold">
+                    <span className="text-gray-700">Amount after Discount</span>
+                    <span>₹ {gstTotals.afterDiscount.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between py-1.5 border-b border-emerald-100">
                 <span className="text-gray-600">Total Basic Amount</span>
                 <span className="font-medium">₹ {gstTotals.basic.toFixed(2)}</span>

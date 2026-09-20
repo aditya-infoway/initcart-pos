@@ -399,7 +399,7 @@ const BranchOrderDetailPage: React.FC = () => {
   };
 
   const getProductImage = (item: OrderItem) => {
-    const BASE_URL = "https://api.initcart.com";
+    const BASE_URL = "http://localhost:8000";
     let img = item.product_details.variant_image || 
              item.product_details.main_image || 
              item.product_details.thumbnail;
