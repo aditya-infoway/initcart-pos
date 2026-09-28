@@ -128,7 +128,7 @@ const downloadErrorReportPdf = (errors: string[]) => {
 const StockTransferExcelImportExport: React.FC = () => {
   const navigate = useNavigate();
   // ✅ Stock Transfer page jaisi hi permission (employee bhi isi se gate hota hai)
-  const { canAdd } = usePermission("/stocktransferexcel");
+  const { canAdd } = usePermission("/stockTransferExcel");
   const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
 
   const [branches, setBranches] = useState<DestinationBranch[]>([]);

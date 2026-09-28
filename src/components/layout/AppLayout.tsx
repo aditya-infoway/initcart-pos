@@ -90,6 +90,8 @@ export const menuItems: MenuCategory[] = [
           { name: "Website Items", to: "/WebItems" },
           { name: "Item Barcodes", to: "/PendingBarcodes" },
           { name: "Orders", to: "/Orders" },
+          { name: "Returns" , to:"/returns"},
+          { name: "Refunds", to:"/refunds"},
           { name: "Group", to: "/createGroup" },
           { name: "Item Import", to: "/ExcelImportExport" },
         ],
@@ -171,7 +173,7 @@ export const menuItems: MenuCategory[] = [
       {
         title: "Import - Stock Transfer",
         icon: <FaExchangeAlt size={20} />,
-        to: "/stocktransferexcel",
+        to: "/stockTransferExcel",
         submenu: [],
       },
     ],
