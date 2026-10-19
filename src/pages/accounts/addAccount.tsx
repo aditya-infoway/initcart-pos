@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 // ------------------ Types ------------------
 interface Account {
@@ -336,47 +337,11 @@ const AddAccount: React.FC = () => {
                         </select>
                     </div>
 
-                    <div className="flex gap-2">
-                        <button
-                            disabled={currentPage === 1}
-                            onClick={() => handlePageChange(currentPage - 1)}
-                            className={`px-3 py-1 border rounded ${
-                                currentPage === 1 ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "hover:bg-gray-50"
-                            }`}
-                        >
-                            Prev
-                        </button>
-
-                        {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                            let pageNum;
-                            if (totalPages <= 5) pageNum = i + 1;
-                            else if (currentPage <= 3) pageNum = i + 1;
-                            else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
-                            else pageNum = currentPage - 2 + i;
-
-                            return (
-                                <button
-                                    key={pageNum}
-                                    onClick={() => handlePageChange(pageNum)}
-                                    className={`px-3 py-1 border rounded ${
-                                        currentPage === pageNum ? "bg-blue-600 text-white" : "hover:bg-gray-50"
-                                    }`}
-                                >
-                                    {pageNum}
-                                </button>
-                            );
-                        })}
-
-                        <button
-                            disabled={currentPage === totalPages}
-                            onClick={() => handlePageChange(currentPage + 1)}
-                            className={`px-3 py-1 border rounded ${
-                                currentPage === totalPages ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "hover:bg-gray-50"
-                            }`}
-                        >
-                            Next
-                        </button>
-                    </div>
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        onPageChange={handlePageChange}
+                    />
                 </div>
             )}
         </div>

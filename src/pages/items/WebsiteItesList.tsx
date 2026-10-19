@@ -5,12 +5,12 @@ import Swal from 'sweetalert2';
 import {
    FiCheckCircle, FiXCircle,
   FiClock, FiRefreshCw, FiInfo, FiImage,
-  FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight
 } from 'react-icons/fi';
 import { MdOutlineStorefront } from 'react-icons/md';
 import api from '../../api/api';
 import { FaEdit, FaEye, FaTrash } from 'react-icons/fa';
 import { usePermission } from '../../hooks/usePermissions';
+import Pagination from "../../components/common/pagination";
 
 // Types
 interface WebsiteItem {
@@ -181,7 +181,7 @@ const WebsiteItemsList: React.FC = () => {
     if (mediaPath.startsWith('http://') || mediaPath.startsWith('https://')) {
       return mediaPath;
     }
-    const API_BASE_URL = "http://localhost:8000";
+    const API_BASE_URL = "https://api.initcart.com";
     if (mediaPath.startsWith('/media/')) {
       return `${API_BASE_URL}${mediaPath}`;
     }
@@ -299,107 +299,7 @@ const WebsiteItemsList: React.FC = () => {
     </div>
   );
 
-  // Pagination component
-  const Pagination = () => {
-    const maxVisiblePages = 5;
-    let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
-    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-    
-    if (endPage - startPage + 1 < maxVisiblePages) {
-      startPage = Math.max(1, endPage - maxVisiblePages + 1);
-    }
-    
-    const pages = [];
-    for (let i = startPage; i <= endPage; i++) {
-      pages.push(i);
-    }
 
-    return (
-      <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-gray-200">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-700">
-            Showing <span className="font-medium">{items.length}</span> of{' '}
-            <span className="font-medium">{totalItems}</span> items
-          </span>
-          <select
-            value={pageSize}
-            onChange={handlePageSizeChange}
-            className="ml-4 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value={10}>10 per page</option>
-            <option value={15}>15 per page</option>
-            <option value={25}>25 per page</option>
-            <option value={50}>50 per page</option>
-            <option value={100}>100 per page</option>
-          </select>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handlePageChange(1)}
-            disabled={currentPage === 1}
-            className={`p-2 rounded-md ${
-              currentPage === 1
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <FiChevronsLeft size={18} />
-          </button>
-          
-          <button
-            onClick={() => handlePageChange(currentPage - 1)}
-            disabled={currentPage === 1}
-            className={`p-2 rounded-md ${
-              currentPage === 1
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <FiChevronLeft size={18} />
-          </button>
-          
-          {pages.map(page => (
-            <button
-              key={page}
-              onClick={() => handlePageChange(page)}
-              className={`px-3 py-1 rounded-md ${
-                currentPage === page
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              {page}
-            </button>
-          ))}
-          
-          <button
-            onClick={() => handlePageChange(currentPage + 1)}
-            disabled={currentPage === totalPages}
-            className={`p-2 rounded-md ${
-              currentPage === totalPages
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <FiChevronRight size={18} />
-          </button>
-          
-          <button
-            onClick={() => handlePageChange(totalPages)}
-            disabled={currentPage === totalPages}
-            className={`p-2 rounded-md ${
-              currentPage === totalPages
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <FiChevronsRight size={18} />
-          </button>
-        </div>
-      </div>
-    );
-  };
 
   if (loading && items.length === 0) {
     return (
@@ -661,8 +561,34 @@ const WebsiteItemsList: React.FC = () => {
           </table>
         </div>
         
-        {/* Pagination Component */}
-        {totalPages > 1 && <Pagination />}
+           {/* Pagination Component */}
+        {totalPages > 0 && (
+          <div className="flex flex-col sm:flex-row justify-between items-center px-6 py-4 bg-white border-t border-gray-200 gap-4">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-700">
+                Showing <span className="font-medium">{items.length}</span> of{' '}
+                <span className="font-medium">{totalItems}</span> items
+              </span>
+              <select
+                value={pageSize}
+                onChange={handlePageSizeChange}
+                className="ml-4 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value={10}>10 per page</option>
+                <option value={15}>15 per page</option>
+                <option value={25}>25 per page</option>
+                <option value={50}>50 per page</option>
+                <option value={100}>100 per page</option>
+              </select>
+            </div>
+
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={handlePageChange}
+            />
+          </div>
+        )}
       </div>
 
       {/* Quick Tips */}

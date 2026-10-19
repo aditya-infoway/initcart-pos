@@ -98,7 +98,7 @@ const Profile: React.FC = () => {
 
   const navigate = useNavigate();
   const { accessToken, logout } = useAuthStore();
-  const API_BASE_URL = "http://localhost:8000";
+  const API_BASE_URL = "https://api.initcart.com";
 
   // ── NEW: Superadmin — apni PURI branch info (name, type, owner, phone, address, bank) edit ──
   const [isEditingBranchInfo, setIsEditingBranchInfo] = useState<boolean>(false);

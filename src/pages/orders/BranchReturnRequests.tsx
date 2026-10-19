@@ -49,7 +49,7 @@ const EMPTY_STATS: Stats = {
 };
 
 const PAGE_SIZES = [10, 15, 25, 50];
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://api.initcart.com";
 const getFullImageUrl = (url: string) => (url.startsWith("http") ? url : `${API_BASE_URL}${url}`);
 
 const formatDate = (d: string) =>

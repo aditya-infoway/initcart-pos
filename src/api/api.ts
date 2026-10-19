@@ -7,7 +7,7 @@ import { useAuthStore } from "../store/authStore";
 const api = axios.create({
   baseURL: import.meta.env.PROD
     ? "/api/pos/"
-    : "http://localhost:8000/api/pos/",
+    : "https://api.initcart.com/api/pos/",
 });
 
 api.interceptors.request.use(
