@@ -11,6 +11,7 @@ import {
 import { MdClose } from "react-icons/md";
 import { Country, State, City } from "country-state-city";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 interface MyBranch {
     id: number;

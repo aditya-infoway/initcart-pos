@@ -10,6 +10,7 @@ import api from "../../api/api";
 import { FaLock } from "react-icons/fa6";
 import { useAuthStore } from "../../store/authStore"; 
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 // ─── TSC TE244 label presets ────────────────────────────────────
 const LABEL_PRESETS = [
@@ -97,124 +98,7 @@ const PreviewLabel: React.FC<{ item: PrintItem; preset: typeof LABEL_PRESETS[num
   );
 };
 
-// ════════════════════════════════════════════════════════════════
-//  Pagination Component
-// ════════════════════════════════════════════════════════════════
-const PaginationControls: React.FC<{
-  pagination: PaginationInfo;
-  onPageChange: (page: number) => void;
-  onPageSizeChange: (size: number) => void;
-}> = ({ pagination, onPageChange, onPageSizeChange }) => {
-  const pageNumbers = [];
-  const maxVisible = 5;
-  let startPage = Math.max(1, pagination.current_page - Math.floor(maxVisible / 2));
-  let endPage = Math.min(pagination.total_pages, startPage + maxVisible - 1);
-  
-  if (endPage - startPage + 1 < maxVisible) {
-    startPage = Math.max(1, endPage - maxVisible + 1);
-  }
 
-  for (let i = startPage; i <= endPage; i++) {
-    pageNumbers.push(i);
-  }
-
-  return (
-    <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 sm:px-6">
-      <div className="flex flex-1 justify-between sm:hidden">
-        <button
-          onClick={() => onPageChange(pagination.current_page - 1)}
-          disabled={!pagination.has_previous}
-          className="relative inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Previous
-        </button>
-        <button
-          onClick={() => onPageChange(pagination.current_page + 1)}
-          disabled={!pagination.has_next}
-          className="relative ml-3 inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Next
-        </button>
-      </div>
-      <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm text-gray-700">
-            Showing <span className="font-medium">{(pagination.current_page - 1) * pagination.page_size + 1}</span> to{" "}
-            <span className="font-medium">
-              {Math.min(pagination.current_page * pagination.page_size, pagination.count)}
-            </span>{" "}
-            of <span className="font-medium">{pagination.count}</span> results
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <select
-            value={pagination.page_size}
-            onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            className="text-sm border border-gray-300 rounded-md px-2 py-1"
-          >
-            <option value={15}>15 per page</option>
-            <option value={25}>25 per page</option>
-            <option value={50}>50 per page</option>
-            <option value={100}>100 per page</option>
-          </select>
-          <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
-            <button
-              onClick={() => onPageChange(pagination.current_page - 1)}
-              disabled={!pagination.has_previous}
-              className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="sr-only">Previous</span>
-              <FaChevronLeft className="h-4 w-4" aria-hidden="true" />
-            </button>
-            {startPage > 1 && (
-              <>
-                <button
-                  onClick={() => onPageChange(1)}
-                  className="relative inline-flex items-center px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0"
-                >
-                  1
-                </button>
-                {startPage > 2 && <span className="relative inline-flex items-center px-3 py-2 text-sm font-semibold text-gray-700 ring-1 ring-inset ring-gray-300">...</span>}
-              </>
-            )}
-            {pageNumbers.map((pageNum) => (
-              <button
-                key={pageNum}
-                onClick={() => onPageChange(pageNum)}
-                className={`relative inline-flex items-center px-3 py-2 text-sm font-semibold ${
-                  pageNum === pagination.current_page
-                    ? "z-10 bg-blue-600 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-                    : "text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0"
-                }`}
-              >
-                {pageNum}
-              </button>
-            ))}
-            {endPage < pagination.total_pages && (
-              <>
-                {endPage < pagination.total_pages - 1 && <span className="relative inline-flex items-center px-3 py-2 text-sm font-semibold text-gray-700 ring-1 ring-inset ring-gray-300">...</span>}
-                <button
-                  onClick={() => onPageChange(pagination.total_pages)}
-                  className="relative inline-flex items-center px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0"
-                >
-                  {pagination.total_pages}
-                </button>
-              </>
-            )}
-            <button
-              onClick={() => onPageChange(pagination.current_page + 1)}
-              disabled={!pagination.has_next}
-              className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="sr-only">Next</span>
-              <FaChevronRight className="h-4 w-4" aria-hidden="true" />
-            </button>
-          </nav>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // ════════════════════════════════════════════════════════════════
 //  CORE: printInNewWindow — writes exact-mm page for TSC TE244
@@ -893,11 +777,33 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
                 </div>
               )}
             </div>
-            <PaginationControls
-              pagination={pendingPagination}
-              onPageChange={handlePendingPageChange}
-              onPageSizeChange={handlePendingPageSizeChange}
-            />
+            <div className="flex flex-col sm:flex-row justify-between items-center px-4 py-3 bg-white border-t border-gray-200 gap-3">
+              <div className="flex items-center gap-3">
+                <p className="text-sm text-gray-700">
+                  Showing <span className="font-medium">{(pendingPagination.current_page - 1) * pendingPagination.page_size + 1}</span> to{" "}
+                  <span className="font-medium">
+                    {Math.min(pendingPagination.current_page * pendingPagination.page_size, pendingPagination.count)}
+                  </span>{" "}
+                  of <span className="font-medium">{pendingPagination.count}</span> results
+                </p>
+                <select
+                  value={pendingPagination.page_size}
+                  onChange={(e) => handlePendingPageSizeChange(Number(e.target.value))}
+                  className="text-sm border border-gray-300 rounded-md px-2 py-1"
+                >
+                  <option value={15}>15 per page</option>
+                  <option value={25}>25 per page</option>
+                  <option value={50}>50 per page</option>
+                  <option value={100}>100 per page</option>
+                </select>
+              </div>
+
+              <Pagination
+                currentPage={pendingPagination.current_page}
+                totalPages={pendingPagination.total_pages}
+                onPageChange={handlePendingPageChange}
+              />
+            </div>
           </>
         )}
 
@@ -1087,11 +993,33 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
                 </div>
               )}
             </div>
-            <PaginationControls
-              pagination={generatedPagination}
-              onPageChange={handleGeneratedPageChange}
-              onPageSizeChange={handleGeneratedPageSizeChange}
-            />
+            <div className="flex flex-col sm:flex-row justify-between items-center px-4 py-3 bg-white border-t border-gray-200 gap-3">
+              <div className="flex items-center gap-3">
+                <p className="text-sm text-gray-700">
+                  Showing <span className="font-medium">{(generatedPagination.current_page - 1) * generatedPagination.page_size + 1}</span> to{" "}
+                  <span className="font-medium">
+                    {Math.min(generatedPagination.current_page * generatedPagination.page_size, generatedPagination.count)}
+                  </span>{" "}
+                  of <span className="font-medium">{generatedPagination.count}</span> results
+                </p>
+                <select
+                  value={generatedPagination.page_size}
+                  onChange={(e) => handleGeneratedPageSizeChange(Number(e.target.value))}
+                  className="text-sm border border-gray-300 rounded-md px-2 py-1"
+                >
+                  <option value={15}>15 per page</option>
+                  <option value={25}>25 per page</option>
+                  <option value={50}>50 per page</option>
+                  <option value={100}>100 per page</option>
+                </select>
+              </div>
+
+              <Pagination
+                currentPage={generatedPagination.current_page}
+                totalPages={generatedPagination.total_pages}
+                onPageChange={handleGeneratedPageChange}
+              />
+            </div>
           </>
         )}
       </div>

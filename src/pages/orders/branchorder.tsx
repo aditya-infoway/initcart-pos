@@ -7,6 +7,7 @@ import { FaEye, FaSearch, FaTruck, FaBox, FaClock, FaBuilding } from "react-icon
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { useAuthStore } from "../../store/authStore";
+import Pagination from "../../components/common/pagination";
 
 interface Order {
   id: number;
