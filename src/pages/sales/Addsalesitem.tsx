@@ -20,13 +20,6 @@ const COMMON_VARIANT_COLUMNS = [
   "net_amount",
 ];
 
-interface PaginatedResponse {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: any[];
-}
-
 interface FilterOptions {
   terms: string;
   startDate: string;
@@ -35,194 +28,181 @@ interface FilterOptions {
 
 const Addsalesitem: React.FC = () => {
   const navigate = useNavigate();
-  
+
   // ✅ PERMISSIONS
   const { canAdd } = usePermission("/Addsalesitem");
-  // Note: Isme edit/delete nahi hai, sirf view + add
 
-  const [allItems, setAllItems] = useState<any[]>([]);
-  const [filteredItems, setFilteredItems] = useState<any[]>([]);
+  // ── Block A: states, fetchItems, exportToExcel, effects, handlers ──
+  const [items, setItems] = useState<any[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [overallTotal, setOverallTotal] = useState(0);
+
   const [variants, setVariants] = useState<any[]>([]);
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+
+  const [initialLoading, setInitialLoading] = useState<boolean>(true);
+  const [fetching, setFetching] = useState<boolean>(false);
+  const [exporting, setExporting] = useState<boolean>(false);
 
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [debouncedSearch, setDebouncedSearch] = useState<string>("");
   const [showFilters, setShowFilters] = useState<boolean>(false);
-  const [filters, setFilters] = useState<FilterOptions>({
-    terms: "",
-    startDate: "",
-    endDate: "",
-  });
+  const [filters, setFilters] = useState<FilterOptions>({ terms: "", startDate: "", endDate: "" });
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
-  const [totalItems, setTotalItems] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-
   const [variantPage, setVariantPage] = useState(1);
 
-  const fetchItems = async () => {
-    setLoading(true);
-    try {
-      const token = sessionStorage.getItem("token");
-      const response = await api.get<PaginatedResponse>(`salesentry-list/?page=1&page_size=1000`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+  const reqIdRef = useRef(0);   // late aaye purane response ignore karne ke liye
 
-      let allResults: any[] = [];
+  const mapSale = (item: any) => ({
+    id: item.id,
+    bill_no: item.bill_no,
+    date: item.date,
+    terms: item.payment_terms,
+    narration: item.narration,
+    total_basic: item.total_basic,
+    total_tax: item.total_tax,
+    grand_total: item.grand_total,
+    customer_name: item.customer_name,
+    dueDate: item.dueDate,
+    F_O_R:
+      (Number(item.frightcharge) || 0) +
+      (Number(item.otherexpnse) || 0) +
+      (Number(item.roundamount) || 0),
+    variants: item.items || [],
+    created_by: item.created_by,
+    created_by_name: item.created_by_name,
+  });
 
-      if (response.data.results) {
-        allResults = response.data.results;
-        let nextUrl = response.data.next;
-        while (nextUrl) {
-          const nextResponse = await api.get(nextUrl);
-          allResults = [...allResults, ...nextResponse.data.results];
-          nextUrl = nextResponse.data.next;
-        }
-      }
+  // ── Search debounce (300 ms) ──
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
 
-      const mappedItems = allResults.map((item: any) => ({
-        id: item.id,
-        bill_no: item.bill_no,
-        date: item.date,
-        terms: item.payment_terms,
-        narration: item.narration,
-        total_basic: item.total_basic,
-        total_tax: item.total_tax,
-        grand_total: item.grand_total,
-        customer_name: item.customer_name,
-        dueDate: item.dueDate,
-        F_O_R:
-          (Number(item.frightcharge) || 0) +
-          (Number(item.otherexpnse) || 0) +
-          (Number(item.roundamount) || 0),
-        variants: item.items || [],
-          created_by: item.created_by,           // ✅ ADD
-      created_by_name: item.created_by_name,
-      }));
-
-      setAllItems(mappedItems);
-      setFilteredItems(mappedItems);
-      setTotalItems(mappedItems.length);
-      setTotalPages(Math.ceil(mappedItems.length / pageSize));
-    } catch (err) {
-      console.error("Failed to fetch sales entries:", err);
-      setAllItems([]);
-      setFilteredItems([]);
-    } finally {
-      setLoading(false);
-    }
+  const buildParams = (extra: Record<string, any> = {}) => {
+    const params: Record<string, any> = { light: 1, ...extra };
+    if (debouncedSearch) params.search = debouncedSearch;
+    if (filters.terms) params.terms = filters.terms;
+    if (filters.startDate) params.date_from = filters.startDate;
+    if (filters.endDate) params.date_to = filters.endDate;
+    return params;
   };
 
-  const exportToExcel = () => {
-    if (filteredItems.length === 0) {
+  // ── Sirf current page fetch ──
+  useEffect(() => {
+    const fetchPage = async () => {
+      const reqId = ++reqIdRef.current;
+      setFetching(true);
+      try {
+        const res = await api.get(`salesentry-list/`, {
+          params: buildParams({ page: currentPage, page_size: pageSize }),
+        });
+        if (reqId !== reqIdRef.current) return;
+
+        const data = res.data;
+        const results = Array.isArray(data) ? data : data.results || [];
+        setItems(results.map(mapSale));
+        setTotalCount(Array.isArray(data) ? results.length : data.count ?? results.length);
+        setOverallTotal(Number(data.overall_total || 0));
+      } catch (err: any) {
+        if (reqId !== reqIdRef.current) return;
+        if (err?.response?.status === 404 && currentPage > 1) {
+          setCurrentPage(1);
+          return;
+        }
+        console.error("Failed to fetch sales entries:", err);
+        toast.error("Failed to load sales records");
+        setItems([]);
+        setTotalCount(0);
+        setOverallTotal(0);
+      } finally {
+        if (reqId === reqIdRef.current) {
+          setFetching(false);
+          setInitialLoading(false);
+        }
+      }
+    };
+    fetchPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, pageSize, debouncedSearch, filters.terms, filters.startDate, filters.endDate]);
+
+  // ── Excel: button dabane par hi saara filtered data ──
+  const exportToExcel = async () => {
+    if (totalCount === 0) {
       toast.warning("No data to export");
       return;
     }
+    setExporting(true);
+    try {
+      let all: any[] = [];
+      let page = 1;
+      while (true) {
+        const res = await api.get(`salesentry-list/`, {
+          params: buildParams({ page, page_size: 5000 }),
+        });
+        all = all.concat((res.data.results || []).map(mapSale));
+        if (!res.data.next) break;
+        page += 1;
+      }
+      if (all.length === 0) {
+        toast.warning("No data to export");
+        return;
+      }
 
-    type ExportRow = {
-      "SR No": number | string;
-      "Date": any;
-      "Terms": any; 
-      "Customer Name": any;
-      "Bill No": any;
-      "Due Date": any;
-      "Narration": any;
-      "Total Basic (₹)": string;
-      "Total Tax (₹)": string;
-      "F+O+R (₹)": string;
-      "Grand Total (₹)": string;
-    };
+      const exportData: any[] = all.map((item, index) => ({
+        "SR No": index + 1,
+        "Date": item.date || "-",
+        "Terms": item.terms || "-",
+        "Customer Name": item.customer_name || "-",
+        "Bill No": item.bill_no || "-",
+        "Due Date": item.dueDate || "-",
+        "Narration": item.narration || "-",
+        "Total Basic (₹)": Number(item.total_basic || 0).toFixed(2),
+        "Total Tax (₹)": Number(item.total_tax || 0).toFixed(2),
+        "F+O+R (₹)": Number(item.F_O_R || 0).toFixed(2),
+        "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
+      }));
 
-    const exportData: ExportRow[] = filteredItems.map((item, index) => ({
-      "SR No": index + 1,
-      "Date": item.date || "-",
-      "Terms": item.terms || "-",
-      "Customer Name": item.customer_name || "-",
-      "Bill No": item.bill_no || "-",
-      "Due Date": item.dueDate || "-",
-      "Narration": item.narration || "-",
-      "Total Basic (₹)": Number(item.total_basic || 0).toFixed(2),
-      "Total Tax (₹)": Number(item.total_tax || 0).toFixed(2),
-      "F+O+R (₹)": Number(item.F_O_R || 0).toFixed(2),
-      "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
-    }));
+      const grandTotal = all.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
+      exportData.push({
+        "SR No": "", "Date": "", "Terms": "", "Customer Name": "TOTAL", "Bill No": "",
+        "Due Date": "", "Narration": "", "Total Basic (₹)": "", "Total Tax (₹)": "",
+        "F+O+R (₹)": "", "Grand Total (₹)": grandTotal.toFixed(2),
+      });
 
-    const grandTotal = filteredItems.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
-    exportData.push({
-      "SR No": "",
-      "Date": "",
-      "Terms": "",
-      "Customer Name": "TOTAL",
-      "Bill No": "",
-      "Due Date": "",
-      "Narration": "",
-      "Total Basic (₹)": "",
-      "Total Tax (₹)": "",
-      "F+O+R (₹)": "",
-      "Grand Total (₹)": grandTotal.toFixed(2),
-    });
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    ws["!cols"] = [
-      { wch: 6 }, { wch: 12 }, { wch: 10 }, { wch: 25 },
-      { wch: 15 }, { wch: 12 }, { wch: 30 }, { wch: 15 },
-      { wch: 15 }, { wch: 12 }, { wch: 15 },
-    ];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Sales Register");
-    const fileName = `Sales_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-    toast.success(`Exported ${filteredItems.length} records successfully`);
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws["!cols"] = [
+        { wch: 6 }, { wch: 12 }, { wch: 10 }, { wch: 25 },
+        { wch: 15 }, { wch: 12 }, { wch: 30 }, { wch: 15 },
+        { wch: 15 }, { wch: 12 }, { wch: 15 },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Sales Register");
+      XLSX.writeFile(wb, `Sales_Register_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast.success(`Exported ${all.length} records successfully`);
+    } catch (err) {
+      console.error("Export error:", err);
+      toast.error("Export failed");
+    } finally {
+      setExporting(false);
+    }
   };
 
-  useEffect(() => {
-    fetchItems();
-  }, []);
-
-  useEffect(() => {
-    let filtered = [...allItems];
-
-    if (searchTerm.trim() !== "") {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (item) =>
-          item.bill_no?.toLowerCase().includes(term) ||
-          item.customer_name?.toLowerCase().includes(term) ||
-          item.narration?.toLowerCase().includes(term)
-      );
-    }
-
-    if (filters.terms) {
-      filtered = filtered.filter(
-        (item) => item.terms?.toLowerCase() === filters.terms.toLowerCase()
-      );
-    }
-
-    if (filters.startDate) {
-      filtered = filtered.filter((item) => item.date >= filters.startDate);
-    }
-    if (filters.endDate) {
-      filtered = filtered.filter((item) => item.date <= filters.endDate);
-    }
-
-    setFilteredItems(filtered);
-    setTotalItems(filtered.length);
-    setTotalPages(Math.ceil(filtered.length / pageSize));
-    setCurrentPage(1);
-  }, [searchTerm, filters, allItems]);
+  // ── Handlers ──
+  const totalPages = Math.ceil(totalCount / pageSize);
 
   const handlePageChange = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
+    if (page >= 1 && page <= totalPages) setCurrentPage(page);
   };
 
   const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newSize = parseInt(e.target.value);
-    setPageSize(newSize);
+    setPageSize(parseInt(e.target.value));
     setCurrentPage(1);
   };
 
@@ -230,32 +210,21 @@ const Addsalesitem: React.FC = () => {
     setSearchTerm(e.target.value);
   };
 
-  const clearSearch = () => {
-    setSearchTerm("");
-  };
+  const clearSearch = () => setSearchTerm("");
 
   const handleFilterChange = (key: keyof FilterOptions, value: string) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
+    setFilters((prev) => ({ ...prev, [key]: value }));
+    setCurrentPage(1);
   };
 
   const clearFilters = () => {
-    setFilters({
-      terms: "",
-      startDate: "",
-      endDate: "",
-    });
+    setFilters({ terms: "", startDate: "", endDate: "" });
+    setCurrentPage(1);
   };
 
-  const hasActiveFilters = () => {
-    return filters.terms !== "" || filters.startDate !== "" || filters.endDate !== "";
-  };
-
-  const getPaginatedItems = () => {
-    return filteredItems.slice(
-      (currentPage - 1) * pageSize,
-      currentPage * pageSize
-    );
-  };
+  const hasActiveFilters = () =>
+    filters.terms !== "" || filters.startDate !== "" || filters.endDate !== "";
+  // ── End Block A ──
 
   const paginatedVariants = variants.slice(
     (variantPage - 1) * VARIANTS_PER_PAGE,
@@ -265,7 +234,7 @@ const Addsalesitem: React.FC = () => {
   const modalColumns = COMMON_VARIANT_COLUMNS;
 
   const handleViewVariants = (itemId: number) => {
-    const item = filteredItems.find(i => i.id === itemId);
+    const item = items.find(i => i.id === itemId);
     if (!item) return;
     setVariants(item.variants);
     setVariantPage(1);
@@ -322,7 +291,7 @@ const Addsalesitem: React.FC = () => {
     }, 500);
   };
 
-  if (loading && allItems.length === 0) {
+  if (initialLoading) {
     return (
       <div className="p-6 bg-white min-h-screen flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -330,9 +299,8 @@ const Addsalesitem: React.FC = () => {
     );
   }
 
-  const paginatedItems = getPaginatedItems();
-  const displayedTotal = paginatedItems.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
-  const overallTotal = filteredItems.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
+  const paginatedItems = items;
+  const displayedTotal = items.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
 
   return (
     <div className="p-6 bg-white min-h-screen">
@@ -343,10 +311,11 @@ const Addsalesitem: React.FC = () => {
         <div className="flex gap-2">
           <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition"
+            disabled={exporting}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <FaFileExcel size={16} />
-            Export Excel
+            {exporting ? "Exporting..." : "Export Excel"}
           </button>
 
           {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
@@ -439,7 +408,7 @@ const Addsalesitem: React.FC = () => {
 
       {/* Results Count */}
       <div className="mb-4 text-sm text-gray-600">
-        Showing {paginatedItems.length} of {filteredItems.length} sales records
+        Showing {paginatedItems.length} of {totalCount} sales records
         {searchTerm && ` matching "${searchTerm}"`}
         {filters.terms && ` with terms: ${filters.terms}`}
         {(filters.startDate || filters.endDate) && ` between ${filters.startDate || "start"} and ${filters.endDate || "end"}`}
@@ -491,7 +460,7 @@ const Addsalesitem: React.FC = () => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap">₹{Number(item.F_O_R || 0).toFixed(2)}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap font-semibold">₹{Number(item.grand_total || 0).toFixed(2)}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
-  {item.created_by_name || "-"}  {/* ✅ ADD */}
+  {item.created_by_name || "-"}
 </td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap text-center">
                     <button
@@ -519,9 +488,9 @@ const Addsalesitem: React.FC = () => {
               <td className="p-3 border border-gray-200 font-bold text-blue-600">₹{displayedTotal.toFixed(2)}</td>
               <td className="p-3 border border-gray-200"></td>
             </tr>
-            {filteredItems.length > pageSize && (
+            {totalCount > pageSize && (
               <tr>
-                <td colSpan={11} className="p-3 border border-gray-200 text-right font-semibold text-gray-500">Grand Total (All {filteredItems.length} records):</td>
+                <td colSpan={11} className="p-3 border border-gray-200 text-right font-semibold text-gray-500">Grand Total (All {totalCount} records):</td>
                 <td className="p-3 border border-gray-200 font-bold text-green-600">₹{overallTotal.toFixed(2)}</td>
                 <td className="p-3 border border-gray-200"></td>
               </tr>
@@ -531,12 +500,12 @@ const Addsalesitem: React.FC = () => {
       </div>
 
       {/* Pagination Controls */}
-      {totalPages > 0 && filteredItems.length > 0 && (
+      {totalPages > 0 && totalCount > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">
               Showing {(currentPage - 1) * pageSize + 1}–
-              {Math.min(currentPage * pageSize, filteredItems.length)} of {filteredItems.length} items
+              {Math.min(currentPage * pageSize, totalCount)} of {totalCount} items
             </span>
 
             <select

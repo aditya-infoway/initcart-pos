@@ -27,7 +27,7 @@ import {
 import { toast } from "react-toastify";
 import { Country, State, City } from "country-state-city";
 
-const groups = ["Customer", "Supplier", "Bank Account", "Case In Hand","Customer - Sundry Debitor", "Supplier - Sundry Creditor","Sundry Debitor(Internal)","Sundry Creditor(Internal)","Sundry Creditor(Main)"];
+const groups = ["Customer", "Supplier", "Bank Account", "Case In Hand","Customer - Sundry Debitor", "Supplier - Sundry Creditor","Sundry Debitor(Internal)","Sundry Creditor(Internal)","Sundry Creditor(Main)", "Duties & Taxes"];
 
 // --- Validation Schema with Yup ---
 const validationSchema = Yup.object({
@@ -149,6 +149,7 @@ const AccountCreationForm = () => {
   const [countries, setCountries] = useState<any[]>([]);
   const [states, setStates] = useState<any[]>([]);
   const [cities, setCities] = useState<any[]>([]);
+  const [isSystemAccount, setIsSystemAccount] = useState(false);
   
   const [initialValues, setInitialValues] = useState({
     accountName: "",
@@ -205,6 +206,7 @@ if (editData) {
         // dropdown ke liye unhe isoCode me convert karo
         const countryCode = countryNameToCode(editData.country);
         const stateCode = stateNameToCode(countryCode, editData.state);
+        setIsSystemAccount(!!editData.is_system_default);   // fetchAccountData me: !!data.is_system_default
 
         setInitialValues({
           accountName: editData.account_name || "",
@@ -264,6 +266,8 @@ const data = res.data;
       // Backend se full names aate hain — dropdown ke liye isoCode me convert karo
       const countryCode = countryNameToCode(data.country);
       const stateCode = stateNameToCode(countryCode, data.state);
+
+      setIsSystemAccount(!!data.is_system_default); 
 
       setInitialValues({
         accountName: data.account_name || "",
@@ -442,12 +446,15 @@ const handleSubmit = async (
                       name="accountName"
                       placeholder="Enter account name"
                       icon={MdPerson}
+                       disabled={isSystemAccount}
                     />
                     <FormSelect
                       label="Group *"
                       name="group"
                       options={groups}
                       icon={MdBusiness}
+
+                       disabled={isSystemAccount}
                       onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
                         const selectedGroup = e.target.value;
                         setFieldValue("group", selectedGroup);
@@ -518,6 +525,7 @@ const handleSubmit = async (
                       name="country"
                       options={countries}
                       icon={MdPublic}
+                       disabled={isSystemAccount}
                       onChange={(e: React.ChangeEvent<HTMLSelectElement>) => 
                         handleCountryChange(e.target.value, setFieldValue)
                       }
@@ -527,17 +535,18 @@ const handleSubmit = async (
                       name="state"
                       options={states}
                       icon={MdMap}
+                      
                       onChange={(e: React.ChangeEvent<HTMLSelectElement>) => 
                         handleStateChange(e.target.value, values.country, setFieldValue)
                       }
-                      disabled={!values.country}
+                      disabled={!values.country || isSystemAccount}
                     />
                     <FormSelect
                       label="City"
                       name="city"
                       options={cities}
                       icon={MdLocationCity}
-                      disabled={!values.state}
+                      disabled={!values.state || isSystemAccount}
                     />
                     <FormInput
                       label="Pincode"

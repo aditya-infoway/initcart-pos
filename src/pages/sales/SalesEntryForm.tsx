@@ -19,7 +19,9 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+import { useTaxAccounts } from "../../hooks/useTaxAccounts";
 import { State } from "country-state-city";
+
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,6 +30,21 @@ const VARIANT_BY_BRANCH: Record<string, string[]> = {
   electronics: ["size", "color", "srno", "warrantydate"],
   mart: ["size"],
 };
+
+const MODAL_LIMIT = 50;
+const SEARCH_DEBOUNCE_MS = 300;
+const CACHE_TTL_MS = 30000;
+
+const mapSaleRow = (item: any) => ({
+  id: item.id, itemId: item.itemId, itemName: item.itemName,
+  hsnCode: item.hsnCode || "", salesPrice: item.salesPrice || 0,
+  per_unit_price: item.per_unit_price || item.salesPrice || 0,
+  unit: item.unit || "", unit_supports_fractional: item.unit_supports_fractional || false,
+  unit_name: item.unit_name || item.unit, taxSlab: item.taxSlab || "0",
+  current_stock: item.current_stock || 0, size: item.size || "-",
+  color: item.color || "-", srno: item.srno || "-",
+  warrantydate: item.warrantydate || "-", barcode: item.barcode || "",
+});
 
 const paymentTerms: string[] = ["Cash", "Bank", "Credit"];
 const today = new Date().toISOString().split("T")[0];
@@ -427,76 +444,27 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
 
     setScanning(true);
     try {
-      const localMatch = itemsModalData.find(
-        (item: any) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
+      const lower = trimmed.toLowerCase();
+      let match: any = itemsModalData.find(
+        (item: any) => item.barcode && item.barcode.toLowerCase() === lower
       );
 
-      if (localMatch) {
-        if (localMatch.current_stock <= 0) {
-          toast.error(`Item "${localMatch.itemName}" is out of stock`);
-          setBarcodeValue("");
-          setScanning(false);
-          inputRef.current?.focus();
-          return;
-        }
-        onItemSelected(localMatch);
-        toast.success(`✓ Item selected: ${localMatch.itemName}`);
-        setBarcodeValue("");
-        setScanning(false);
-        inputRef.current?.focus();
+      if (!match) {
+        const res = await api.get("sale-search-item/", { params: { barcode: trimmed } });
+        const row = Array.isArray(res.data) ? res.data[0] : null;
+        if (row) match = mapSaleRow(row);
+      }
+
+      if (!match) {
+        toast.error(`No item found with barcode "${trimmed}"`);
         return;
       }
-
-      const token = sessionStorage.getItem("accessToken");
-      const res = await api.get(`sale-search-item/?query=${encodeURIComponent(trimmed)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.data && res.data.length > 0) {
-        const apiMatch = res.data.find(
-          (item: any) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
-        );
-
-        if (!apiMatch) {
-          toast.error(`No item found with barcode "${trimmed}"`);
-          setBarcodeValue("");
-          setScanning(false);
-          inputRef.current?.focus();
-          return;
-        }
-
-        if (apiMatch.current_stock <= 0) {
-          toast.error(`Item "${apiMatch.itemName}" is out of stock`);
-          setBarcodeValue("");
-          setScanning(false);
-          inputRef.current?.focus();
-          return;
-        }
-
-        const mappedItem = {
-          id: apiMatch.id,
-          itemId: apiMatch.itemId,
-          itemName: apiMatch.itemName,
-          hsnCode: apiMatch.hsnCode || "",
-          salesPrice: apiMatch.salesPrice || 0,
-          per_unit_price: apiMatch.per_unit_price || apiMatch.salesPrice || 0,
-          unit: apiMatch.unit || "",
-          unit_supports_fractional: apiMatch.unit_supports_fractional || false,
-          unit_name: apiMatch.unit_name || apiMatch.unit,
-          taxSlab: apiMatch.taxSlab || "0",
-          current_stock: apiMatch.current_stock || 0,
-          size: apiMatch.size || "-",
-          color: apiMatch.color || "-",
-          srno: apiMatch.srno || "-",
-          warrantydate: apiMatch.warrantydate || "-",
-          barcode: apiMatch.barcode || "",
-        };
-
-        onItemSelected(mappedItem);
-        toast.success(`✓ Item selected: ${mappedItem.itemName}`);
-      } else {
-        toast.error(`No item found with barcode "${trimmed}"`);
+      if (match.current_stock <= 0) {
+        toast.error(`Item "${match.itemName}" is out of stock`);
+        return;
       }
+      onItemSelected(match);
+      toast.success(`✓ Item selected: ${match.itemName}`);
     } catch (err) {
       console.error("Barcode search error:", err);
       toast.error("Barcode search failed. Please try again.");
@@ -506,7 +474,6 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
       inputRef.current?.focus();
     }
   };
-
   return (
     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
       <label className="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-2">
@@ -784,6 +751,7 @@ const ItemsTable = ({ items, onDelete, totals }: any) => (
 
 const SalesEntryForm: React.FC = () => {
   const navigate = useNavigate();
+  const taxAccounts = useTaxAccounts();
 
   const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
 
@@ -801,12 +769,17 @@ const SalesEntryForm: React.FC = () => {
   // ── Modal / UI state ──
   const [itemsModalData, setItemsModalData] = useState<any[]>([]);
   const [filteredItems, setFilteredItems] = useState<any[]>([]);
+  
   const [searchTerm, setSearchTerm] = useState("");
   const [openModal, setOpenModal] = useState(false);
   const [branchType, setBranchType] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [savedSaleId, setSavedSaleId] = useState<number | null>(null);
+
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalHasMore, setModalHasMore] = useState(false);
+  const modalReqId = useRef(0);
 
   //  NEW: guards against duplicate sales entries from double/triple clicking
   //  "Save Entry" (e.g. while the server is saving the sale and sending the
@@ -847,30 +820,21 @@ const SalesEntryForm: React.FC = () => {
   // ── Fetch items for modal ──
   useEffect(() => {
     if (!branchType) return;
-    const fetchItems = async () => {
-      try {
-        const token = sessionStorage.getItem("accessToken");
-        const itemsRes = await api.get(`sale-search-item/`, { headers: { Authorization: `Bearer ${token}` } });
-        const mapped: any[] = itemsRes.data.map((item: any) => ({
-          id: item.id, itemId: item.itemId, itemName: item.itemName,
-          hsnCode: item.hsnCode, salesPrice: item.salesPrice || 0,
-          per_unit_price: item.per_unit_price || item.salesPrice,
-          unit: item.unit || "", unit_supports_fractional: item.unit_supports_fractional || false,
-          unit_name: item.unit_name || item.unit, taxSlab: item.taxSlab || "0",
-          current_stock: item.current_stock || 0, size: item.size || "-",
-          color: item.color || "-", srno: item.srno || "-",
-          warrantydate: item.warrantydate || "-", barcode: item.barcode || "",
-        }));
-        setItemsModalData(mapped);
-        setFilteredItems(mapped);
-        if (mapped.length === 0) toast.info("No items with stock available. Please purchase items first.");
-      } catch (err) {
-        console.error("Error fetching items:", err);
-        toast.error("Failed to load items");
-      }
-    };
-    fetchItems();
-  }, [branchType]);
+      const fetchItems = async () => {
+        try {
+          const token = sessionStorage.getItem("accessToken");
+const itemsRes = await api.get("sale-search-item/", { params: { limit: MODAL_LIMIT } });
+const mapped: any[] = itemsRes.data.map(mapSaleRow);
+          setItemsModalData(mapped);
+          setFilteredItems(mapped);
+          if (mapped.length === 0) toast.info("No items with stock available. Please purchase items first.");
+        } catch (err) {
+          console.error("Error fetching items:", err);
+          toast.error("Failed to load items");
+        }
+      };
+      fetchItems();
+    }, [branchType]);
 
   // ── Tax calculation for current item row ──
   useEffect(() => {
@@ -1092,6 +1056,36 @@ const SalesEntryForm: React.FC = () => {
   };
 
   const handleDeleteAll = () => { setAddedItems([]); setIdCounter(1); };
+
+  const loadModalItems = async (term: string, offset = 0) => {
+    const id = ++modalReqId.current;
+    setModalLoading(true);
+    try {
+      const res = await api.get("sale-search-item/", {
+        params: { query: term, limit: MODAL_LIMIT + 1, offset },
+      });
+      if (id !== modalReqId.current) return;
+      const all = (res.data || []).map(mapSaleRow);
+      const rows = all.slice(0, MODAL_LIMIT);
+      setFilteredItems(prev => (offset ? [...prev, ...rows] : rows));
+      setModalHasMore(all.length > MODAL_LIMIT);
+    } catch (err) {
+      if (id === modalReqId.current) {
+        console.error("Search API error:", err);
+        toast.error("Failed to load items");
+      }
+    } finally {
+      if (id === modalReqId.current) setModalLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (!openModal) return;
+    const t = setTimeout(
+      () => loadModalItems(searchTerm.trim(), 0),
+      searchTerm ? SEARCH_DEBOUNCE_MS : 0
+    );
+    return () => clearTimeout(t);
+  }, [openModal, searchTerm]);
 
   const variantFields = VARIANT_BY_BRANCH[branchType || ""] || [];
 
@@ -1396,25 +1390,33 @@ const SalesEntryForm: React.FC = () => {
                       <div className="space-y-1.5 text-sm">
                         {[
                           { label: "Total Basic", value: `₹ ${Number(totals.totalBasic || 0).toFixed(2)}` },
-                          ...(totals.totalCgst > 0 || totals.totalSgst > 0
-                            ? [
-                                { label: "CGST", value: `₹ ${totals.totalCgst}` },
-                                { label: "SGST", value: `₹ ${totals.totalSgst}` },
-                              ]
-                            : totals.totalIgst > 0
-                            ? [{ label: "IGST", value: `₹ ${totals.totalIgst}` }]
-                            : []),
+...(totals.totalCgst > 0 || totals.totalSgst > 0
+  ? [
+      { label: "CGST", value: `₹ ${totals.totalCgst}`,
+        account: taxAccounts.SALES_CGST?.account_name || "Sales CGST", side: "Credit" },
+      { label: "SGST", value: `₹ ${totals.totalSgst}`,
+        account: taxAccounts.SALES_SGST?.account_name || "Sales SGST", side: "Credit" },
+    ]
+  : totals.totalIgst > 0
+  ? [{ label: "IGST", value: `₹ ${totals.totalIgst}`,
+       account: taxAccounts.SALES_IGST?.account_name || "Sales IGST", side: "Credit" }]
+  : []),
                           { label: "Total Tax", value: `₹ ${Number(totals.totalTax || 0).toFixed(2)}` },
                           { label: "Total Discount", value: `₹ ${Number(totals.totalDiscount || 0).toFixed(2)}` },
                           { label: "Freight", value: `₹ ${Number(values.freightCharge || 0).toFixed(2)}` },
                           { label: "Other Expense", value: `₹ ${Number(values.otherExpense || 0).toFixed(2)}` },
                           { label: "Round Off", value: `₹ ${Number(values.roundAmount || 0).toFixed(2)}` },
-                        ].map((row) => (
-                          <div key={row.label} className="flex justify-between py-1 border-b border-blue-100">
-                            <span className="text-gray-600">{row.label}</span>
-                            <span className="font-medium">{row.value}</span>
-                          </div>
-                        ))}
+].map((row: any) => (
+  <div key={row.label} className="flex justify-between py-1 border-b border-blue-100">
+    <span className="text-gray-600">
+      {row.label}
+      {row.account && (
+        <span className="block text-[10px] text-blue-600">→ {row.account} ({row.side})</span>
+      )}
+    </span>
+    <span className="font-medium">{row.value}</span>
+  </div>
+))}
                         <div className="flex justify-between pt-2 text-base font-bold">
                           <span>Grand Total</span>
                           <span className="text-blue-700">₹ {grandTotal.toFixed(2)}</span>
@@ -1479,50 +1481,11 @@ const SalesEntryForm: React.FC = () => {
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") e.preventDefault();
                               }}
-                              onChange={async (e) => {
-                                const term = e.target.value;
-                                setSearchTerm(term);
-                                if (!term) { setFilteredItems(itemsModalData); return; }
-                                const termLower = term.toLowerCase();
-                                const clientFiltered = itemsModalData.filter((item) =>
-                                  item.itemName?.toLowerCase().includes(termLower) ||
-                                  item.hsnCode?.toLowerCase().includes(termLower) ||
-                                  (item.barcode && item.barcode.toLowerCase().includes(termLower)) ||
-                                  (item.size && item.size.toLowerCase().includes(termLower)) ||
-                                  (item.color && item.color.toLowerCase().includes(termLower))
-                                );
-                                setFilteredItems(clientFiltered);
-                                try {
-                                  const token = sessionStorage.getItem("accessToken");
-                                  const res = await api.get(`sale-search-item/?query=${encodeURIComponent(term)}`, {
-                                    headers: { Authorization: `Bearer ${token}` },
-                                  });
-                                  const mapped: any[] = res.data.map((item: any) => ({
-                                    id: item.id, itemId: item.itemId, itemName: item.itemName,
-                                    hsnCode: item.hsnCode, salesPrice: item.salesPrice || 0,
-                                    per_unit_price: item.per_unit_price || item.salesPrice || 0,
-                                    unit: item.unit || "", unit_supports_fractional: item.unit_supports_fractional || false,
-                                    unit_name: item.unit_name || item.unit, taxSlab: item.taxSlab || "0",
-                                    current_stock: item.current_stock || 0, size: item.size || "-",
-                                    color: item.color || "-", srno: item.srno || "-",
-                                    warrantydate: item.warrantydate || "-", barcode: item.barcode || "",
-                                  }));
-                                  const finalFiltered = mapped.filter((item) =>
-                                    item.itemName?.toLowerCase().includes(termLower) ||
-                                    item.hsnCode?.toLowerCase().includes(termLower) ||
-                                    (item.barcode && item.barcode.toLowerCase().includes(termLower)) ||
-                                    (item.size && item.size.toLowerCase().includes(termLower)) ||
-                                    (item.color && item.color.toLowerCase().includes(termLower))
-                                  );
-                                  setFilteredItems(finalFiltered.length > 0 ? finalFiltered : mapped);
-                                } catch (err) {
-                                  console.error("Search API error:", err);
-                                }
-                              }}
+onChange={(e) => setSearchTerm(e.target.value)}
                               className="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
                             />
                             <div className="px-3 py-1.5 bg-gray-100 rounded-lg text-sm text-gray-600">
-                              <span className="font-semibold">{filteredItems.length}</span> items in stock
+                              <span className="font-semibold">{filteredItems.length}{modalHasMore ? "+" : ""}</span> items
                             </div>
                           </div>
 
@@ -1544,6 +1507,9 @@ const SalesEntryForm: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody>
+                                {modalLoading && filteredItems.length === 0 && (
+                                  <tr><td colSpan={9 + variantFields.length} className="text-center py-10 text-gray-500">Loading...</td></tr>
+                                )}
                                 {filteredItems.map((row, idx) => (
                                   <tr key={idx} className="border-b hover:bg-gray-50 transition">
                                     <td className="px-2 py-2 text-center">
@@ -1584,7 +1550,7 @@ const SalesEntryForm: React.FC = () => {
                                     <td className="px-2 py-2 text-center">{row.taxSlab}</td>
                                   </tr>
                                 ))}
-                                {filteredItems.length === 0 && (
+                                {filteredItems.length === 0 && !modalLoading && (
                                   <tr>
                                     <td colSpan={9 + variantFields.length} className="text-center py-10 text-gray-500">
                                       No items with stock available
@@ -1594,6 +1560,19 @@ const SalesEntryForm: React.FC = () => {
                               </tbody>
                             </table>
                           </div>
+
+                          {modalLoading && filteredItems.length > 0 && (
+                            <p className="text-center text-xs text-gray-500 mt-2">Loading more...</p>
+                          )}
+                          {modalHasMore && !modalLoading && (
+                            <div className="text-center mt-3">
+                              <button type="button"
+                                onClick={() => loadModalItems(searchTerm.trim(), filteredItems.length)}
+                                className="px-6 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 text-sm">
+                                Load more
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <div className="flex justify-center p-4 pt-0">
 <button

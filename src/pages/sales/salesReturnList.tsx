@@ -25,6 +25,7 @@ interface PaginatedResponse {
   next: string | null;
   previous: string | null;
   results: SalesReturn[];
+  overall_total?: number;
 }
 
 // ✅ Filter options interface
@@ -36,14 +37,20 @@ interface FilterOptions {
 
 const SalesReturnList: React.FC = () => {
   const navigate = useNavigate();
-  const [allReturns, setAllReturns] = useState<SalesReturn[]>([]);
-  const [filteredReturns, setFilteredReturns] = useState<SalesReturn[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // Ab sirf CURRENT PAGE ki rows (server-side pagination)
+  const [returns, setReturns] = useState<SalesReturn[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [overallTotal, setOverallTotal] = useState(0);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<SalesReturn | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   
   // ✅ Search and Filter state
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [debouncedSearch, setDebouncedSearch] = useState<string>("");
   const [showFilters, setShowFilters] = useState<boolean>(false);
   const [filters, setFilters] = useState<FilterOptions>({
     return_type: "",
@@ -51,146 +58,148 @@ const SalesReturnList: React.FC = () => {
     endDate: "",
   });
   
-  // ✅ Pagination state (for filtered items)
+  // ✅ Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
-  const [totalItems, setTotalItems] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
 
-    // ✅ Add Export to Excel function
-  const exportToExcel = () => {
-    if (filteredReturns.length === 0) {
+  // delete/create ke baad refetch ke liye
+  const [refreshKey, setRefreshKey] = useState(0);
+  // late aaye purane response ignore karne ke liye
+  const reqIdRef = useRef(0);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  // ── Search debounce (300 ms) + page 1 par reset ──
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  const buildParams = (extra: Record<string, any> = {}) => {
+    const params: Record<string, any> = { ...extra };
+    if (debouncedSearch) params.search = debouncedSearch;
+    if (filters.return_type) params.return_type = filters.return_type;
+    if (filters.startDate) params.date_from = filters.startDate;
+    if (filters.endDate) params.date_to = filters.endDate;
+    return params;
+  };
+
+  // ── Server-side fetch (sirf current page) ──
+  useEffect(() => {
+    const fetchPage = async () => {
+      const reqId = ++reqIdRef.current;
+      setFetching(true);
+      try {
+        const res = await api.get<PaginatedResponse>("/sales-return-list/", {
+          params: buildParams({ page: currentPage, page_size: pageSize }),
+        });
+        if (reqId !== reqIdRef.current) return; // purana response ignore
+
+        const data: any = res.data;
+        const results: SalesReturn[] = Array.isArray(data) ? data : data.results || [];
+        setReturns(results);
+        setTotalCount(Array.isArray(data) ? results.length : data.count ?? results.length);
+        setOverallTotal(Number(data.overall_total || 0));
+      } catch (err: any) {
+        if (reqId !== reqIdRef.current) return;
+        // Page > 1 par 404 = last row delete ho gayi -> ek page peeche
+        if (err?.response?.status === 404 && currentPage > 1) {
+          setCurrentPage((p) => p - 1);
+          return;
+        }
+        console.error("Error fetching returns:", err);
+        toast.error("Failed to load sales returns");
+        setReturns([]);
+        setTotalCount(0);
+        setOverallTotal(0);
+      } finally {
+        if (reqId === reqIdRef.current) {
+          setFetching(false);
+          setInitialLoading(false);
+        }
+      }
+    };
+    fetchPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, pageSize, debouncedSearch, filters.return_type, filters.startDate, filters.endDate, refreshKey]);
+
+  // ✅ Export to Excel — sirf button dabane par saari filtered rows fetch hoti hain
+  const exportToExcel = async () => {
+    if (exporting) return;
+    if (totalCount === 0) {
       toast.warning("No data to export");
       return;
     }
 
-    // Prepare data for export
-    const exportData: any[] = filteredReturns.map((item, index) => ({
-      "SR No": index + 1,
-      "Return No": item.return_no || "-",
-      "Date": item.date || "-",
-      "Customer Name": item.customer_name || "-",
-      "Reason for Return": item.reason_for_return || "-",
-      "Return Type": item.return_type || "-",
-      "Approved By": item.approved_by || "-",
-      "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
-    }));
-
-    // Add grand total row
-    const grandTotal = filteredReturns.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
-    exportData.push({
-      "SR No": "",
-      "Return No": "",
-      "Date": "",
-      "Customer Name": "TOTAL",
-      "Reason for Return": "",
-      "Return Type": "",
-      "Approved By": "",
-      "Grand Total (₹)": grandTotal.toFixed(2),
-    });
-
-    // Create worksheet
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    
-    // Set column widths
-    ws["!cols"] = [
-      { wch: 6 },   // SR No
-      { wch: 18 },  // Return No
-      { wch: 12 },  // Date
-      { wch: 25 },  // Customer Name
-      { wch: 35 },  // Reason for Return
-      { wch: 14 },  // Return Type
-      { wch: 18 },  // Approved By
-      { wch: 16 },  // Grand Total
-    ];
-
-    // Create workbook and download
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Sales Return List");
-    
-    // Generate filename with current date
-    const fileName = `Sales_Return_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-    
-    toast.success(`Exported ${filteredReturns.length} records successfully`);
-  };
-
-  // ✅ Fetch all returns (without pagination from API)
-  const fetchReturns = async () => {
-    setLoading(true);
+    setExporting(true);
     try {
-      const res = await api.get<PaginatedResponse>(`/sales-return-list/?page=1&page_size=1000`);
-      
-      let allResults: SalesReturn[] = [];
-      
-      if (res.data && res.data.results) {
-        allResults = res.data.results;
-        
-        // ✅ If there are more pages, fetch them all
-        let nextUrl = res.data.next;
-        while (nextUrl) {
-          const nextResponse = await api.get(nextUrl);
-          allResults = [...allResults, ...nextResponse.data.results];
-          nextUrl = nextResponse.data.next;
-        }
-      } else if (Array.isArray(res.data)) {
-        allResults = res.data;
+      let all: SalesReturn[] = [];
+      const first = await api.get<PaginatedResponse>("/sales-return-list/", {
+        params: buildParams({ page: 1, page_size: 100 }),
+      });
+      all = [...(first.data.results || [])];
+      let nextUrl = first.data.next;
+      while (nextUrl) {
+        const nextResponse = await api.get(nextUrl);
+        all = [...all, ...(nextResponse.data.results || [])];
+        nextUrl = nextResponse.data.next;
       }
-      
-      setAllReturns(allResults);
-      setFilteredReturns(allResults);
-      setTotalItems(allResults.length);
-      setTotalPages(Math.ceil(allResults.length / pageSize));
+
+      if (all.length === 0) {
+        toast.warning("No data to export");
+        return;
+      }
+
+      const exportData: any[] = all.map((item, index) => ({
+        "SR No": index + 1,
+        "Return No": item.return_no || "-",
+        "Date": item.date || "-",
+        "Customer Name": item.customer_name || "-",
+        "Reason for Return": item.reason_for_return || "-",
+        "Return Type": item.return_type || "-",
+        "Approved By": item.approved_by || "-",
+        "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
+      }));
+
+      const grandTotal = all.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
+      exportData.push({
+        "SR No": "",
+        "Return No": "",
+        "Date": "",
+        "Customer Name": "TOTAL",
+        "Reason for Return": "",
+        "Return Type": "",
+        "Approved By": "",
+        "Grand Total (₹)": grandTotal.toFixed(2),
+      });
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws["!cols"] = [
+        { wch: 6 },   // SR No
+        { wch: 18 },  // Return No
+        { wch: 12 },  // Date
+        { wch: 25 },  // Customer Name
+        { wch: 35 },  // Reason for Return
+        { wch: 14 },  // Return Type
+        { wch: 18 },  // Approved By
+        { wch: 16 },  // Grand Total
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Sales Return List");
+      const fileName = `Sales_Return_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      toast.success(`Exported ${all.length} records successfully`);
     } catch (err) {
-      console.error("Error fetching returns:", err);
-      toast.error("Failed to load sales returns");
-      setAllReturns([]);
-      setFilteredReturns([]);
+      console.error("Export error:", err);
+      toast.error("Export failed. Please try again.");
     } finally {
-      setLoading(false);
+      setExporting(false);
     }
   };
-
-  // ✅ Initial fetch - runs only once on mount
-  useEffect(() => {
-    fetchReturns();
-  }, []);
-
-  // ✅ Client-side filtering
-  useEffect(() => {
-    let filtered = [...allReturns];
-
-    // ✅ Filter by search term (return_no, customer_name, reason)
-    if (searchTerm.trim() !== "") {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (item) =>
-          item.return_no?.toLowerCase().includes(term) ||
-          item.customer_name?.toLowerCase().includes(term) ||
-          item.reason_for_return?.toLowerCase().includes(term)
-      );
-    }
-
-    // ✅ Filter by return type
-    if (filters.return_type) {
-      filtered = filtered.filter(
-        (item) => item.return_type?.toLowerCase() === filters.return_type.toLowerCase()
-      );
-    }
-
-    // ✅ Filter by date range
-    if (filters.startDate) {
-      filtered = filtered.filter((item) => item.date >= filters.startDate);
-    }
-    if (filters.endDate) {
-      filtered = filtered.filter((item) => item.date <= filters.endDate);
-    }
-
-    setFilteredReturns(filtered);
-    setTotalItems(filtered.length);
-    setTotalPages(Math.ceil(filtered.length / pageSize));
-    setCurrentPage(1); // Reset to first page when filters change
-  }, [searchTerm, filters, allReturns]);
 
   // ✅ Pagination handlers
   const handlePageChange = (page: number) => {
@@ -217,6 +226,7 @@ const SalesReturnList: React.FC = () => {
   // ✅ Filter Handlers
   const handleFilterChange = (key: keyof FilterOptions, value: string) => {
     setFilters(prev => ({ ...prev, [key]: value }));
+    setCurrentPage(1);
   };
 
   const clearFilters = () => {
@@ -225,6 +235,7 @@ const SalesReturnList: React.FC = () => {
       startDate: "",
       endDate: "",
     });
+    setCurrentPage(1);
   };
 
   const hasActiveFilters = () => {
@@ -236,7 +247,7 @@ const SalesReturnList: React.FC = () => {
       try {
         await api.delete(`/sales-return-delete/${id}/`);
         toast.success("Sales return deleted successfully");
-        fetchReturns(); // Refresh all data
+        setRefreshKey((k) => k + 1); // list refetch
       } catch (err) {
         console.error("Error deleting return:", err);
         toast.error("Failed to delete sales return");
@@ -253,20 +264,12 @@ const SalesReturnList: React.FC = () => {
     return type === 'Full' ? 'bg-purple-100 text-purple-800' : 'bg-orange-100 text-orange-800';
   };
 
-  // ✅ Get paginated data
-  const getPaginatedReturns = () => {
-    return filteredReturns.slice(
-      (currentPage - 1) * pageSize,
-      currentPage * pageSize
-    );
-  };
-
-  const paginatedReturns = getPaginatedReturns();
+  const paginatedReturns = returns;
+  // Current page total = visible rows; Grand total = backend overall_total
   const displayedTotal = paginatedReturns.reduce((sum, r) => sum + Number(r.grand_total || 0), 0);
-  const overallTotal = filteredReturns.reduce((sum, r) => sum + Number(r.grand_total || 0), 0);
 
-  // ✅ Loading State
-  if (loading && allReturns.length === 0) {
+  // ✅ Full spinner sirf pehli load par
+  if (initialLoading && returns.length === 0) {
     return (
       <div className="min-h-screen bg-gray-100 flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -284,10 +287,11 @@ const SalesReturnList: React.FC = () => {
             {/* ✅ Export Excel Button */}
             <button
               onClick={exportToExcel}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition"
+              disabled={exporting}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <FaFileExcel size={16} />
-              Export Excel
+              {exporting ? "Exporting..." : "Export Excel"}
             </button>
             
             <button
@@ -382,8 +386,8 @@ const SalesReturnList: React.FC = () => {
 
         {/* ✅ Results Count */}
         <div className="mb-4 text-sm text-gray-600">
-          Showing {paginatedReturns.length} of {filteredReturns.length} sales returns
-          {searchTerm && ` matching "${searchTerm}"`}
+          Showing {paginatedReturns.length} of {totalCount} sales returns
+          {debouncedSearch && ` matching "${debouncedSearch}"`}
           {filters.return_type && ` with type: ${filters.return_type}`}
           {(filters.startDate || filters.endDate) && ` between ${filters.startDate || "start"} and ${filters.endDate || "end"}`}
         </div>
@@ -393,9 +397,9 @@ const SalesReturnList: React.FC = () => {
             <h2 className="text-blue-800 font-bold text-lg">SALES RETURN LIST</h2>
           </div>
 
-          {filteredReturns.length === 0 ? (
+          {paginatedReturns.length === 0 && !fetching ? (
             <div className="text-center py-12 text-gray-500">
-              <p>{searchTerm || hasActiveFilters() ? "No sales returns match your search/filters" : "No sales returns found"}</p>
+              <p>{debouncedSearch || hasActiveFilters() ? "No sales returns match your search/filters" : "No sales returns found"}</p>
               <button
                 onClick={() => navigate("/sales-return")}
                 className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
@@ -404,7 +408,7 @@ const SalesReturnList: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className={`overflow-x-auto transition-opacity ${fetching ? "opacity-60" : "opacity-100"}`}>
               <table className="w-full text-sm border border-gray-300 rounded-lg overflow-hidden">
                 <thead className="bg-gray-50">
                   <tr>
@@ -419,7 +423,7 @@ const SalesReturnList: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedReturns.map((item, index) => (
+                  {paginatedReturns.map((item) => (
                     <tr key={item.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 border border-gray-200 whitespace-nowrap font-medium text-blue-600">
                         {item.return_no}
@@ -467,10 +471,10 @@ const SalesReturnList: React.FC = () => {
                     </td>
                     <td className="px-4 py-3 border border-gray-200 whitespace-nowrap"></td>
                   </tr>
-                  {filteredReturns.length > pageSize && (
+                  {totalCount > pageSize && (
                     <tr>
                       <td colSpan={6} className="px-4 py-3 border border-gray-200 whitespace-nowrap font-semibold text-gray-500">
-                        Grand Total (All {filteredReturns.length} records):
+                        Grand Total (All {totalCount} records):
                       </td>
                       <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right font-bold text-green-600">
                         ₹{overallTotal.toFixed(2)}
@@ -485,12 +489,12 @@ const SalesReturnList: React.FC = () => {
         </div>
         
         {/* ✅ Enhanced Pagination Controls */}
-        {totalPages > 0 && filteredReturns.length > 0 && (
+        {totalCount > 0 && (
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 p-4">
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-700">
                 Showing {(currentPage - 1) * pageSize + 1}–
-                {Math.min(currentPage * pageSize, filteredReturns.length)} of {filteredReturns.length} items
+                {Math.min(currentPage * pageSize, totalCount)} of {totalCount} items
               </span>
               
               <select

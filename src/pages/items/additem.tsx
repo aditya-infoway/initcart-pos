@@ -18,6 +18,7 @@ const COMMON_VARIANT_COLUMNS = [
   "salesPrice",
   "mrp",
   "barcode",
+  "location",
   "current_stock",
   "netValue",
 ];

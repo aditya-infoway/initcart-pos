@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { FaEdit, FaSearch, FaSync } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
@@ -32,9 +32,14 @@ interface Account {
     current_drcr: string;
     created_by?: number;
     created_by_name?: string;
-
-
 }
+
+type PageData = { items: Account[]; count: number; groups: string[] };
+
+// Component band hone ke baad bhi bacha rehta hai (edit se wapas aane par list turant dikhe)
+const pageCache = new Map<string, PageData>();
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 // ------------------ Main Component ------------------
 const AddAccount: React.FC = () => {
@@ -42,99 +47,145 @@ const AddAccount: React.FC = () => {
     const { canAdd, canEdit } = usePermission("/addAccounts");
 
     const [items, setItems] = useState<Account[]>([]);
-    const [filteredItems, setFilteredItems] = useState<Account[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [totalItems, setTotalItems] = useState(0);
+    const [groups, setGroups] = useState<string[]>([]);
+
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [fetching, setFetching] = useState(false);
+
     const [searchTerm, setSearchTerm] = useState("");
+    const [debouncedSearch, setDebouncedSearch] = useState("");
     const [groupFilter, setGroupFilter] = useState<string>("All");
-    
-    // Pagination state
+
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(15);
-    const [totalItems, setTotalItems] = useState(0);
-    const [totalPages, setTotalPages] = useState(1);
 
-    // Fetch Items WITH PAGINATION
-    const fetchItems = async (page = 1) => {
-        setLoading(true);
+    const reqIdRef = useRef(0); // late aaye purane response ignore karne ke liye
+
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+
+    // Search debounce
+    useEffect(() => {
+        const t = setTimeout(() => {
+            setDebouncedSearch(searchTerm.trim());
+            setCurrentPage(1);
+        }, SEARCH_DEBOUNCE_MS);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
+
+    const buildParams = (page: number) => {
+        const params: Record<string, any> = { page, page_size: pageSize };
+        if (debouncedSearch) params.search = debouncedSearch;
+        if (groupFilter !== "All") params.group = groupFilter;
+        return params;
+    };
+
+    const applyData = (d: PageData) => {
+        setItems(d.items);
+        setTotalItems(d.count);
+        if (d.groups.length) setGroups(d.groups);
+    };
+
+    const fetchPage = async (force = false) => {
+        const reqId = ++reqIdRef.current;
+        const params = buildParams(currentPage);
+        const key = JSON.stringify(params);
+
+        const hit = !force ? pageCache.get(key) : undefined;
+        if (hit) {
+            applyData(hit);          // turant dikhao, peeche se refresh bhi hoga
+            setInitialLoading(false);
+        } else {
+            setFetching(true);
+        }
+
         try {
-            const token = sessionStorage.getItem("token");
-            const response = await api.get(`account/?page=${page}&page_size=${pageSize}`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            
-            if (response.data.results) {
-                setItems(response.data.results);
-                setFilteredItems(response.data.results);
-                setTotalItems(response.data.count);
-                setTotalPages(Math.ceil(response.data.count / pageSize));
-            } else if (Array.isArray(response.data)) {
-                setItems(response.data);
-                setFilteredItems(response.data);
-                setTotalItems(response.data.length);
-                setTotalPages(1);
+            const res = await api.get("account/", { params });
+            if (reqId !== reqIdRef.current) return;
+
+            const data = res.data;
+            const results: Account[] = Array.isArray(data) ? data : data.results || [];
+            const fresh: PageData = {
+                items: results,
+                count: Array.isArray(data) ? results.length : data.count ?? results.length,
+                groups: Array.isArray(data?.groups) ? data.groups : [],
+            };
+
+            if (pageCache.size > 50) pageCache.clear();
+            pageCache.set(key, fresh);
+            applyData(fresh);
+
+            // Agla page peeche se pehle se le aao (Next dabane par instant)
+            if (data?.next) {
+                const nextParams = { ...params, page: currentPage + 1 };
+                const nextKey = JSON.stringify(nextParams);
+                if (!pageCache.has(nextKey)) {
+                    api.get("account/", { params: nextParams })
+                        .then((r) => {
+                            const rs: Account[] = r.data.results || [];
+                            pageCache.set(nextKey, {
+                                items: rs,
+                                count: r.data.count ?? rs.length,
+                                groups: Array.isArray(r.data?.groups) ? r.data.groups : [],
+                            });
+                        })
+                        .catch(() => {});
+                }
             }
-        } catch (err) {
-            console.error("Failed to fetch items:", err);
-            setItems([]);
-            setFilteredItems([]);
-            toast.error("Failed to fetch accounts");
+        } catch (err: any) {
+            if (reqId !== reqIdRef.current) return;
+            // Filter ki wajah se page out-of-range ho gaya to page 1 pe wapas
+            if (err?.response?.status === 404 && currentPage > 1) {
+                setCurrentPage(1);
+                return;
+            }
+            console.error("Failed to fetch accounts:", err);
+            if (!hit) {
+                setItems([]);
+                setTotalItems(0);
+                toast.error("Failed to fetch accounts");
+            }
         } finally {
-            setLoading(false);
+            if (reqId === reqIdRef.current) {
+                setFetching(false);
+                setInitialLoading(false);
+            }
         }
     };
 
     useEffect(() => {
-        fetchItems(currentPage);
-    }, [currentPage, pageSize]);
-
-    // Filter items based on search and group
-    useEffect(() => {
-        let filtered = items;
-        
-        // Apply search filter
-        if (searchTerm) {
-            filtered = filtered.filter(account => 
-                account.account_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                account.mobile?.includes(searchTerm) ||
-                account.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                account.city?.toLowerCase().includes(searchTerm.toLowerCase())
-            );
-        }
-        
-        // Apply group filter
-        if (groupFilter !== "All") {
-            filtered = filtered.filter(account => account.group === groupFilter);
-        }
-        
-        setFilteredItems(filtered);
-    }, [searchTerm, groupFilter, items]);
+        fetchPage();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentPage, pageSize, debouncedSearch, groupFilter]);
 
     const handleEditClick = (account: Account) => {
         navigate(`/accounts/edit/${account.id}`, { state: { accountData: account } });
     };
 
     const handlePageChange = (page: number) => {
-        if (page >= 1 && page <= totalPages) {
-            setCurrentPage(page);
-        }
+        if (page >= 1 && page <= totalPages) setCurrentPage(page);
     };
 
     const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newSize = parseInt(e.target.value);
-        setPageSize(newSize);
+        setPageSize(parseInt(e.target.value));
         setCurrentPage(1);
     };
 
-    const handleRefresh = () => {
-        fetchItems(currentPage);
+    const handleGroupChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        setGroupFilter(e.target.value);
+        setCurrentPage(1);
+    };
+
+    const handleRefresh = async () => {
+        pageCache.clear();
+        await fetchPage(true);
         toast.success("Data refreshed");
     };
 
-    // Get unique groups for filter
-    const uniqueGroups = ["All", ...new Set(items.map(item => item.group))];
+    const groupOptions = ["All", ...groups];
 
-    // Loading state
-    if (loading) {
+    // Pehli baar hi full-page spinner
+    if (initialLoading) {
         return (
             <div className="p-6 bg-gray-50 min-h-screen flex justify-center items-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -153,13 +204,16 @@ const AddAccount: React.FC = () => {
                         className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded shadow flex items-center gap-2"
                         title="Refresh"
                     >
-                        <FaSync /> Refresh
+                        <FaSync className={fetching ? "animate-spin" : ""} /> Refresh
                     </button>
-{canAdd && (
-  <button onClick={() => navigate("/accounts")} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow">
-    + Add Account
-  </button>
-)}
+                    {canAdd && (
+                        <button
+                            onClick={() => navigate("/accounts")}
+                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
+                        >
+                            + Add Account
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -174,22 +228,31 @@ const AddAccount: React.FC = () => {
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoComplete="off"
                         />
                     </div>
                     <select
                         value={groupFilter}
-                        onChange={(e) => setGroupFilter(e.target.value)}
+                        onChange={handleGroupChange}
                         className="px-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                     >
-                        {uniqueGroups.map(group => (
+                        {groupOptions.map((group) => (
                             <option key={group} value={group}>{group}</option>
                         ))}
                     </select>
                 </div>
+                <div className="mt-2 text-xs text-gray-500 flex items-center gap-3">
+                    <span>
+                        {totalItems} accounts
+                        {debouncedSearch && ` matching "${debouncedSearch}"`}
+                        {groupFilter !== "All" && ` in ${groupFilter}`}
+                    </span>
+                    {fetching && <span className="text-blue-600 animate-pulse">Loading...</span>}
+                </div>
             </div>
 
-            {/* Table Section - Simple with borders */}
-            <div className="bg-white rounded-lg shadow overflow-x-auto">
+            {/* Table Section */}
+            <div className={`bg-white rounded-lg shadow overflow-x-auto transition-opacity ${fetching ? "opacity-60" : "opacity-100"}`}>
                 <table className="w-full border-collapse text-sm">
                     <thead className="bg-blue-600 text-white">
                         <tr>
@@ -201,19 +264,19 @@ const AddAccount: React.FC = () => {
                             <th className="p-3 border border-gray-300 whitespace-nowrap text-left">Mobile no.</th>
                             <th className="p-3 border border-gray-300 whitespace-nowrap text-left">Opening Balance</th>
                             <th className="p-3 border border-gray-300 whitespace-nowrap text-left">Current Balance</th>
-                            <th className="p-3 border border-gray-300 whitespace-nowrap text-left">created By </th>
+                            <th className="p-3 border border-gray-300 whitespace-nowrap text-left">Created By</th>
                             <th className="p-3 border border-gray-300 whitespace-nowrap text-center">Action</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {filteredItems.length === 0 ? (
+                        {items.length === 0 ? (
                             <tr>
-                                <td colSpan={9} className="text-center p-8 text-gray-500 border border-gray-300">
+                                <td colSpan={10} className="text-center p-8 text-gray-500 border border-gray-300">
                                     No accounts found
                                 </td>
                             </tr>
                         ) : (
-                            filteredItems.map((account, index) => (
+                            items.map((account, index) => (
                                 <tr key={account.id} className="border-b hover:bg-gray-50">
                                     <td className="p-3 border border-gray-300 whitespace-nowrap">
                                         {(currentPage - 1) * pageSize + index + 1}
@@ -221,18 +284,10 @@ const AddAccount: React.FC = () => {
                                     <td className="p-3 border border-gray-300 whitespace-nowrap font-medium">
                                         {account.account_name}
                                     </td>
-                                    <td className="p-3 border border-gray-300 whitespace-nowrap">
-                                        {account.group}
-                                    </td>
-                                    <td className="p-3 border border-gray-300 whitespace-nowrap">
-                                        {account.city || "-"}
-                                    </td>
-                                    <td className="p-3 border border-gray-300 whitespace-nowrap">
-                                        {account.state || "-"}
-                                    </td>
-                                    <td className="p-3 border border-gray-300 whitespace-nowrap">
-                                        {account.mobile || "-"}
-                                    </td>
+                                    <td className="p-3 border border-gray-300 whitespace-nowrap">{account.group}</td>
+                                    <td className="p-3 border border-gray-300 whitespace-nowrap">{account.city || "-"}</td>
+                                    <td className="p-3 border border-gray-300 whitespace-nowrap">{account.state || "-"}</td>
+                                    <td className="p-3 border border-gray-300 whitespace-nowrap">{account.mobile || "-"}</td>
                                     <td className="p-3 border border-gray-300 whitespace-nowrap">
                                         ₹{account.opening_balance} {account.drcr}
                                     </td>
@@ -240,19 +295,17 @@ const AddAccount: React.FC = () => {
                                         ₹{account.current_balance} {account.current_drcr}
                                     </td>
                                     <td className="p-3 border border-gray-300 whitespace-nowrap">
-                                        {account.created_by_name}
+                                        {account.created_by_name || "-"}
                                     </td>
-
                                     <td className="p-3 border border-gray-300 whitespace-nowrap text-center">
-
-                                    {canEdit &&(
-                                        <button
-                                            onClick={() => handleEditClick(account)}
-                                            className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200"
-                                            title="Edit Account"
-                                        >
-                                            <FaEdit />
-                                        </button>
+                                        {canEdit && (
+                                            <button
+                                                onClick={() => handleEditClick(account)}
+                                                className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200"
+                                                title="Edit Account"
+                                            >
+                                                <FaEdit />
+                                            </button>
                                         )}
                                     </td>
                                 </tr>
@@ -263,79 +316,69 @@ const AddAccount: React.FC = () => {
             </div>
 
             {/* Pagination Section */}
-            <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
-                <div className="flex items-center gap-3">
-                    <span className="text-sm text-gray-700">
-                        Showing {((currentPage - 1) * pageSize) + 1}–
-                        {Math.min(currentPage * pageSize, totalItems)} of {totalItems} items
-                    </span>
-                    
-                    <select
-                        value={pageSize}
-                        onChange={handlePageSizeChange}
-                        className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none"
-                    >
-                        <option value={10}>10 per page</option>
-                        <option value={15}>15 per page</option>
-                        <option value={25}>25 per page</option>
-                        <option value={50}>50 per page</option>
-                    </select>
+            {totalItems > 0 && (
+                <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-700">
+                            Showing {(currentPage - 1) * pageSize + 1}–
+                            {Math.min(currentPage * pageSize, totalItems)} of {totalItems} items
+                        </span>
+
+                        <select
+                            value={pageSize}
+                            onChange={handlePageSizeChange}
+                            className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none"
+                        >
+                            <option value={10}>10 per page</option>
+                            <option value={15}>15 per page</option>
+                            <option value={25}>25 per page</option>
+                            <option value={50}>50 per page</option>
+                        </select>
+                    </div>
+
+                    <div className="flex gap-2">
+                        <button
+                            disabled={currentPage === 1}
+                            onClick={() => handlePageChange(currentPage - 1)}
+                            className={`px-3 py-1 border rounded ${
+                                currentPage === 1 ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "hover:bg-gray-50"
+                            }`}
+                        >
+                            Prev
+                        </button>
+
+                        {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                            let pageNum;
+                            if (totalPages <= 5) pageNum = i + 1;
+                            else if (currentPage <= 3) pageNum = i + 1;
+                            else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                            else pageNum = currentPage - 2 + i;
+
+                            return (
+                                <button
+                                    key={pageNum}
+                                    onClick={() => handlePageChange(pageNum)}
+                                    className={`px-3 py-1 border rounded ${
+                                        currentPage === pageNum ? "bg-blue-600 text-white" : "hover:bg-gray-50"
+                                    }`}
+                                >
+                                    {pageNum}
+                                </button>
+                            );
+                        })}
+
+                        <button
+                            disabled={currentPage === totalPages}
+                            onClick={() => handlePageChange(currentPage + 1)}
+                            className={`px-3 py-1 border rounded ${
+                                currentPage === totalPages ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "hover:bg-gray-50"
+                            }`}
+                        >
+                            Next
+                        </button>
+                    </div>
                 </div>
-
-                <div className="flex gap-2">
-                    <button
-                        disabled={currentPage === 1}
-                        onClick={() => handlePageChange(currentPage - 1)}
-                        className={`px-3 py-1 border rounded ${
-                            currentPage === 1 
-                                ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                : 'hover:bg-gray-50'
-                        }`}
-                    >
-                        Prev
-                    </button>
-
-                    {/* Page Numbers */}
-                    {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                        let pageNum;
-                        if (totalPages <= 5) {
-                            pageNum = i + 1;
-                        } else if (currentPage <= 3) {
-                            pageNum = i + 1;
-                        } else if (currentPage >= totalPages - 2) {
-                            pageNum = totalPages - 4 + i;
-                        } else {
-                            pageNum = currentPage - 2 + i;
-                        }
-                        
-                        return (
-                            <button
-                                key={pageNum}
-                                onClick={() => handlePageChange(pageNum)}
-                                className={`px-3 py-1 border rounded ${
-                                    currentPage === pageNum 
-                                        ? "bg-blue-600 text-white" 
-                                        : "hover:bg-gray-50"
-                                }`}
-                            >
-                                {pageNum}
-                            </button>
-                        );
-                    })}
-
-                    <button
-                        disabled={currentPage === totalPages || totalPages === 0}
-                        onClick={() => handlePageChange(currentPage + 1)}
-                        className={`px-3 py-1 border rounded ${
-                            currentPage === totalPages || totalPages === 0
-                                ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                : 'hover:bg-gray-50'
-                        }`}
-                    >
-                        Next
-                    </button>
-                </div>
-            </div>
+            )}
         </div>
     );
 };

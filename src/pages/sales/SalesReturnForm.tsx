@@ -4,6 +4,7 @@ import * as Yup from "yup";
 import {
   FaSearch, FaArrowLeft, FaBuilding, FaPhone,
   FaMapMarkerAlt, FaHistory, FaChevronDown, FaChevronUp,
+  FaDotCircle,
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -316,80 +317,114 @@ const BillSummaryPanel: React.FC<{ summary: BillSummary }> = ({ summary }) => {
     </div>
   );
 };
+
 /* ─────────────────────────── Bill Search Modal ─────────────────────────── */
 const BillSearchModal = ({ isOpen, onClose, onSelectBill }: any) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const reqId = React.useRef(0);
+  const PAGE = 20;
 
-  useEffect(() => { if (isOpen) loadBills(""); }, [isOpen]);
-
-  const loadBills = async (search: string) => {
+  const loadBills = async (search: string, offset = 0) => {
+    const id = ++reqId.current;
     setLoading(true);
     try {
-      const res = await api.get(`sales-bill-search/?type=sales&query=${search}`);
-      setBills(res.data.bills || []);
-    } catch { toast.error("Failed to load bills"); }
-    finally { setLoading(false); }
+      const res = await api.get("sales-bill-search/", {
+        params: { type: "sales", query: search, limit: PAGE, offset },
+      });
+      if (id !== reqId.current) return;
+      const rows = res.data.bills || [];
+      setBills(prev => (offset ? [...prev, ...rows] : rows));
+      setHasMore(!!res.data.has_more);
+    } catch {
+      if (id === reqId.current) toast.error("Failed to load bills");
+    } finally {
+      if (id === reqId.current) setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    if (!isOpen) { setSearchTerm(""); setBills([]); setHasMore(false); return; }
+    const t = setTimeout(() => { loadBills(searchTerm, 0); }, searchTerm ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [isOpen, searchTerm]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-lg w-full max-w-4xl max-h-[85vh] overflow-hidden">
-        <div className="flex justify-between items-center px-4 py-3 border-b bg-blue-600 text-white">
-          <h3 className="text-base font-semibold">Search Sales Bill</h3>
-          <button onClick={onClose} className="text-white hover:text-gray-200 text-xl">✕</button>
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden">
+        <div className="flex justify-between items-center px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <FaSearch /> Search Sales Bill
+          </h3>
+          <button onClick={onClose} className="hover:bg-white/20 rounded p-1">✕</button>
         </div>
         <div className="p-4">
-          <div className="relative">
-            <input type="text" placeholder="Search by Bill No or Customer Name..."
-              value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); loadBills(e.target.value); }}
-              className="w-full p-2 pl-8 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <FaSearch className="absolute left-2 top-3 text-gray-400" />
-          </div>
-          <div className="mt-4 overflow-y-auto max-h-[60vh]">
-            {loading ? (
+          <input
+            type="text"
+            placeholder="Search by Bill No or Customer..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm mb-3"
+            autoFocus
+          />
+
+          <div className="max-h-[400px] overflow-y-auto border rounded-lg">
+            {loading && bills.length === 0 ? (
               <div className="text-center py-8">
                 <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-                <p className="mt-2 text-gray-500">Loading bills…</p>
+                <p className="mt-2 text-gray-500 text-sm">Loading...</p>
               </div>
             ) : bills.length === 0 ? (
-              <div className="text-center py-12 text-gray-500">
-                <FaSearch className="text-gray-300 text-5xl mx-auto mb-3" />
-                <p>No bills found</p>
-              </div>
+              <div className="text-center py-8 text-gray-500 text-sm">No bills found</div>
             ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-gray-100 sticky top-0">
-                  <tr>
-                    <th className="p-2 text-left">Bill No</th>
-                    <th className="p-2 text-left">Customer</th>
-                    <th className="p-2 text-left">Date</th>
-                    <th className="p-2 text-right">Amount</th>
-                    <th className="p-2 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bills.map((bill) => (
-                    <tr key={bill.id} className="border-b hover:bg-gray-50">
-                      <td className="p-2 font-medium text-blue-600">{bill.billNo}</td>
-                      <td className="p-2">{bill.partyName__account_name}</td>
-                      <td className="p-2">{bill.date}</td>
-                      <td className="p-2 text-right">₹{Number(bill.grand_total).toFixed(2)}</td>
-                      <td className="p-2 text-center">
-                        <button onClick={(e) => { e.stopPropagation(); onSelectBill(bill); }}
-                          className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700">
-                          Select
-                        </button>
-                      </td>
+              <>
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-100 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Bill No</th>
+                      <th className="px-3 py-2 text-left">Date</th>
+                      <th className="px-3 py-2 text-left">Customer</th>
+                      <th className="px-3 py-2 text-right">Amount</th>
+                      <th className="px-3 py-2 text-center">Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {bills.map((bill) => (
+                      <tr key={bill.id} className="border-t hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{bill.billNo}</td>
+                        <td className="px-3 py-2">{bill.date}</td>
+                        <td className="px-3 py-2">{bill.partyName__account_name}</td>
+                        <td className="px-3 py-2 text-right">₹{Number(bill.grand_total || 0).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => onSelectBill(bill)}
+                            className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
+                          >
+                            Select
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {loading && (
+                  <div className="text-center py-3 text-gray-500 text-xs">Loading more...</div>
+                )}
+                {hasMore && !loading && (
+                  <div className="text-center py-3">
+                    <button type="button" onClick={() => loadBills(searchTerm, bills.length)}
+                      className="px-6 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">
+                      Load more
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -480,6 +515,7 @@ const SalesReturnForm: React.FC = () => {
   const [bankAccounts, setBankAccounts] = useState<any[]>([]);
   /** Bill payment/return summary */
   const [billSummary, setBillSummary] = useState<BillSummary | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const paymentTerms = ["Credit", "Cash", "Bank"];
   const returnReasons = ["Damaged", "Expired", "Wrong Item", "Defective", "Quality Issue", "Other"];
@@ -611,6 +647,8 @@ const SalesReturnForm: React.FC = () => {
   };
 
   const handleSubmit = async (values: FormValues) => {
+    if (isSubmitting) return;
+
     const selectedItems = billItems.filter(i => i.return_quantity > 0);
     if (selectedItems.length === 0) { toast.error("Please select at least one item to return"); return; }
     if (!values.customer || values.customer === 0) { toast.error("Please select a customer"); return; }
@@ -657,6 +695,7 @@ const SalesReturnForm: React.FC = () => {
       })),
     };
 
+    setIsSubmitting(true);
     try {
       const res = await api.post("/sales-return-create/", payload);
       if (res.data.stock_alerts?.length) res.data.stock_alerts.forEach((a: string) => toast.warning(a));
@@ -674,6 +713,8 @@ const SalesReturnForm: React.FC = () => {
       } else {
         toast.error(msg);
       }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -693,6 +734,7 @@ const SalesReturnForm: React.FC = () => {
       </div>
 
       <Formik initialValues={initialValues} validationSchema={validationSchema}
+        validateOnChange={false}
         onSubmit={handleSubmit} enableReinitialize>
         {({ values, setFieldValue }) => {
           React.useEffect(() => {
@@ -847,13 +889,13 @@ const SalesReturnForm: React.FC = () => {
 
               {/* ── Bottom Action Bar ─────────────────────────────────── */}
               <div className="col-span-full flex fixed bottom-0 left-0 right-0 bg-white p-3 shadow-lg gap-3 flex-wrap justify-center z-10 border-t">
-                <button type="submit" disabled={!selectedBill || !hasSelectedItems}
+                <button type="submit" disabled={!selectedBill || !hasSelectedItems || isSubmitting}
                   className={`px-6 py-2 rounded text-sm font-semibold transition ${
-                    selectedBill && hasSelectedItems
+                    selectedBill && hasSelectedItems && !isSubmitting
                       ? "bg-blue-600 text-white hover:bg-blue-700 shadow-md"
                       : "bg-gray-300 text-gray-500 cursor-not-allowed"
                   }`}>
-                  Save Return
+                  {isSubmitting ? "Saving..." : "Save Return"}
                 </button>
 
                 <button type="button" onClick={() => navigate("/salesReturnList")}

@@ -1,23 +1,12 @@
 // src/pages/superadmin/B2BSales.tsx
 // B2B SALES — Superadmin to Franchise branch stock "sell"
-// Difference from Stock Transfer: Stock is deducted immediately on creation
-// (Verification is only for franchise branch stock ADD — B2BSalesVerify.tsx)
-// + HOLD / RESUME feature (localStorage based, same pattern as Stock Transfer)
+// Stock is deducted immediately on creation. HOLD / RESUME feature (localStorage).
 //
-// FIXES APPLIED:
-// 1. Rate field is now editable (was read-only). GST calc is STILL fully
-//    server-driven (b2b-sales/item-tax/ API) exactly as before — the only
-//    change is that the edited `rate` is now sent in the request so the
-//    backend computes basic/tax/net (and CGST+SGST vs IGST based on the
-//    destination branch's state) using YOUR entered rate instead of always
-//    recomputing from the default branch price.
-//    IMPORTANT: this requires the backend `b2b-sales/item-tax/` endpoint to
-//    accept an optional `rate` field and use it when present. If it currently
-//    ignores `rate` and always looks up branch_price itself, the backend
-//    needs that one small change too — otherwise editing Rate on the frontend
-//    won't change the calculated GST.
-// 2. Item-select modal no longer shows stale filtered results after reopening —
-//    searchTerm + filteredItems are reset on open, on select, and on close.
+// PERFORMANCE CHANGE:
+// Items ab pehle se load nahi hote. Item-select modal khulne par backend se sirf
+// 50 items aate hain; search bhi backend par hota hai (debounced); "Load More"
+// se agle 50 aate hain (keyset cursor). 2 lakh items me bhi load time same rahega.
+// Barcode scan backend se exact barcode match karta hai.
 
 import React, { useEffect, useRef, useState } from "react";
 import { Formik, Form, useField } from "formik";
@@ -37,7 +26,7 @@ import { toast } from "react-toastify";
 // ─── Hold Storage Types & Helpers ─────────────────────────────────────
 interface HeldSale {
   holdId: string;
-  heldAt: string;           // ISO timestamp
+  heldAt: string;
   sale_date: string;
   to_branch_id: number;
   to_branch_name: string;
@@ -66,6 +55,33 @@ const saveHolds = (holds: HeldSale[]) => {
   }
 };
 
+// ─── Items API helpers ────────────────────────────────────────────────
+const ITEMS_PAGE_LIMIT = 50;
+
+// Backend ka nested (item -> variants) response ko flat variant rows me badlo
+const flattenItems = (nested: any[]): any[] => {
+  const flat: any[] = [];
+  nested.forEach((it: any) => {
+    (it.variants || []).forEach((v: any) => {
+      flat.push({
+        variantId: v.variant_id,
+        itemName: it.item_name,
+        hsnCode: it.hsnCode,
+        taxSlab: v.taxSlab || it.taxSlab || "0",
+        barcode: v.barcode || "",
+        display: v.display,
+        size: v.size,
+        color: v.color,
+        unit: it.unit || "pc",
+        unit_name: it.unit_name || "",
+        current_stock: v.current_stock || 0,
+        branch_price: v.branch_price || 0,
+      });
+    });
+  });
+  return flat;
+};
+
 // ─── Empty item template ──────────────────────────────────────────────
 const emptyCurrentItem = {
   variantId: null as number | null,
@@ -76,7 +92,7 @@ const emptyCurrentItem = {
   quantity: "" as any,
   rate: 0,
   taxSlab: "",
-  isInterState: false,   // captured once from server per item/branch pair; drives CGST+SGST vs IGST split
+  isInterState: false,
   availableStock: 0,
   basicAmount: "0.00",
   taxAmount: "0.00",
@@ -177,7 +193,7 @@ const FranchiseBranchSelect: React.FC<{ name: string; branches: any[]; loading: 
   );
 };
 
-// ─── Selected Branch Details Card (blue box, GST-summary jaisa) ────────
+// ─── Selected Branch Details Card ─────────────────────────────────────
 const BranchDetailsCard: React.FC<{ branch: any }> = ({ branch }) => {
   if (!branch) return null;
 
@@ -221,12 +237,11 @@ const BranchDetailsCard: React.FC<{ branch: any }> = ({ branch }) => {
   );
 };
 
-// ─── Barcode Scanner ──────────────────────────────────────────────────
+// ─── Barcode Scanner (backend exact-match, local list par depend nahi) ─
 const BarcodeScannerInput: React.FC<{
-  flatItems: any[];
   toBranchId: number;
   onItemSelected: (row: any) => void;
-}> = ({ flatItems, toBranchId, onItemSelected }) => {
+}> = ({ toBranchId, onItemSelected }) => {
   const [barcodeValue, setBarcodeValue] = useState("");
   const [scanning, setScanning] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -248,58 +263,21 @@ const BarcodeScannerInput: React.FC<{
 
     setScanning(true);
     try {
-      const localMatch = flatItems.find(
-        (item) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
-      );
-
-      if (localMatch) {
-        if ((localMatch.current_stock || 0) <= 0) {
-          toast.error(`Item "${localMatch.itemName}" is out of stock`);
-        } else {
-          onItemSelected(localMatch);
-          toast.success(`✓ Item selected: ${localMatch.itemName}`);
-        }
-        setBarcodeValue("");
-        setScanning(false);
-        inputRef.current?.focus();
-        return;
-      }
-
       const res = await api.get(
-        `b2b-sales/my-branch-items/?query=${encodeURIComponent(trimmed)}`
+        `b2b-sales/my-branch-items/?barcode=${encodeURIComponent(trimmed)}&limit=5`
       );
-      const nested = res.data.data || [];
-      const flatFromApi: any[] = [];
-      nested.forEach((it: any) => {
-        (it.variants || []).forEach((v: any) => {
-          flatFromApi.push({
-            variantId: v.variant_id,
-            itemName: it.item_name,
-            hsnCode: it.hsnCode,
-            taxSlab: v.taxSlab || it.taxSlab || "0",
-            barcode: v.barcode || "",
-            display: v.display,
-            size: v.size,
-            color: v.color,
-            unit: it.unit || "pc",
-            unit_name: it.unit_name || "",
-            current_stock: v.current_stock || 0,
-            branch_price: v.branch_price || 0,
-          });
-        });
-      });
-
-      const apiMatch = flatFromApi.find(
+      const flat = flattenItems(res.data.data || []);
+      const match = flat.find(
         (item) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
       );
 
-      if (!apiMatch) {
-        toast.error(`No item found with barcode "${trimmed}"`);
-      } else if ((apiMatch.current_stock || 0) <= 0) {
-        toast.error(`Item "${apiMatch.itemName}" is out of stock`);
+      if (!match) {
+        toast.error(`No in-stock item found with barcode "${trimmed}"`);
+      } else if ((match.current_stock || 0) <= 0) {
+        toast.error(`Item "${match.itemName}" is out of stock`);
       } else {
-        onItemSelected(apiMatch);
-        toast.success(`✓ Item selected: ${apiMatch.itemName}`);
+        onItemSelected(match);
+        toast.success(`✓ Item selected: ${match.itemName}`);
       }
     } catch (err) {
       console.error("Barcode search error:", err);
@@ -433,9 +411,15 @@ const B2BSales: React.FC = () => {
   const [franchiseBranches, setFranchiseBranches] = useState<any[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
 
+  // ── Item modal state (server-side search + load more) ──
   const [flatItems, setFlatItems] = useState<any[]>([]);
-  const [filteredItems, setFilteredItems] = useState<any[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const itemsReqIdRef = useRef(0);
+
   const [openModal, setOpenModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [savedSaleNo, setSavedSaleNo] = useState<string>("");
@@ -456,36 +440,43 @@ const B2BSales: React.FC = () => {
     setHolds(loadHolds());
   }, []);
 
-  // ── Fetch superadmin's own items, flatten for barcode/search ──
+  // ── Fetch ek batch (50) items. cursor null = fresh list, warna append ──
+  const fetchItems = async (search: string, cursor: number | null) => {
+    const reqId = ++itemsReqIdRef.current;
+    setItemsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: String(ITEMS_PAGE_LIMIT) });
+      if (search) params.set("query", search);
+      if (cursor) params.set("after_id", String(cursor));
+
+      const res = await api.get(`b2b-sales/my-branch-items/?${params.toString()}`);
+      if (reqId !== itemsReqIdRef.current) return; // purani request ignore
+
+      const flat = flattenItems(res.data.data || []);
+      setFlatItems((prev) => (cursor ? [...prev, ...flat] : flat));
+      setHasMore(!!res.data.has_more);
+      setNextCursor(res.data.next_cursor ?? null);
+    } catch (e) {
+      if (reqId !== itemsReqIdRef.current) return;
+      console.error("Failed to load items", e);
+      toast.error("Failed to load items");
+    } finally {
+      if (reqId === itemsReqIdRef.current) setItemsLoading(false);
+    }
+  };
+
+  // ── Search debounce (typing rukne ke 400ms baad) ──
   useEffect(() => {
-    api.get("b2b-sales/my-branch-items/")
-      .then((res) => {
-        const nested = res.data.data || [];
-        const flat: any[] = [];
-        nested.forEach((it: any) => {
-          (it.variants || []).forEach((v: any) => {
-            flat.push({
-              variantId: v.variant_id,
-              itemName: it.item_name,
-              hsnCode: it.hsnCode,
-              taxSlab: v.taxSlab || it.taxSlab || "0",
-              barcode: v.barcode || "",
-              display: v.display,
-              size: v.size,
-              color: v.color,
-              unit: it.unit || "pc",
-              unit_name: it.unit_name || "",
-              current_stock: v.current_stock || 0,
-              branch_price: v.branch_price || 0,
-            });
-          });
-        });
-        setFlatItems(flat);
-        setFilteredItems(flat);
-        if (flat.length === 0) toast.info("No transferrable items found in your branch.");
-      })
-      .catch(() => toast.error("Failed to load items"));
-  }, []);
+    const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // ── Modal khulne par ya search badalne par fresh first batch ──
+  useEffect(() => {
+    if (!openModal) return;
+    fetchItems(debouncedSearch, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openModal, debouncedSearch]);
 
   // ── Fetch next sale number preview ──
   useEffect(() => {
@@ -505,11 +496,7 @@ const B2BSales: React.FC = () => {
       .finally(() => setBranchesLoading(false));
   }, []);
 
-  // ── STEP 1: on item (variant) or destination branch change, ask the
-  // server ONCE whether this branch relationship is intra-state
-  // (CGST+SGST) or inter-state (IGST). We do NOT use the server's amounts
-  // for money — only this yes/no flag — because the backend was ignoring
-  // an edited rate and always recalculating from its own branch_price.
+  // ── STEP 1: server se sirf intra-state / inter-state flag lo ──
   useEffect(() => {
     if (!currentItem.variantId || !selectedToBranchId) {
       setCurrentItem((prev) => ({
@@ -537,12 +524,8 @@ const B2BSales: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentItem.variantId, selectedToBranchId]);
 
-  // ── STEP 2: actual money calculation — always local, always driven by
-  // whatever Rate is currently in the field (default or manually edited).
-  // Formula (matches your existing business data exactly):
-  //   net   = rate × qty
-  //   tax   = net × taxSlab% / 100
-  //   basic = net − tax
+  // ── STEP 2: local money calculation (rate editable) ──
+  //   net = rate × qty ; tax = net × taxSlab% / 100 ; basic = net − tax
   useEffect(() => {
     if (!currentItem.variantId || !selectedToBranchId) return;
     const qty = Number(currentItem.quantity) || 0;
@@ -671,7 +654,6 @@ const B2BSales: React.FC = () => {
     setHolds(updated);
     saveHolds(updated);
 
-    // Reset the form
     setAddedItems([]);
     setIdCounter(1);
     setCurrentItem({ ...emptyCurrentItem });
@@ -687,13 +669,11 @@ const B2BSales: React.FC = () => {
     setFieldValue("to_branch_id", hold.to_branch_id);
     setFieldValue("note", hold.note || "");
 
-    // Restore items with fresh ids
     const restoredItems = hold.items.map((it, idx) => ({ ...it, id: idx + 1 }));
     setAddedItems(restoredItems);
     setIdCounter(restoredItems.length + 1);
     setSelectedToBranchId(hold.to_branch_id);
 
-    // Remove from hold list
     const updated = holds.filter((h) => h.holdId !== hold.holdId);
     setHolds(updated);
     saveHolds(updated);
@@ -762,21 +742,26 @@ const B2BSales: React.FC = () => {
 
   const handleDeleteAll = () => { setAddedItems([]); setIdCounter(1); };
 
-  // ── FIX #3: single helper to open the item-select modal with a clean
-  // search state, so stale filtered results never carry over from a
-  // previous search.
+  // ── Modal open: clean search state; effect first 50 items fetch karega ──
   const openItemSelectModal = () => {
     if (!selectedToBranchId) { toast.error("Please select destination branch first"); return; }
     setSearchTerm("");
-    setFilteredItems(flatItems);
+    setDebouncedSearch("");
+    setFlatItems([]);
+    setHasMore(false);
+    setNextCursor(null);
     setOpenModal(true);
   };
 
-  // ── FIX #3: single helper to close the modal and reset search state.
   const closeItemSelectModal = () => {
     setOpenModal(false);
     setSearchTerm("");
-    setFilteredItems(flatItems);
+    setDebouncedSearch("");
+  };
+
+  const handleLoadMore = () => {
+    if (itemsLoading || !hasMore || !nextCursor) return;
+    fetchItems(debouncedSearch, nextCursor);
   };
 
   return (
@@ -800,19 +785,17 @@ const B2BSales: React.FC = () => {
         </div>
 
         <Formik initialValues={initialValues} validationSchema={validationSchema} onSubmit={handleSubmit}>
-{({ values, setFieldValue, resetForm }) => {
-  // ✅ NEW: branch sync (useEffect ki jagah)
-  const currentBranchId = Number(values.to_branch_id) || 0;
-  if (currentBranchId !== selectedToBranchId) {
-    setTimeout(() => setSelectedToBranchId(currentBranchId), 0);
-  }
+          {({ values, setFieldValue, resetForm }) => {
+            const currentBranchId = Number(values.to_branch_id) || 0;
+            if (currentBranchId !== selectedToBranchId) {
+              setTimeout(() => setSelectedToBranchId(currentBranchId), 0);
+            }
 
-  // ✅ NEW: resume handler register karo
-  resumeHandlerRef.current = (hold: HeldSale) => {
-    handleResumeHold(hold, setFieldValue);
-  };
+            resumeHandlerRef.current = (hold: HeldSale) => {
+              handleResumeHold(hold, setFieldValue);
+            };
 
-  const totals = calculateTotals(addedItems);
+            const totals = calculateTotals(addedItems);
             const selectedBranchDetails = franchiseBranches.find(
               (b) => b.id === selectedToBranchId
             ) || null;
@@ -841,14 +824,12 @@ const B2BSales: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* ── Selected Branch Details (blue box) ── */}
                   {selectedBranchDetails && (
                     <BranchDetailsCard branch={selectedBranchDetails} />
                   )}
 
                   {/* ── Barcode Scanner ── */}
                   <BarcodeScannerInput
-                    flatItems={flatItems}
                     toBranchId={selectedToBranchId}
                     onItemSelected={(row: any) => {
                       applyItemToForm(row);
@@ -871,7 +852,6 @@ const B2BSales: React.FC = () => {
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2 items-end">
 
-                      {/* Select Item button */}
                       <div className="flex flex-col justify-end">
                         <button
                           type="button"
@@ -886,7 +866,6 @@ const B2BSales: React.FC = () => {
                         {currentItemErrors.variantId && <p className="text-xs text-red-500 mt-1">{currentItemErrors.variantId}</p>}
                       </div>
 
-                      {/* HSN Code */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">HSN</label>
                         <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-700 font-mono">
@@ -894,7 +873,6 @@ const B2BSales: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Quantity */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">Qty</label>
                         <input
@@ -913,7 +891,6 @@ const B2BSales: React.FC = () => {
                         {currentItemErrors.quantity && <p className="text-xs text-red-500">{currentItemErrors.quantity}</p>}
                       </div>
 
-                      {/* Rate — FIX #1: now editable instead of read-only display */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">Rate</label>
                         <input
@@ -934,7 +911,6 @@ const B2BSales: React.FC = () => {
                         {currentItemErrors.rate && <p className="text-xs text-red-500">{currentItemErrors.rate}</p>}
                       </div>
 
-                      {/* Unit */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">Unit</label>
                         <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-700 font-mono">
@@ -942,7 +918,6 @@ const B2BSales: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Tax% */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">Tax%</label>
                         <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-700 font-mono">
@@ -950,7 +925,6 @@ const B2BSales: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Net Value */}
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-gray-700">Net</label>
                         <div className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm text-blue-700 font-bold font-mono">
@@ -958,7 +932,6 @@ const B2BSales: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Add to Cart button */}
                       <div className="flex flex-col justify-end">
                         <button
                           type="button"
@@ -1029,7 +1002,6 @@ const B2BSales: React.FC = () => {
                       <FaTrash /> Clear All
                     </button>
 
-                    {/* ── HOLD button ── */}
                     <button
                       type="button"
                       onClick={() => handleHold(values, resetForm)}
@@ -1055,7 +1027,6 @@ const B2BSales: React.FC = () => {
                       List
                     </button>
 
-                    {/* ── HOLD LIST button ── */}
                     <button
                       type="button"
                       onClick={() => setShowHoldListModal(true)}
@@ -1080,7 +1051,7 @@ const B2BSales: React.FC = () => {
                   </div>
                 </div>
 
-                {/* ── Item Selection Modal ── */}
+                {/* ── Item Selection Modal (server search + Load More) ── */}
                 <AnimatePresence>
                   {openModal && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-2">
@@ -1092,7 +1063,7 @@ const B2BSales: React.FC = () => {
                       >
                         <div className="flex justify-between items-center px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
                           <h3 className="text-lg font-semibold flex items-center gap-2"><FaBox /> Select Item Variant</h3>
-                          <button onClick={closeItemSelectModal} className="hover:bg-white/20 rounded-lg p-1 transition">
+                          <button type="button" onClick={closeItemSelectModal} className="hover:bg-white/20 rounded-lg p-1 transition">
                             <MdClose size={24} />
                           </button>
                         </div>
@@ -1102,27 +1073,20 @@ const B2BSales: React.FC = () => {
                               type="text"
                               placeholder="Search item, HSN, barcode..."
                               value={searchTerm}
+                              autoFocus
                               onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-                              onChange={(e) => {
-                                const term = e.target.value.toLowerCase();
-                                setSearchTerm(e.target.value);
-                                setFilteredItems(
-                                  flatItems.filter(
-                                    (item) =>
-                                      item.itemName?.toLowerCase().includes(term) ||
-                                      item.hsnCode?.toLowerCase().includes(term) ||
-                                      (item.barcode && item.barcode.toLowerCase().includes(term))
-                                  )
-                                );
-                              }}
+                              onChange={(e) => setSearchTerm(e.target.value)}
                               className="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
                             />
-                            <div className="px-3 py-1.5 bg-gray-100 rounded-lg text-sm text-gray-600">
-                              <span className="font-semibold">{filteredItems.length}</span> items in stock
+                            <div className="px-3 py-1.5 bg-gray-100 rounded-lg text-sm text-gray-600 flex items-center gap-2">
+                              <span className="font-semibold">{flatItems.length}</span> loaded
+                              {itemsLoading && (
+                                <span className="inline-block animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></span>
+                              )}
                             </div>
                           </div>
 
-                          <div className="border rounded-lg overflow-x-auto max-h-[420px]">
+                          <div className="border rounded-lg overflow-x-auto max-h-[420px] overflow-y-auto">
                             <table className="w-full text-sm min-w-[800px]">
                               <thead className="bg-gradient-to-r from-blue-600 to-blue-700 text-white sticky top-0">
                                 <tr>
@@ -1137,8 +1101,8 @@ const B2BSales: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody>
-                                {filteredItems.map((row, idx) => (
-                                  <tr key={idx} className="border-b hover:bg-gray-50 transition">
+                                {flatItems.map((row) => (
+                                  <tr key={row.variantId} className="border-b hover:bg-gray-50 transition">
                                     <td className="px-2 py-2 text-center">
                                       <button
                                         type="button"
@@ -1168,15 +1132,42 @@ const B2BSales: React.FC = () => {
                                     <td className="px-2 py-2 text-center">{row.taxSlab}</td>
                                   </tr>
                                 ))}
-                                {filteredItems.length === 0 && (
+                                {flatItems.length === 0 && !itemsLoading && (
                                   <tr>
                                     <td colSpan={8} className="text-center py-10 text-gray-500">
-                                      No items with stock available
+                                      {debouncedSearch ? "No items match your search" : "No items with stock available"}
+                                    </td>
+                                  </tr>
+                                )}
+                                {flatItems.length === 0 && itemsLoading && (
+                                  <tr>
+                                    <td colSpan={8} className="text-center py-10 text-gray-400">
+                                      Loading items...
                                     </td>
                                   </tr>
                                 )}
                               </tbody>
                             </table>
+
+                            {hasMore && (
+                              <div className="flex justify-center p-3 border-t bg-gray-50">
+                                <button
+                                  type="button"
+                                  onClick={handleLoadMore}
+                                  disabled={itemsLoading}
+                                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm disabled:opacity-50 flex items-center gap-2"
+                                >
+                                  {itemsLoading ? (
+                                    <>
+                                      <span className="inline-block animate-spin rounded-full h-3 w-3 border-b-2 border-white"></span>
+                                      Loading...
+                                    </>
+                                  ) : (
+                                    "Load More"
+                                  )}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="flex justify-center p-4 pt-0">
@@ -1255,20 +1246,19 @@ const B2BSales: React.FC = () => {
                               </div>
                             </div>
                             <div className="flex gap-2">
-<button
-  type="button"
-  onClick={() => {
-    // ✅ NEW: ref se handler call karo
-    if (resumeHandlerRef.current) {
-      resumeHandlerRef.current(h);
-    } else {
-      toast.error("Resume handler not ready. Please try again.");
-    }
-  }}
-  className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-1 text-xs"
->
-  <FaPlay size={10} /> Resume
-</button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (resumeHandlerRef.current) {
+                                    resumeHandlerRef.current(h);
+                                  } else {
+                                    toast.error("Resume handler not ready. Please try again.");
+                                  }
+                                }}
+                                className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-1 text-xs"
+                              >
+                                <FaPlay size={10} /> Resume
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteHold(h.holdId)}
@@ -1279,7 +1269,6 @@ const B2BSales: React.FC = () => {
                             </div>
                           </div>
 
-                          {/* Items preview */}
                           <div className="mt-3 pt-3 border-t border-gray-200">
                             <div className="flex flex-wrap gap-1.5">
                               {h.items.slice(0, 5).map((it: any, i: number) => (

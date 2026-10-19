@@ -98,99 +98,27 @@ export const menuItems: MenuCategory[] = [
       },
     ],
   },
-  {
-    items: [
-      {
-        title: "Order Items",
-        icon: <FaShoppingCart size={20} />,
-        to: "/order-items",
-        submenu: [],
-      },
-    ],
-  },
-  {
-    items: [
-      {
-        title: "Stock Verification",
-        icon: <FaCheckCircle size={20} />,
-        to: "/stock-verification",
-        submenu: [],
-      },
-    ],
-  },
-  {
-    items: [
-      {
-        title: "Stock Return",
-        icon: <FaCheckCircle size={20} />,
-        to: "/stockReturn",
-        submenu: [],
-      },
-    ],
-  },
+{
+  items: [
     {
-    items: [
-      {
-        title: "B2B Stock Return",
-        icon: <FaCheckCircle size={20} />,
-        to: "/b2bstockReturn",
-        submenu: [],
-      },
-    ],
-  },
-  {
-    items: [
-      {
-        title: "Stock Return Verification",
-        icon: <FaCheckCircle size={20} />,
-        to: "/stockReturnverification",
-        submenu: [],
-      },
-    ],
-  },
-    {
-    items: [
-      {
-        title: "B2B Stock Returns",
-        icon: <FaCheckCircle size={20} />,
-        to: "/b2bstockReturnverification",
-        submenu: [],
-      },
-    ],
-  },
-  {
-    items: [
-      {
-        title: "Stock Transfer",
-        icon: <FaExchangeAlt size={20} />,
-        to: "/stockTransfer",
-        submenu: [],
-      },
-    ],
-  },
-    {
-    items: [
-      {
-        title: "Import - Stock Transfer",
-        icon: <FaExchangeAlt size={20} />,
-        to: "/stockTransferExcel",
-        submenu: [],
-      },
-    ],
-  },
-    {
-    items: [
-      {
-        title: "B2B Stock Transfer",
-        icon: <FaExchangeAlt size={20} />,
-        submenu: [
-
-          {name:"Send Order", to: "/B2BOrderRequest"},
-          {name:"Received orders" , to:"/B2BStockTransfer"},
-        ],
-      },
-    ],
-  },
+      title: "Stock Master",
+      icon: <MdOutlineInventory2 size={20} />,
+      submenu: [
+        { name: "Stock Transfer", to: "/stockTransfer" },
+        { name: "Import - Stock Transfer", to: "/stockTransferExcel" },
+        { name: "Stock Return Verification", to: "/stockReturnverification" },
+        { name: "Order Items", to: "/order-items" },
+        { name: "Stock Verification", to: "/stock-verification" },
+        { name: "Stock Return", to: "/stockReturn" },
+        { name: "B2B Stock Returns", to: "/b2bstockReturnverification" },
+        { name: "Send Order", to: "/B2BOrderRequest" },
+        { name: "Receive Order", to: "/B2BStockTransfer" },
+        { name: "B2B Stock Return", to: "/b2bstockReturn" },
+        { name: "Stock Report", to: "/stock-report" },
+      ],
+    },
+  ],
+},
   {
     items: [
       {
@@ -239,16 +167,7 @@ export const menuItems: MenuCategory[] = [
       }
     ],
   },
-  {
-    items: [
-      {
-        title: "Stock Report",
-        icon: <MdOutlineInventory2 size={20} />,
-        to: "/stock-report",
-        submenu: [],
-      },
-    ],
-  },
+
     {
     items: [
       {
@@ -395,31 +314,45 @@ export const getSuperAdminMenuItems = (): MenuCategory[] => {
   return menuItems
     .map(category => ({
       ...category,
-      items: category.items
-        // purchase submenu se "B2B Purchase Verify" hataana
-        .map(item => {
-          if (item.title === "purchase" && item.submenu) {
-            return {
-              ...item,
-              submenu: item.submenu.filter(
-                sub => sub.name !== "B2B Purchase Verify"
-              )
-            };
-          }
-          return item;
-        })
-        // superadmin ke liye hide hone wale top-level items
-        .filter(item =>
-          item.title !== "Stock Verification" &&
-          item.title !== "Order Items" &&
-          item.title !== "Stock Return" &&
-          item.title !== "B2B Stock Return" &&
-          item.title !== "B2B Stock Transfer" &&
-          item.title !== "Scheme Offer Register"
-        )
+      items: category.items.map(item => {
+        if (item.title === "purchase" && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(
+              sub => sub.name !== "B2B Purchase Verify"
+            ),
+          };
+        }
+        return item;
+      }),
     }))
     .filter(category => category.items.length > 0);
 };
+
+const SUPERADMIN_STOCK_MENU = new Set([
+  "Stock Transfer",
+  "Import - Stock Transfer",
+  "Stock Return Verification",
+  "B2B Stock Returns",
+  "Stock Report",
+]);
+
+const BRANCH_STOCK_MENU = new Set([
+  "Order Items",
+  "Stock Verification",
+  "Stock Return",
+  "Send Order",
+  "Receive Order",
+  "B2B Stock Return",
+  "Stock Report",
+]);
+
+const FRANCHISE_STOCK_MENU = new Set([
+  "Order Items",
+  "Stock Verification",
+  "Stock Return",
+  "Stock Report",
+]);
 
 // ── Main AppLayout ──────────────────────────────────────────
 const AppLayout = ({ children }: { children: React.ReactNode }) => {
@@ -440,126 +373,208 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const [branchLogo, setBranchLogo] = useState<string | null>(null);
   const [branchName, setBranchName] = useState<string>("");
 
-const filteredMenuItems = React.useMemo(() => {
-  if (!menuItems) return [];
+  const filteredMenuItems = React.useMemo(() => {
+    if (!menuItems) return [];
 
-  const isEmployee = user?.role === "employee";
- 
-  if (isEmployee) {
-    const allowedKeys = new Set(permissions.filter(p => p.can_view).map(p => p.page_key));
+    const isEmployee = user?.role === "employee";
+    const isBranchRole =
+      user?.role === "branch" ||
+      user?.role === "branch_both" ||
+      user?.role === "branch_customer" ||
+      user?.role === "branch_agent" ||
+      user?.role === "branch_single";
+    const isBranchOrVendor = isBranchRole || user?.role === "vendor";
+
+    // Employee visibility remains permission-based.
+    if (isEmployee) {
+      const allowedKeys = new Set(
+        permissions.filter(p => p.can_view).map(p => p.page_key)
+      );
+
+      return menuItems
+        .map(category => ({
+          ...category,
+          items: category.items
+            .map(item => {
+              if (item.submenu && item.submenu.length > 0) {
+                return {
+                  ...item,
+                  submenu: item.submenu.filter(
+                    sub => sub.to && allowedKeys.has(sub.to)
+                  ),
+                };
+              }
+              return item;
+            })
+            .filter(item => {
+              if (item.title === "Logout" || item.title === "Dashboard") return true;
+              if (item.submenu && item.submenu.length > 0) return true;
+              if (item.to) return allowedKeys.has(item.to);
+              return false;
+            }),
+        }))
+        .filter(category => category.items.length > 0);
+    }
+
+    // ── SUPERADMIN ─────────────────────────────────────────────
+    if (isSuperAdmin) {
+      return menuItems
+        .map(category => ({
+          ...category,
+          items: category.items
+            .map(item => {
+              if (item.title === "Stock Master" && item.submenu) {
+                return {
+                  ...item,
+                  submenu: item.submenu.filter(sub =>
+                    SUPERADMIN_STOCK_MENU.has(sub.name)
+                  ),
+                };
+              }
+
+              if (item.title === "purchase" && item.submenu) {
+                return {
+                  ...item,
+                  submenu: item.submenu.filter(
+                    sub => sub.name !== "B2B Purchase Verify"
+                  ),
+                };
+              }
+
+              return item;
+            })
+            .filter(item => item.title !== "My Branches"),
+        }))
+        .filter(category => category.items.length > 0);
+    }
+
+    // ── BRANCH / FRANCHISE / VENDOR ───────────────────────────
+    if (isBranchOrVendor) {
+      const { branch } = useAuthStore.getState();
+      const isFranchise = branch?.ownership_type === "franchise";
+
+      // Vendor behavior stays unchanged: no Stock Master.
+      if (!isBranchRole) {
+        return menuItems
+          .map(category => ({
+            ...category,
+            items: category.items
+              .map(item => {
+                if (item.title === "Master" && item.submenu) {
+                  return {
+                    ...item,
+                    submenu: item.submenu.filter(
+                      sub => sub.name !== "Branch Master"
+                    ),
+                  };
+                }
+                if (item.title === "sales" && item.submenu) {
+                  return {
+                    ...item,
+                    submenu: item.submenu.filter(
+                      sub =>
+                        sub.name !== "B2B Sales" &&
+                        sub.name !== "Import - B2B Sales"
+                    ),
+                  };
+                }
+                return item;
+              })
+              .filter(item =>
+                item.title !== "Stock Master" &&
+                item.title !== "Stock Transfer" &&
+                item.title !== "Import - Stock Transfer" &&
+                item.title !== "Stock Return Verification" &&
+                item.title !== "B2B Stock Returns" &&
+                item.title !== "Scheme Offers" &&
+                item.title !== "Employee Management" &&
+                (item.title !== "My Branches" || isFranchise)
+              ),
+          }))
+          .filter(category => category.items.length > 0);
+      }
+
+      return menuItems
+        .map(category => ({
+          ...category,
+          items: category.items
+            .map(item => {
+              if (item.title === "Master" && item.submenu) {
+                return {
+                  ...item,
+                  submenu: item.submenu.filter(
+                    sub => sub.name !== "Branch Master"
+                  ),
+                };
+              }
+
+              if (item.title === "sales" && item.submenu) {
+                return {
+                  ...item,
+                  submenu: item.submenu.filter(
+                    sub =>
+                      sub.name !== "B2B Sales" &&
+                      sub.name !== "Import - B2B Sales"
+                  ),
+                };
+              }
+
+              if (item.title === "Stock Master" && item.submenu) {
+                const allowedStockMenu = isFranchise
+                  ? FRANCHISE_STOCK_MENU
+                  : BRANCH_STOCK_MENU;
+
+                return {
+                  ...item,
+                  submenu: item.submenu.filter(sub =>
+                    allowedStockMenu.has(sub.name)
+                  ),
+                };
+              }
+
+              return item;
+            })
+            .filter(item =>
+              item.title !== "Stock Transfer" &&
+              item.title !== "Import - Stock Transfer" &&
+              item.title !== "Stock Verification" &&
+              item.title !== "Stock Return" &&
+              item.title !== "Stock Return Verification" &&
+              item.title !== "Order Items" &&
+              item.title !== "B2B Stock Return" &&
+              item.title !== "B2B Stock Returns" &&
+              item.title !== "B2B Stock Transfer" &&
+              item.title !== "Scheme Offers" &&
+              item.title !== "Employee Management" &&
+              (item.title !== "My Branches" || isFranchise)
+            ),
+        }))
+        .filter(category => category.items.length > 0);
+    }
+
+    // ── OTHER ROLES ────────────────────────────────────────────
+    // Existing behavior preserved: stock remains hidden for other roles.
     return menuItems
       .map(category => ({
         ...category,
-        items: category.items
-          .map(item => {
-            if (item.submenu && item.submenu.length > 0) {
-              return { ...item, submenu: item.submenu.filter(sub => sub.to && allowedKeys.has(sub.to)) };
-            }
-            return item;
-          })
-          .filter(item => {
-            if (item.title === "Logout" || item.title === "Dashboard") return true;
-            if (item.submenu && item.submenu.length > 0) return true;
-            if (item.to) return allowedKeys.has(item.to);
-            return false;
-          })
-      }))
-      .filter(category => category.items.length > 0);
-  }
-
-  const isBranchOrVendor = user?.role === 'branch' || user?.role === 'vendor' ||
-                           user?.role === 'branch_both' || user?.role === 'branch_customer' ||
-                           user?.role === 'branch_agent' || user?.role === 'branch_single';
-
-    
-if (isSuperAdmin) {
-  return menuItems
-    .map(category => ({
-      ...category,
-      items: category.items
-
-        // YE NAYA BLOCK ADD KARO
-        .map(item => {
-          if (item.title === "purchase" && item.submenu) {
-            return {
-              ...item,
-              submenu: item.submenu.filter(
-                sub => sub.name !== "B2B Purchase Verify"
-              )
-            };
-          }
-          return item;
-        })
-
-        // 👇 YE AAPKA EXISTING CODE HAI, ISME KUCH CHANGE MAT KARNA
-        .filter(item =>
+        items: category.items.filter(item =>
+          item.title !== "Stock Master" &&
+          item.title !== "Stock Transfer" &&
           item.title !== "Stock Verification" &&
-          item.title !== "Order Items" &&
           item.title !== "Stock Return" &&
+          item.title !== "Stock Return Verification" &&
+          item.title !== "Order Items" &&
           item.title !== "B2B Stock Return" &&
+          item.title !== "B2B Stock Returns" &&
           item.title !== "B2B Stock Transfer" &&
           item.title !== "Scheme Offer Register" &&
-          item.title !== "My Branches"  
-        )
-    }))
-    .filter(category => category.items.length > 0);
-}
-    
-if (isBranchOrVendor) {
-  const { branch } = useAuthStore.getState(); 
-  const isFranchise = branch?.ownership_type === "franchise";
-
-  return menuItems
-    .map(category => ({
-      ...category,
-      items: category.items
-        .map(item => {
-          if (item.title === "Master" && item.submenu) {
-            return { ...item, submenu: item.submenu.filter(sub => sub.name !== "Branch Master") };
-          }
-if (item.title === "sales" && item.submenu) {
-  return {
-    ...item,
-    submenu: item.submenu.filter(
-      sub => sub.name !== "B2B Sales" && sub.name !== "Import - B2B Sales"
-    ),
-  };
-}
-          return item;
-        })
-        .filter(item =>
-          item.title !== "Stock Transfer" &&
-          item.title !== "Import - Stock Transfer" &&
-          item.title !== "Stock Return Verification" &&
-          item.title !== "B2B Stock Returns" &&
-          item.title !== "Scheme Offers" &&
-          item.title !== "Employee Management" &&
-          (item.title !== "My Branches" || isFranchise)
-        )
-    }))
-    .filter(category => category.items.length > 0);
-}
-    
-    // ✅ OTHER ROLES:
-    // Hide all stock-related menus
-    return menuItems
-      .map(category => ({
-        ...category,
-        items: category.items.filter(
-          item => 
-            item.title !== "Stock Transfer" && 
-            item.title !== "Stock Verification" && 
-            item.title !== "Stock Return" &&
-            item.title !== "Stock Return Verification" &&
-            item.title !== "Order Items"&&
-            item.title !== "Scheme Offer Register" &&
-            item.title !== "My Branches"
-        )
+          item.title !== "My Branches"
+        ),
       }))
       .filter(category => category.items.length > 0);
-  }, [isSuperAdmin, user?.role]);
+  }, [isSuperAdmin, user?.role, permissions, branch?.ownership_type]);
 
-  // ── Effects ──
+// ── Effects ──
   useEffect(() => {
     const fetchBranchData = async () => {
       try {

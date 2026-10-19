@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import MobileSalesEntry from "./MobileSalesEntry";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+import { useTaxAccounts } from "../../hooks/useTaxAccounts";
 import { State } from "country-state-city";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -28,6 +29,22 @@ const VARIANT_BY_BRANCH: Record<string, string[]> = {
   electronics: ["size", "color", "srno", "warrantydate"],
   mart: ["size"],
 };
+
+const GRID_LIMIT = 50;           // ek baar me kitne items
+const SEARCH_DEBOUNCE_MS = 150;  // local filter turant, server call itni der baad
+const CACHE_TTL_MS = 30000;      // cache 30 sec (stock purana na rahe)
+
+// Backend row -> UI row
+const mapSaleRow = (item: any) => ({
+  id: item.id, itemId: item.itemId, itemName: item.itemName,
+  hsnCode: item.hsnCode || "", salesPrice: item.salesPrice || 0,
+  per_unit_price: item.per_unit_price || item.salesPrice || 0,
+  unit: item.unit || "", unit_supports_fractional: item.unit_supports_fractional || false,
+  unit_name: item.unit_name || item.unit, taxSlab: item.taxSlab || "0",
+  current_stock: item.current_stock || 0, size: item.size || "-",
+  color: item.color || "-", srno: item.srno || "-",
+  warrantydate: item.warrantydate || "-", barcode: item.barcode || "",
+});
 
 const paymentTerms: string[] = ["Cash", "Bank", "Credit"];
 const today = new Date().toISOString().split("T")[0];
@@ -785,6 +802,7 @@ const SalesEntryForm2: React.FC = () => {
   const { checkLocation, isLoading: locationLoading } = useBranchLocationCheck();
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);  
   const navigate = useNavigate();
+  const taxAccounts = useTaxAccounts(); 
 
   const [addedItems, setAddedItems] = useState<CartItem[]>([]);
   const [idCounter, setIdCounter] = useState(1);
@@ -792,6 +810,13 @@ const SalesEntryForm2: React.FC = () => {
 
   const [itemsData, setItemsData] = useState<any[]>([]);
   const [filteredItems, setFilteredItems] = useState<any[]>([]);
+
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [gridLimit, setGridLimit] = useState(GRID_LIMIT);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const itemsReqId = useRef(0);
+  const itemsAbort = useRef<AbortController | null>(null);
+  const itemsCache = useRef<Map<string, { t: number; rows: any[] }>>(new Map());
   const [searchTerm, setSearchTerm] = useState("");
   const [branchType, setBranchType] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -872,7 +897,6 @@ const SalesEntryForm2: React.FC = () => {
     } catch { toast.error("Failed to add item"); }
   };
 
-  // ── barcode ──
   const handleBarcodeSearch = async (barcode: string) => {
     const b = barcode.trim();
     if (!b) return;
@@ -880,25 +904,16 @@ const SalesEntryForm2: React.FC = () => {
     setScanning(true);
     try {
       const local = itemsData.find(i => i.barcode && i.barcode.toLowerCase() === b.toLowerCase());
-      if (local) { await addItemToCart(local); setBarcodeValue(""); setScanning(false); barcodeRef.current?.focus(); return; }
-      const token = sessionStorage.getItem("accessToken");
-      const r = await api.get(`sale-search-item/?query=${encodeURIComponent(b)}`, { headers: { Authorization: `Bearer ${token}` } });
-      if (r.data?.length > 0) {
-        const match = r.data.find((i: any) => i.barcode && i.barcode.toLowerCase() === b.toLowerCase());
-        if (match) {
-          await addItemToCart({
-            id: match.id, itemId: match.itemId, itemName: match.itemName, hsnCode: match.hsnCode || "",
-            salesPrice: match.salesPrice || 0, per_unit_price: match.per_unit_price || match.salesPrice || 0,
-            unit: match.unit || "", unit_supports_fractional: match.unit_supports_fractional || false,
-            unit_name: match.unit_name || match.unit, taxSlab: match.taxSlab || "0",
-            current_stock: match.current_stock || 0, barcode: match.barcode || "",
-          });
-        } else { toast.error(`No item with barcode "${b}"`); }
-      } else { toast.error(`No item found`); }
+      if (local) { await addItemToCart(local); return; }
+
+      // Server se exact barcode (1 chhoti request)
+      const r = await api.get("sale-search-item/", { params: { barcode: b } });
+      const row = Array.isArray(r.data) ? r.data[0] : null;
+      if (row) await addItemToCart(mapSaleRow(row));
+      else toast.error(`No item with barcode "${b}"`);
     } catch { toast.error("Barcode search failed"); }
     finally { setBarcodeValue(""); setScanning(false); barcodeRef.current?.focus(); }
   };
-
   // ── fetch items ──
   useEffect(() => {
     const fetchBT = async () => {
@@ -911,39 +926,72 @@ const SalesEntryForm2: React.FC = () => {
     fetchBT();
   }, []);
 
+  // Server se items laao (cache + purana request cancel + late response ignore)
+  const loadItems = async (term: string, limit: number) => {
+    const reqId = ++itemsReqId.current;
+    itemsAbort.current?.abort();
+
+    const apply = (rows: any[]) => {
+      setFilteredItems(rows);
+      if (!term && limit === GRID_LIMIT) setItemsData(rows);   // base list (scanner + instant filter)
+    };
+
+    const key = `${term.toLowerCase()}|${limit}`;
+    const hit = itemsCache.current.get(key);
+    if (hit && Date.now() - hit.t < CACHE_TTL_MS) {
+      apply(hit.rows);
+      setItemsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    itemsAbort.current = controller;
+    setItemsLoading(true);
+    try {
+      const r = await api.get("sale-search-item/", {
+        params: { query: term, limit },
+        signal: controller.signal,
+      });
+      if (reqId !== itemsReqId.current) return;
+      const rows = (r.data || []).map(mapSaleRow);
+      if (itemsCache.current.size > 100) itemsCache.current.clear();
+      itemsCache.current.set(key, { t: Date.now(), rows });
+      apply(rows);
+      if (!term && limit === GRID_LIMIT && rows.length === 0) toast.info("No items in stock");
+    } catch (err: any) {
+      if (err?.code === "ERR_CANCELED" || err?.name === "CanceledError") return;
+      console.error("Item load error:", err);
+      if (!term) toast.error("Failed to load items");
+    } finally {
+      if (reqId === itemsReqId.current) setItemsLoading(false);
+    }
+  };
+
+  // search ko debounce karo
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setGridLimit(GRID_LIMIT);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // typing par turant local filter (server result aane tak)
+  useEffect(() => {
+    const tokens = searchTerm.toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return;
+    setFilteredItems(itemsData.filter(i => {
+      const text = `${i.itemName} ${i.hsnCode} ${i.barcode} ${i.size} ${i.color} ${i.srno}`.toLowerCase();
+      return tokens.every(t => text.includes(t));
+    }));
+  }, [searchTerm, itemsData]);
+
+  // term ya limit badle to server se laao
   useEffect(() => {
     if (!branchType) return;
-    const fetch = async () => {
-      try {
-        const token = sessionStorage.getItem("accessToken");
-        const r = await api.get("sale-search-item/", { headers: { Authorization: `Bearer ${token}` } });
-        const mapped = r.data.map((item: any) => ({
-          id: item.id, itemId: item.itemId, itemName: item.itemName,
-          hsnCode: item.hsnCode, salesPrice: item.salesPrice || 0,
-          per_unit_price: item.per_unit_price || item.salesPrice,
-          unit: item.unit || "", unit_supports_fractional: item.unit_supports_fractional || false,
-          unit_name: item.unit_name || item.unit, taxSlab: item.taxSlab || "0",
-          current_stock: item.current_stock || 0, size: item.size || "-",
-          color: item.color || "-", srno: item.srno || "-",
-          warrantydate: item.warrantydate || "-", barcode: item.barcode || "",
-        }));
-        setItemsData(mapped); setFilteredItems(mapped);
-        if (mapped.length === 0) toast.info("No items in stock");
-      } catch { toast.error("Failed to load items"); }
-    };
-    fetch();
-  }, [branchType]);
-
-  // ── search filter ──
-  useEffect(() => {
-    if (!searchTerm) { setFilteredItems(itemsData); return; }
-    const t = searchTerm.toLowerCase();
-    setFilteredItems(itemsData.filter(i =>
-      i.itemName?.toLowerCase().includes(t) || i.hsnCode?.toLowerCase().includes(t) ||
-      (i.barcode && i.barcode.toLowerCase().includes(t)) ||
-      (i.size && i.size.toLowerCase().includes(t)) || (i.color && i.color.toLowerCase().includes(t))
-    ));
-  }, [searchTerm, itemsData]);
+    loadItems(debouncedSearch, gridLimit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchType, debouncedSearch, gridLimit]);
 
   useEffect(() => {
   const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -1014,6 +1062,7 @@ const SalesEntryForm2: React.FC = () => {
     try {
       const r = await api.post("salesentry-create/", buildPayload(values));
       toast.update(toastId, { render: "Sale saved successfully!", type: "success", autoClose: 2500, isLoading: false });
+            itemsCache.current.clear();
       if (r.data.stock_alerts) r.data.stock_alerts.forEach((m: any) => toast.error(m));
       setAddedItems([]); setIdCounter(1);
       navigate("/Addsalesitem");
@@ -1040,6 +1089,7 @@ const SalesEntryForm2: React.FC = () => {
     try {
       const r = await api.post("salesentry-create/", buildPayload(values));
       toast.update(toastId, { render: "Sale saved successfully!", type: "success", autoClose: 2500, isLoading: false });
+            itemsCache.current.clear();
       if (r.data.stock_alerts) r.data.stock_alerts.forEach((m: any) => toast.error(m));
       setSavedSaleId(r.data.id);
       setAddedItems([]); setIdCounter(1);
@@ -1136,7 +1186,10 @@ const SalesEntryForm2: React.FC = () => {
                         <MdTableRows size={15} />
                       </button>
                     </div>
-                    <span className="text-xs text-slate-400 whitespace-nowrap">{filteredItems.length} items</span>
+                    <span className="text-xs text-slate-400 whitespace-nowrap">
+  {filteredItems.length}{filteredItems.length >= gridLimit ? "+" : ""} items
+  {itemsLoading && <span className="ml-1 text-blue-500 animate-pulse">...</span>}
+</span>
                   </div>
 
                   {/* Barcode */}
@@ -1219,6 +1272,15 @@ const SalesEntryForm2: React.FC = () => {
                           )}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+                                    {filteredItems.length >= gridLimit && (
+                    <div className="text-center mt-4">
+                      <button type="button"
+                        onClick={() => setGridLimit(g => g + GRID_LIMIT)}
+                        className="px-5 py-2 text-sm bg-blue-50 text-blue-700 rounded-xl hover:bg-blue-100 border border-blue-200">
+                        Load more
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1345,28 +1407,50 @@ const SalesEntryForm2: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Summary rows */}
-                    <div className="px-3 py-2 space-y-1 border-t border-blue-100">
-                      {[
-                        { label: "Subtotal (Taxable)", value: `₹${totals.totalBasic.toFixed(2)}`, cls: "" },
-                        { label: "Total Discount", value: `-₹${totals.totalDiscount.toFixed(2)}`, cls: "text-emerald-600" },
-                        ...(totals.totalCgst > 0 || totals.totalSgst > 0
-                          ? [{ label: "CGST + SGST", value: `₹${(totals.totalCgst + totals.totalSgst).toFixed(2)}`, cls: "text-purple-600" }]
-                          : totals.totalIgst > 0
-                          ? [{ label: "IGST", value: `₹${totals.totalIgst.toFixed(2)}`, cls: "text-purple-600" }]
-                          : []),
-                        { label: "Estimated Tax", value: `₹${totals.totalTax.toFixed(2)}`, cls: "text-purple-600" },
-                        ...(Number(values.freightCharge || 0) > 0 ? [{ label: "Freight", value: `₹${Number(values.freightCharge).toFixed(2)}`, cls: "" }] : []),
-                        ...(Number(values.otherExpense || 0) > 0 ? [{ label: "Other Expense", value: `₹${Number(values.otherExpense).toFixed(2)}`, cls: "" }] : []),
-                        ...(Number(values.roundAmount || 0) !== 0 ? [{ label: "Round Off", value: `₹${Number(values.roundAmount).toFixed(2)}`, cls: "" }] : []),
-                      ].map((row: any) => (
-                        <div key={row.label} className="flex justify-between text-[11px]">
-                          <span className="text-slate-500">{row.label}</span>
-                          <span className={`font-semibold ${row.cls || "text-slate-700"}`}>{row.value}</span>
-                        </div>
-                      ))}
-                    </div>
-
+{/* Summary rows */}
+<div className="px-3 py-2 space-y-1 border-t border-blue-100">
+  {[
+    { label: "Subtotal (Taxable)", value: `₹${totals.totalBasic.toFixed(2)}`, cls: "" },
+    { label: "Total Discount", value: `-₹${totals.totalDiscount.toFixed(2)}`, cls: "text-emerald-600" },
+    
+    //  CGST + SGST wali row (ab account name ke saath)
+    ...(totals.totalCgst > 0 || totals.totalSgst > 0
+      ? [{
+          label: "CGST + SGST",
+          value: `₹${(totals.totalCgst + totals.totalSgst).toFixed(2)}`,
+          cls: "text-purple-600",
+          account: `${taxAccounts.SALES_CGST?.account_name || "Sales CGST"} + ${taxAccounts.SALES_SGST?.account_name || "Sales SGST"}`,
+          side: "Cr"
+        }]
+      : totals.totalIgst > 0
+      ? [{
+          label: "IGST",
+          value: `₹${totals.totalIgst.toFixed(2)}`,
+          cls: "text-purple-600",
+          account: taxAccounts.SALES_IGST?.account_name || "Sales IGST",
+          side: "Cr"
+        }]
+      : []),
+    
+    { label: "Estimated Tax", value: `₹${totals.totalTax.toFixed(2)}`, cls: "text-purple-600" },
+    ...(Number(values.freightCharge || 0) > 0 ? [{ label: "Freight", value: `₹${Number(values.freightCharge).toFixed(2)}`, cls: "" }] : []),
+    ...(Number(values.otherExpense || 0) > 0 ? [{ label: "Other Expense", value: `₹${Number(values.otherExpense).toFixed(2)}`, cls: "" }] : []),
+    ...(Number(values.roundAmount || 0) !== 0 ? [{ label: "Round Off", value: `₹${Number(values.roundAmount).toFixed(2)}`, cls: "" }] : []),
+  ].map((row: any) => (
+    // 👇 Ab render mein account name bhi dikhega
+    <div key={row.label} className="flex justify-between text-[11px]">
+      <span className="text-slate-500">
+        {row.label}
+        {row.account && (
+          <span className="block text-[9px] text-blue-600 font-normal">
+            → {row.account} ({row.side})
+          </span>
+        )}
+      </span>
+      <span className={`font-semibold ${row.cls || "text-slate-700"}`}>{row.value}</span>
+    </div>
+  ))}
+</div>
                     {/* Grand Total band */}
                     <div className="mx-3 mb-2 flex items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl px-4 py-2.5 shadow-md shadow-blue-200">
                       <span className="text-xs font-bold text-white/80">Grand Total</span>

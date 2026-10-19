@@ -17,6 +17,32 @@ import api from "../../api/api";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 import Barcode from "react-barcode";
 import { usePermission } from "../../hooks/usePermissions";
+import { useTaxAccounts } from "../../hooks/useTaxAccounts";
+
+
+// ─── Module-level constants + mapRow (Block 1) ────────────────────────────────
+const MODAL_LIMIT = 50;          // modal me ek baar me kitni rows
+const SEARCH_DEBOUNCE_MS = 120;  // server call se pehle ruko (local filter turant chalta hai)
+
+// Backend row -> modal row
+const mapRow = (item: any) => ({
+  id: item.id,
+  itemId: item.itemId,
+  itemName: item.itemName,
+  hsnCode: item.hsnCode,
+  purchasePrice: item.purchasePrice || 0,
+  per_unit_price: item.per_unit_price || item.purchasePrice,
+  barcode: item.barcode || "",
+  size: item.size || "-",
+  color: item.color || "-",
+  srno: item.srno || "-",
+  warrantydate: item.warrantydate || "-",
+  unit: item.unit || "-",
+  unit_name: item.unit_name || item.unit,
+  unit_supports_fractional: item.unit_supports_fractional || false,
+  taxSlab: item.taxSlab || "0",
+  opStock: item.opStock || 0,
+});
 
 
 // ─── Barcode Scanner ──────────────────────────────────────────────────────────
@@ -42,6 +68,7 @@ const PurchaseBarcodeScanner: React.FC<BarcodeScannerProps> = ({
     setTimeout(() => inputRef.current?.focus(), 300);
   }, []);
 
+  // Block 2: server exact barcode lookup
   const handleBarcodeSearch = async (barcode: string) => {
     const trimmed = barcode.trim();
     if (!trimmed) return;
@@ -55,63 +82,30 @@ const PurchaseBarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
     setScanning(true);
     try {
-      // 🔍 First check in local data
-      const localMatch = itemsModalData.find(
-        (item: any) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
-      );
+      const lower = trimmed.toLowerCase();
 
+      // 🔍 Pehle already-loaded rows me (0 ms)
+      const localMatch = itemsModalData.find(
+        (item: any) => item.barcode && item.barcode.toLowerCase() === lower
+      );
       if (localMatch) {
         onItemSelected(localMatch);
         toast.success(`✓ Item selected: ${localMatch.itemName}`);
-        setBarcodeValue("");
-        setScanning(false);
-        inputRef.current?.focus();
         return;
       }
 
-      // 🔍 If not found locally, search via API
-      const token = sessionStorage.getItem("accessToken");
-      const res = await api.get(`purchse-item-search/?query=${encodeURIComponent(trimmed)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      // 🔍 Nahi mila to server se exact barcode lookup
+      const res = await api.get("purchse-item-search/", { params: { barcode: trimmed } });
+      const row = Array.isArray(res.data) ? res.data[0] : null;
 
-      if (res.data && res.data.length > 0) {
-        const apiMatch = res.data.find(
-          (item: any) => item.barcode && item.barcode.toLowerCase() === trimmed.toLowerCase()
-        );
-
-        if (!apiMatch) {
-          toast.error(`No item found with barcode "${trimmed}"`);
-          setBarcodeValue("");
-          setScanning(false);
-          inputRef.current?.focus();
-          return;
-        }
-
-        const mappedItem = {
-          id: apiMatch.id,
-          itemId: apiMatch.itemId,
-          itemName: apiMatch.itemName,
-          hsnCode: apiMatch.hsnCode || "",
-          purchasePrice: apiMatch.purchasePrice || 0,
-          per_unit_price: apiMatch.per_unit_price || apiMatch.purchasePrice || 0,
-          unit: apiMatch.unit || "",
-          unit_supports_fractional: apiMatch.unit_supports_fractional || false,
-          unit_name: apiMatch.unit_name || apiMatch.unit,
-          taxSlab: apiMatch.taxSlab || "0",
-          opStock: apiMatch.opStock || 0,
-          size: apiMatch.size || "-",
-          color: apiMatch.color || "-",
-          srno: apiMatch.srno || "-",
-          warrantydate: apiMatch.warrantydate || "-",
-          barcode: apiMatch.barcode || "",
-        };
-
-        onItemSelected(mappedItem);
-        toast.success(`✓ Item selected: ${mappedItem.itemName}`);
-      } else {
+      if (!row) {
         toast.error(`No item found with barcode "${trimmed}"`);
+        return;
       }
+
+      const mappedItem = mapRow(row);
+      onItemSelected(mappedItem);
+      toast.success(`✓ Item selected: ${mappedItem.itemName}`);
     } catch (err) {
       console.error("Barcode search error:", err);
       toast.error("Barcode search failed. Please try again.");
@@ -812,6 +806,7 @@ const PurchaseEntryForm: React.FC = () => {
 
 
  const { canAdd } = usePermission("/Addpurchaseitem");
+ const taxAccounts = useTaxAccounts();
   // ─── Check if user is Superadmin ──────────────────────────────────────────
   // ─── Check if user is Superadmin / Employee ────────────────────────────────
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
@@ -916,11 +911,91 @@ const PurchaseEntryForm: React.FC = () => {
   const [addedItems, setAddedItems] = useState<Item[]>([]);
   const [idCounter, setIdCounter] = useState<number>(1);
   const [isAddingItem, setIsAddingItem] = useState<boolean>(false); 
-  const [itemsModalData, setItemsModalData] = useState<any[]>([]);
+
+  // Block 3: itemsModalData + modal search state
+  const [itemsModalData, setItemsModalData] = useState<any[]>([]);   // pehli MODAL_LIMIT rows (modal ka initial + scanner local match)
   const [openModal, setOpenModal] = useState(false);
   const [branchType, setBranchType] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [filteredItems, setFilteredItems] = useState<any[]>([]);
+  const [filteredItems, setFilteredItems] = useState<any[]>([]);       // modal me jo rows dikhti hain
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalLimit, setModalLimit] = useState(MODAL_LIMIT);
+
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchReqId = useRef(0);
+  const searchAbort = useRef<AbortController | null>(null);
+  const searchCache = useRef<Map<string, any[]>>(new Map());          // "term|limit" -> rows
+
+  // Server se rows laao (cache + purana request cancel + late response ignore)
+  const fetchModalItems = async (term: string, limit: number) => {
+    const reqId = ++searchReqId.current;
+    searchAbort.current?.abort();
+
+    const key = `${term.toLowerCase()}|${limit}`;
+    const cached = searchCache.current.get(key);
+    if (cached) {
+      setFilteredItems(cached);
+      setModalLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    searchAbort.current = controller;
+    setModalLoading(true);
+
+    try {
+      const res = await api.get("purchse-item-search/", {
+        params: { query: term, limit },
+        signal: controller.signal,
+      });
+      if (reqId !== searchReqId.current) return;   // naya request aa chuka hai
+
+      const rows = (res.data || []).map(mapRow);
+      if (searchCache.current.size > 100) searchCache.current.clear();
+      searchCache.current.set(key, rows);
+
+      if (!term && limit === MODAL_LIMIT) setItemsModalData(rows);
+      setFilteredItems(rows);
+    } catch (err: any) {
+      if (err?.code === "ERR_CANCELED" || err?.name === "CanceledError") return;
+      console.error("Item search error:", err);
+      if (!term) toast.error("Failed to load items");
+    } finally {
+      if (reqId === searchReqId.current) setModalLoading(false);
+    }
+  };
+
+  // Already-loaded rows pe turant filter (server ka result aane tak)
+  const localFilter = (term: string) => {
+    const tokens = term.toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return itemsModalData;
+    return itemsModalData.filter((r) => {
+      const text = `${r.itemName} ${r.hsnCode} ${r.purchasePrice} ${r.size} ${r.color} ${r.barcode} ${r.srno}`.toLowerCase();
+      return tokens.every((t) => text.includes(t));
+    });
+  };
+
+  const handleModalSearch = (term: string) => {
+    setSearchTerm(term);
+    setModalLimit(MODAL_LIMIT);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+
+    const clean = term.trim();
+
+    // Pehle search ho chuki hai to cache se 0 ms me
+    const cached = searchCache.current.get(`${clean.toLowerCase()}|${MODAL_LIMIT}`);
+    if (cached) {
+      searchReqId.current++;
+      searchAbort.current?.abort();
+      setModalLoading(false);
+      setFilteredItems(cached);
+      return;
+    }
+
+    // Turant local filter, phir 120 ms baad server se poora result
+    setFilteredItems(localFilter(clean));
+    searchTimer.current = setTimeout(() => fetchModalItems(clean, MODAL_LIMIT), SEARCH_DEBOUNCE_MS);
+  };
 
   const calculateTotals = (items: any[]) => {
     const sum = (key: string) => items.reduce((a, b) => a + Number(b[key] || 0), 0);
@@ -953,46 +1028,20 @@ const PurchaseEntryForm: React.FC = () => {
     fetchBranchType();
   }, []);
 
-  // ── Fetch items for modal ──
+  // Block 4: page load pe sirf pehli 50 rows (~20 kB), saare items nahi
   useEffect(() => {
-    if (openModal) {
-      const fetchAllItems = async () => {
-        try {
-          const token = sessionStorage.getItem("accessToken");
-          const res = await api.get(`purchase-item-all/`, { headers: { Authorization: `Bearer ${token}` } });
-          const mapped = res.data.map((item: any) => ({
-            id: item.id,
-            itemId: item.itemId,
-            itemName: item.itemName,
-            hsnCode: item.hsnCode,
-            purchasePrice: item.purchasePrice || 0,
-            per_unit_price: item.per_unit_price || item.purchasePrice,
-            barcode: item.barcode || "",
-            size: item.size || "-",
-            color: item.color || "-",
-            srno: item.srno || "-",
-            warrantydate: item.warrantydate || "-",
-            unit: item.unit || "-",
-            unit_name: item.unit_name || item.unit,
-            unit_supports_fractional: item.unit_supports_fractional || false,
-            taxSlab: item.taxSlab || "0",
-            opStock: item.opStock || 0,
-          }));
-          setItemsModalData(mapped);
-          setFilteredItems(mapped);
-          if (res.data.length === 0) toast.info("No items available for purchase. Please create items first.");
-        } catch (err) {
-          console.error("Error fetching items:", err);
-          toast.error("Failed to load items");
-        }
-      };
-      fetchAllItems();
-    }
-  }, [openModal]);
+    fetchModalItems("", MODAL_LIMIT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openModalWithData = () => {
     if (!branchType) { toast.error("Please wait, loading branch info..."); return; }
+    setSearchTerm("");
+    setModalLimit(MODAL_LIMIT);
+    setFilteredItems(itemsModalData);          // modal turant dikhe
     setOpenModal(true);
+    searchCache.current.clear();               // background me fresh data
+    fetchModalItems("", MODAL_LIMIT);
   };
 
   // ── Generate Barcode API call (only generates, does NOT save) ──
@@ -1121,7 +1170,7 @@ const accountId = Number(values.account);
         <Formik
           initialValues={initialValues}
           validationSchema={validationSchema}
-          validateOnChange={true}
+          validateOnChange={false}
           validateOnBlur={true}
           onSubmit={async (values, { setSubmitting }) => {
             await handleSubmit(values);
@@ -1253,6 +1302,11 @@ const finalPrice = round2(row.purchasePrice || row.per_unit_price || 0);
                 );
                 setFieldValue("items[0].barcodeSaved", true);
                 setFieldValue("items[0].existingBarcode", cur.barcodeValue);
+
+                // Block 4: naya barcode scanner/modal me bhi dikhe
+                searchCache.current.clear();
+                fetchModalItems("", MODAL_LIMIT);
+
                 toast.success("Barcode saved successfully! Now click 'Add' to add item.");
               } catch (err: any) {
                 console.error("Failed to save barcode:", err);
@@ -1529,23 +1583,38 @@ const totals = calculateTotals(addedItems);
                           </div>
                         ))}
 
-                        {Number(totals.totalCgst) > 0 || Number(totals.totalSgst) > 0 ? (
-                          <>
-                            <div className="flex justify-between py-1.5 border-b border-blue-100">
-                              <span className="text-gray-600">CGST</span>
-                              <span className="font-medium">₹ {totals.totalCgst}</span>
-                            </div>
-                            <div className="flex justify-between py-1.5 border-b border-blue-100">
-                              <span className="text-gray-600">SGST</span>
-                              <span className="font-medium">₹ {totals.totalSgst}</span>
-                            </div>
-                          </>
-                        ) : Number(totals.totalIgst) > 0 ? (
-                          <div className="flex justify-between py-1.5 border-b border-blue-100">
-                            <span className="text-gray-600">IGST</span>
-                            <span className="font-medium">₹ {totals.totalIgst}</span>
-                          </div>
-                        ) : null}
+{Number(totals.totalCgst) > 0 || Number(totals.totalSgst) > 0 ? (
+  <>
+    <div className="flex justify-between py-1.5 border-b border-blue-100">
+      <span className="text-gray-600">
+        CGST
+        <span className="block text-[10px] text-blue-600">
+          → {taxAccounts.PURCHASE_CGST?.account_name || "Purchase CGST"} (Debit)
+        </span>
+      </span>
+      <span className="font-medium">₹ {totals.totalCgst}</span>
+    </div>
+    <div className="flex justify-between py-1.5 border-b border-blue-100">
+      <span className="text-gray-600">
+        SGST
+        <span className="block text-[10px] text-blue-600">
+          → {taxAccounts.PURCHASE_SGST?.account_name || "Purchase SGST"} (Debit)
+        </span>
+      </span>
+      <span className="font-medium">₹ {totals.totalSgst}</span>
+    </div>
+  </>
+) : Number(totals.totalIgst) > 0 ? (
+  <div className="flex justify-between py-1.5 border-b border-blue-100">
+    <span className="text-gray-600">
+      IGST
+      <span className="block text-[10px] text-blue-600">
+        → {taxAccounts.PURCHASE_IGST?.account_name || "Purchase IGST"} (Debit)
+      </span>
+    </span>
+    <span className="font-medium">₹ {totals.totalIgst}</span>
+  </div>
+) : null}
 
                         {[
                           { label: "Total Net (incl. Tax)", value: `₹ ${Number(totals.totalNet || 0).toFixed(2)}`, bold: true },
@@ -1608,47 +1677,20 @@ const totals = calculateTotals(addedItems);
 
                         <div className="flex-1 overflow-y-auto min-h-0 p-6">
                           <div className="flex justify-between items-center mb-4 gap-4">
+                            {/* Block 5a: autoFocus */}
                             <input
                               type="text"
+                              autoFocus
                               placeholder="Search item, HSN, barcode, variant..."
                               value={searchTerm}
-                              onChange={async (e) => {
-                                const term = e.target.value;
-                                setSearchTerm(term);
-                                if (!term) { setFilteredItems(itemsModalData); return; }
-                                try {
-                                  const token = sessionStorage.getItem("accessToken");
-                                  const res = await api.get(
-                                    `purchse-item-search/?query=${term}`,
-                                    { headers: { Authorization: `Bearer ${token}` } }
-                                  );
-                                  const mapped: any[] = res.data.map((item: any) => ({
-                                    id: item.id,
-                                    itemId: item.itemId,
-                                    itemName: item.itemName,
-                                    hsnCode: item.hsnCode,
-                                    purchasePrice: item.purchasePrice || 0,
-                                    per_unit_price: item.per_unit_price || item.purchasePrice,
-                                    barcode: item.barcode || "",
-                                    size: item.size || "-",
-                                    color: item.color || "-",
-                                    srno: item.srno || "-",
-                                    warrantydate: item.warrantydate || "-",
-                                    unit: item.unit || "-",
-                                    unit_name: item.unit_name || item.unit,
-                                    unit_supports_fractional: item.unit_supports_fractional || false,
-                                    taxSlab: item.taxSlab || "0",
-                                    opStock: item.opStock || 0,
-                                  }));
-                                  setFilteredItems(mapped);
-                                } catch (err) {
-                                  console.error("Search API error:", err);
-                                }
-                              }}
+                              onChange={(e) => handleModalSearch(e.target.value)}
                               className="flex-1 max-w-sm px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
                             />
+                            {/* Block 5b: items found box */}
                             <div className="px-4 py-2 bg-gray-100 rounded-lg text-sm text-gray-600">
-                              <span className="font-semibold">{(searchTerm ? filteredItems : itemsModalData).length}</span> items found
+                              <span className="font-semibold">{filteredItems.length}</span>
+                              {filteredItems.length >= modalLimit ? "+" : ""} items
+                              {modalLoading && <span className="ml-2 text-blue-600 animate-pulse">Searching...</span>}
                             </div>
                           </div>
 
@@ -1668,7 +1710,7 @@ const totals = calculateTotals(addedItems);
                                 </tr>
                               </thead>
                               <tbody>
-                                {(searchTerm ? filteredItems : itemsModalData).map((row) => {
+                                {filteredItems.map((row) => {
                                   const hasBarcode = row.barcode && row.barcode.trim() !== '';
                                   return (
                                     <tr key={`${row.itemId}-${row.id}`} className="border-b hover:bg-gray-50 transition">
@@ -1728,7 +1770,7 @@ const totals = calculateTotals(addedItems);
                                     </tr>
                                   );
                                 })}
-                                {(searchTerm ? filteredItems : itemsModalData).length === 0 && (
+                                {filteredItems.length === 0 && (
                                   <tr>
                                     <td colSpan={6 + variantFields.length} className="text-center py-10 text-gray-500">
                                       No items available
@@ -1738,6 +1780,23 @@ const totals = calculateTotals(addedItems);
                               </tbody>
                             </table>
                           </div>
+
+                          {/* Block 5d: Load more button */}
+                          {filteredItems.length >= modalLimit && (
+                            <div className="text-center mt-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = modalLimit + MODAL_LIMIT;
+                                  setModalLimit(next);
+                                  fetchModalItems(searchTerm.trim(), next);
+                                }}
+                                className="px-5 py-2 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 border border-blue-200"
+                              >
+                                Load more
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex justify-center py-4 border-t bg-white flex-shrink-0">
