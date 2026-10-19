@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useRef } from "react";
-import { FaEye, FaSearch, FaFilter, FaTimes , FaFileExcel, FaRobot} from "react-icons/fa";
+import { FaEye, FaSearch, FaFilter, FaTimes, FaFileExcel } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import api from "../../api/api";
 import * as XLSX from "xlsx";
 import { usePermission } from "../../hooks/usePermissions";
-import AIBillUploadModal from "../AI/AIBillUploadModal";
-import Swal from "sweetalert2";
+
 // ------------------ Common variant columns ------------------
 const COMMON_VARIANT_COLUMNS = [
   "itemName_name",
@@ -22,225 +21,221 @@ const COMMON_VARIANT_COLUMNS = [
   "netValue",
 ];
 
-// ✅ Pagination settings
 const DEFAULT_PAGE_SIZE = 15;
+const SEARCH_DEBOUNCE_MS = 300;
+const EXPORT_PAGE_SIZE = 5000;
 
-// ✅ Filter options interface
 interface FilterOptions {
   terms: string;
 }
 
+// ------------------ Backend row -> UI row ------------------
+const mapPurchase = (item: any) => ({
+  id: item.id,
+  billNo: item.billNo,
+  date: item.date,
+  due_date: item.dueDate,
+  grand_total: item.grand_total,
+  total_basic: item.total_basic,
+  total_tax: item.total_tax,
+  terms: item.terms,
+  narration: item.narration,
+  party_name_name: item.party_name_name,
+  purchasebill_no: item.purchasebill_no,
+  created_by: item.created_by,
+  created_by_name: item.created_by_name,
+  F_O_R:
+    (Number(item.frightcharge) || 0) +
+    (Number(item.otherexpnse) || 0) +
+    (Number(item.roundamount) || 0),
+  variants: Array.isArray(item.items)
+    ? item.items.map((v: any) => ({
+        itemName_name: v.itemName_name || v.itemName?.itemName || "",
+        hsnCode: v.hsnCode || "",
+        quantity: v.quantity || 0,
+        altQuantity: v.altQuantity || 0,
+        price: v.price || 0,
+        per: v.per || "",
+        discountPercent: v.discountPercent || 0,
+        basicAmount: v.basicAmount || 0,
+        discountAmount: v.discountAmount || 0,
+        taxAmount: v.taxAmount || 0,
+        netValue: v.netValue || 0,
+      }))
+    : [],
+});
+
 const Addpurchaseitem: React.FC = () => {
   const navigate = useNavigate();
-  const {canAdd} = usePermission("/Addpurchaseitem");
+  const { canAdd } = usePermission("/Addpurchaseitem");
 
-  const [allItems, setAllItems] = useState<any[]>([]); // Store all items from API
-  const [filteredItems, setFilteredItems] = useState<any[]>([]); // Filtered items for display
+  // ✅ Sirf current page ka data
+  const [items, setItems] = useState<any[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [overallTotal, setOverallTotal] = useState(0);
+
   const [variants, setVariants] = useState<any[]>([]);
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
 
-  // ✅ Search and Filter state
+  const [initialLoading, setInitialLoading] = useState<boolean>(true);
+  const [fetching, setFetching] = useState<boolean>(false);
+  const [exporting, setExporting] = useState<boolean>(false);
+
+  // ✅ Search: searchTerm = input me jo type hua, debouncedSearch = server ko jo bhejna hai
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [debouncedSearch, setDebouncedSearch] = useState<string>("");
   const [showFilters, setShowFilters] = useState<boolean>(false);
-  const [filters, setFilters] = useState<FilterOptions>({
-    terms: "",
-  });
+  const [filters, setFilters] = useState<FilterOptions>({ terms: "" });
 
-  // ✅ Pagination state (for filtered items)
   const [currentPage, setCurrentPage] = useState(1);
-  const [aiModalOpen, setAiModalOpen] = useState(false);
-
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
-    // ✅ Add Export to Excel function
-  const exportToExcel = () => {
-    if (filteredItems.length === 0) {
+  // Purane (late aaye) response ko ignore karne ke liye
+  const reqIdRef = useRef(0);
+
+  // ------------------ Debounce search ------------------
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // ------------------ Common query params ------------------
+  const buildParams = (extra: Record<string, any> = {}) => {
+    const params: Record<string, any> = { ...extra };
+    if (debouncedSearch) params.search = debouncedSearch;
+    if (filters.terms) params.terms = filters.terms;
+    return params;
+  };
+
+  // ------------------ Fetch ONLY the current page ------------------
+  useEffect(() => {
+    const fetchPage = async () => {
+      const reqId = ++reqIdRef.current;
+      setFetching(true);
+      try {
+        const token = sessionStorage.getItem("token");
+        const response = await api.get(`purchse-items/`, {
+          params: buildParams({ page: currentPage, page_size: pageSize }),
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (reqId !== reqIdRef.current) return; // naya request aa chuka hai
+
+        const data = response.data;
+        const results = Array.isArray(data) ? data : data.results || [];
+
+        setItems(results.map(mapPurchase));
+        setTotalCount(Array.isArray(data) ? results.length : data.count ?? results.length);
+        setOverallTotal(Number(data.overall_total || 0));
+      } catch (err: any) {
+        if (reqId !== reqIdRef.current) return;
+        // Page delete/filter ki wajah se out-of-range ho gaya to page 1 pe wapas
+        if (err?.response?.status === 404 && currentPage > 1) {
+          setCurrentPage(1);
+          return;
+        }
+        console.error("Error fetching purchases:", err);
+        toast.error("Failed to load purchase records");
+        setItems([]);
+        setTotalCount(0);
+        setOverallTotal(0);
+      } finally {
+        if (reqId === reqIdRef.current) {
+          setFetching(false);
+          setInitialLoading(false);
+        }
+      }
+    };
+
+    fetchPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, pageSize, debouncedSearch, filters.terms]);
+
+  // ------------------ Excel export: button dabane par hi saara data ------------------
+  const exportToExcel = async () => {
+    if (totalCount === 0) {
       toast.warning("No data to export");
       return;
     }
 
-    // Prepare data for export
-    const exportData: any[] = filteredItems.map((item, index) => ({
-      "SR No": index + 1,
-      "Date": item.date || "-",
-      "Terms": item.terms || "-",
-      "Party Name": item.party_name_name || "-",
-      "Bill No": item.billNo || "-",
-      "Purchase Bill No": item.purchasebill_no || "-",
-      "Due Date": item.due_date || "-",
-      "Narration": item.narration || "-",
-      "Total Basic (₹)": Number(item.total_basic || 0).toFixed(2),
-      "Total Tax (₹)": Number(item.total_tax || 0).toFixed(2),
-      "F+O+R (₹)": Number(item.F_O_R || 0).toFixed(2),
-      "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
-    }));
+    setExporting(true);
+    try {
+      const token = sessionStorage.getItem("token");
+      let all: any[] = [];
+      let page = 1;
 
-    // Add grand total row
-    const grandTotal = filteredItems.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
-    exportData.push({
-      "SR No": "",
-      "Date": "",
-      "Terms": "",
-      "Party Name": "TOTAL",
-      "Bill No": "",
-      "Purchase Bill No": "",
-      "Due Date": "",
-      "Narration": "",
-      "Total Basic (₹)": "",
-      "Total Tax (₹)": "",
-      "F+O+R (₹)": "",
-      "Grand Total (₹)": grandTotal.toFixed(2),
-    });
-
-    // Create worksheet
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    
-    // Set column widths
-    ws["!cols"] = [
-      { wch: 6 },   // SR No
-      { wch: 12 },  // Date
-      { wch: 10 },  // Terms
-      { wch: 25 },  // Party Name
-      { wch: 15 },  // Bill No
-      { wch: 18 },  // Purchase Bill No
-      { wch: 12 },  // Due Date
-      { wch: 30 },  // Narration
-      { wch: 15 },  // Total Basic
-      { wch: 15 },  // Total Tax
-      { wch: 12 },  // F+O+R
-      { wch: 15 },  // Grand Total
-    ];
-
-    // Create workbook and download
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Purchase Register");
-    
-    // Generate filename with current date
-    const fileName = `Purchase_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-    
-    toast.success(`Exported ${filteredItems.length} records successfully`);
-  };
-
-  
-
-
-  // ------------------ Fetch All Purchases (without pagination from API) ------------------
-const fetchItems = async () => {
-  setLoading(true);
-  try {
-    const token = sessionStorage.getItem("token");
-    const response = await api.get(`purchse-items/`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    let itemsArray: any[] = [];
-
-    // Handle DRF paginated response
-    if (response.data.results) {
-      itemsArray = response.data.results;
-      
-      // Fetch all pages
-      let nextUrl = response.data.next;
-      while (nextUrl) {
-        const nextResponse = await api.get(nextUrl, {
+      // Same search/filter ke saath saare records (bade chunks me)
+      while (true) {
+        const res = await api.get(`purchse-items/`, {
+          params: buildParams({ page, page_size: EXPORT_PAGE_SIZE }),
           headers: { Authorization: `Bearer ${token}` },
         });
-        itemsArray = [...itemsArray, ...nextResponse.data.results];
-        nextUrl = nextResponse.data.next;
+        const results = res.data.results || [];
+        all = all.concat(results.map(mapPurchase));
+        if (!res.data.next) break;
+        page += 1;
       }
-    } else if (Array.isArray(response.data)) {
-      itemsArray = response.data;
+
+      if (all.length === 0) {
+        toast.warning("No data to export");
+        return;
+      }
+
+      const exportData: any[] = all.map((item, index) => ({
+        "SR No": index + 1,
+        "Date": item.date || "-",
+        "Terms": item.terms || "-",
+        "Party Name": item.party_name_name || "-",
+        "Bill No": item.billNo || "-",
+        "Purchase Bill No": item.purchasebill_no || "-",
+        "Due Date": item.due_date || "-",
+        "Narration": item.narration || "-",
+        "Total Basic (₹)": Number(item.total_basic || 0).toFixed(2),
+        "Total Tax (₹)": Number(item.total_tax || 0).toFixed(2),
+        "F+O+R (₹)": Number(item.F_O_R || 0).toFixed(2),
+        "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
+      }));
+
+      const grandTotal = all.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
+      exportData.push({
+        "SR No": "",
+        "Date": "",
+        "Terms": "",
+        "Party Name": "TOTAL",
+        "Bill No": "",
+        "Purchase Bill No": "",
+        "Due Date": "",
+        "Narration": "",
+        "Total Basic (₹)": "",
+        "Total Tax (₹)": "",
+        "F+O+R (₹)": "",
+        "Grand Total (₹)": grandTotal.toFixed(2),
+      });
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws["!cols"] = [
+        { wch: 6 }, { wch: 12 }, { wch: 10 }, { wch: 25 }, { wch: 15 }, { wch: 18 },
+        { wch: 12 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 15 },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Purchase Register");
+      XLSX.writeFile(wb, `Purchase_Register_${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+      toast.success(`Exported ${all.length} records successfully`);
+    } catch (err) {
+      console.error("Export error:", err);
+      toast.error("Export failed");
+    } finally {
+      setExporting(false);
     }
-
-    // Map items with proper IDs
-    const mappedItems = itemsArray.map((item: any, index: number) => {
-      // Debug: Log each item to see its structure
-      console.log(`📦 Item ${index}:`, item);
-      
-      return {
-        uid: index,
-        id: item.id, // ✅ This should exist in Django REST Framework responses
-        billNo: item.billNo,
-        date: item.date,
-        due_date: item.dueDate,
-        grand_total: item.grand_total,
-        total_basic: item.total_basic,
-        total_tax: item.total_tax,
-        terms: item.terms,
-        narration: item.narration,
-        party_name_name: item.party_name_name,
-        purchasebill_no: item.purchasebill_no,
-        created_by: item.created_by,
-        created_by_name: item.created_by_name,
-        F_O_R: (Number(item.frightcharge) || 0) + (Number(item.otherexpnse) || 0) + (Number(item.roundamount) || 0),
-        variants: Array.isArray(item.items) ? item.items.map((v: any) => ({
-          itemName_name: v.itemName_name || v.itemName?.itemName || "",
-          hsnCode: v.hsnCode || "",
-          quantity: v.quantity || 0,
-          altQuantity: v.altQuantity || 0,
-          price: v.price || 0,
-          per: v.per || "",
-          discountPercent: v.discountPercent || 0,
-          basicAmount: v.basicAmount || 0,
-          discountAmount: v.discountAmount || 0,
-          taxAmount: v.taxAmount || 0,
-          netValue: v.netValue || 0,
-        })) : [],
-      };
-    });
-
-    setAllItems(mappedItems);
-    setFilteredItems(mappedItems);
-  } catch (err) {
-    console.error("Error fetching purchases:", err);
-    toast.error("Failed to load purchase records");
-    setAllItems([]);
-    setFilteredItems([]);
-  } finally {
-    setLoading(false);
-  }
-};
-
-
-  // ✅ Initial fetch - runs only once on mount
-  useEffect(() => {
-    fetchItems();
-  }, []);
-
-  // ✅ Client-side filtering
-  useEffect(() => {
-    let filtered = [...allItems];
-
-    // ✅ Filter by search term (billNo, party name, purchasebill_no)
-    if (searchTerm.trim() !== "") {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (item) =>
-          item.billNo?.toLowerCase().includes(term) ||
-          item.party_name_name?.toLowerCase().includes(term) ||
-          item.purchasebill_no?.toLowerCase().includes(term)
-      );
-    }
-
-    // ✅ Filter by terms
-    if (filters.terms) {
-      filtered = filtered.filter(
-        (item) => item.terms?.toLowerCase() === filters.terms.toLowerCase()
-      );
-    }
-
-    setFilteredItems(filtered);
-    setCurrentPage(1); // Reset to first page when filters change
-  }, [searchTerm, filters, allItems]);
+  };
 
   // ------------------ Pagination Handlers ------------------
-  const totalPages = Math.ceil(filteredItems.length / pageSize);
-  const paginatedItems = filteredItems.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  const totalPages = Math.ceil(totalCount / pageSize);
 
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) {
@@ -249,9 +244,8 @@ const fetchItems = async () => {
   };
 
   const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newSize = parseInt(e.target.value);
-    setPageSize(newSize);
-    setCurrentPage(1); // Reset to first page
+    setPageSize(parseInt(e.target.value));
+    setCurrentPage(1);
   };
 
   // ------------------ Search Handlers ------------------
@@ -265,30 +259,28 @@ const fetchItems = async () => {
 
   // ------------------ Filter Handlers ------------------
   const handleFilterChange = (key: keyof FilterOptions, value: string) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
+    setFilters((prev) => ({ ...prev, [key]: value }));
+    setCurrentPage(1);
   };
 
   const clearFilters = () => {
-    setFilters({
-      terms: "",
-    });
+    setFilters({ terms: "" });
+    setCurrentPage(1);
   };
 
-  const hasActiveFilters = () => {
-    return filters.terms !== "";
-  };
+  const hasActiveFilters = () => filters.terms !== "";
 
   // ------------------ View Variants ------------------
   const handleViewVariants = (itemId: number) => {
-    const purchase = filteredItems.find((i) => i.id === itemId);
+    const purchase = items.find((i) => i.id === itemId);
     if (!purchase) return;
 
     setVariants([...purchase.variants]);
     setSelectedItem(itemId);
   };
 
-  // ------------------ Loading State ------------------
-  if (loading && allItems.length === 0) {
+  // ------------------ First load spinner (sirf pehli baar) ------------------
+  if (initialLoading) {
     return (
       <div className="p-6 bg-white min-h-screen flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -302,34 +294,23 @@ const fetchItems = async () => {
       <div className="flex justify-between items-center mb-5">
         <h1 className="text-xl font-bold text-gray-800">Purchase Register</h1>
         <div className="flex gap-2">
-          {/* ✅ Export Excel Button */}
           <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition"
+            disabled={exporting}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <FaFileExcel size={16} />
-            Export Excel
+            {exporting ? "Exporting..." : "Export Excel"}
           </button>
 
-
-{/*{canAdd && (
-  <button
-    onClick={() => setAiModalOpen(true)}
-    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow transition"
-  >
-    <FaRobot size={16} />
-    AI Bill Upload
-  </button>
-)}*/}
           {canAdd && (
-          <button
-            onClick={() => navigate("/purchases")}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
-          >
-            + Add Purchase
-          </button>
+            <button
+              onClick={() => navigate("/purchases")}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
+            >
+              + Add Purchase
+            </button>
           )}
-
         </div>
       </div>
 
@@ -373,7 +354,7 @@ const fetchItems = async () => {
               Filters
               {hasActiveFilters() && (
                 <span className="ml-1 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5">
-                  {Object.values(filters).filter(v => v !== "").length}
+                  {Object.values(filters).filter((v) => v !== "").length}
                 </span>
               )}
             </button>
@@ -395,7 +376,6 @@ const fetchItems = async () => {
         {showFilters && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* Terms Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Terms</label>
                 <select
@@ -415,14 +395,24 @@ const fetchItems = async () => {
       </div>
 
       {/* ------------------ Results Count ------------------ */}
-      <div className="mb-4 text-sm text-gray-600">
-        Showing {paginatedItems.length} of {filteredItems.length} purchase records
-        {searchTerm && ` matching "${searchTerm}"`}
-        {filters.terms && ` with terms: ${filters.terms}`}
+      <div className="mb-4 text-sm text-gray-600 flex flex-wrap items-center gap-x-4">
+        <span>
+          Showing {items.length} of {totalCount} purchase records
+          {debouncedSearch && ` matching "${debouncedSearch}"`}
+          {filters.terms && ` with terms: ${filters.terms}`}
+        </span>
+        <span className="font-semibold text-gray-800">
+          Total: ₹{overallTotal.toFixed(2)}
+        </span>
+        {fetching && <span className="text-blue-600 animate-pulse">Loading...</span>}
       </div>
 
       {/* ------------------ Main Table ------------------ */}
-      <div className="overflow-x-auto bg-white rounded-lg shadow">
+      <div
+        className={`overflow-x-auto bg-white rounded-lg shadow transition-opacity ${
+          fetching ? "opacity-60" : "opacity-100"
+        }`}
+      >
         <table className="w-full text-sm">
           <thead className="bg-gradient-to-r from-blue-600 to-blue-500 text-white">
             <tr>
@@ -450,34 +440,33 @@ const fetchItems = async () => {
           </thead>
 
           <tbody>
-            {paginatedItems.length === 0 ? (
+            {items.length === 0 ? (
               <tr>
                 <td colSpan={14} className="text-center p-8 text-gray-500">
-                  {searchTerm || hasActiveFilters() 
+                  {debouncedSearch || hasActiveFilters()
                     ? "No purchase records match your search/filters"
                     : "No purchase records found"}
                 </td>
               </tr>
             ) : (
-              paginatedItems.map((item, index) => (
-                <tr
-                  key={item.id}
-                  className="border-b hover:bg-blue-50 transition"
-                >
+              items.map((item, index) => (
+                <tr key={item.id} className="border-b hover:bg-blue-50 transition">
                   <td className="p-3 border border-gray-200 whitespace-nowrap">
                     {(currentPage - 1) * pageSize + index + 1}
                   </td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{item.date || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      item.terms?.toLowerCase() === "credit" 
-                        ? "bg-yellow-100 text-yellow-800"
-                        : item.terms?.toLowerCase() === "cash"
-                        ? "bg-green-100 text-green-800"
-                        : item.terms?.toLowerCase() === "bank"
-                        ? "bg-blue-100 text-blue-800"
-                        : "bg-gray-100 text-gray-800"
-                    }`}>
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-medium ${
+                        item.terms?.toLowerCase() === "credit"
+                          ? "bg-yellow-100 text-yellow-800"
+                          : item.terms?.toLowerCase() === "cash"
+                          ? "bg-green-100 text-green-800"
+                          : item.terms?.toLowerCase() === "bank"
+                          ? "bg-blue-100 text-blue-800"
+                          : "bg-gray-100 text-gray-800"
+                      }`}
+                    >
                       {item.terms || "-"}
                     </span>
                   </td>
@@ -508,14 +497,14 @@ const fetchItems = async () => {
       </div>
 
       {/* ------------------ Pagination Controls ------------------ */}
-      {totalPages > 0 && filteredItems.length > 0 && (
+      {totalPages > 0 && totalCount > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">
               Showing {(currentPage - 1) * pageSize + 1}–
-              {Math.min(currentPage * pageSize, filteredItems.length)} of {filteredItems.length} items
+              {Math.min(currentPage * pageSize, totalCount)} of {totalCount} items
             </span>
-            
+
             <select
               value={pageSize}
               onChange={handlePageSizeChange}
@@ -542,21 +531,20 @@ const fetchItems = async () => {
               Previous
             </button>
 
-            {/* Page Numbers - Smart pagination */}
             {(() => {
               const maxVisible = 5;
               let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
               let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-              
+
               if (endPage - startPage + 1 < maxVisible) {
                 startPage = Math.max(1, endPage - maxVisible + 1);
               }
-              
+
               const pages = [];
               for (let i = startPage; i <= endPage; i++) {
                 pages.push(i);
               }
-              
+
               return pages.map((page) => (
                 <button
                   key={page}
@@ -592,9 +580,7 @@ const fetchItems = async () => {
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex justify-center items-start pt-20 z-50">
           <div className="bg-white w-11/12 md:w-3/4 lg:w-1/2 rounded-xl shadow-2xl p-5">
             <div className="flex justify-between items-center border-b pb-2 mb-4">
-              <h2 className="text-lg font-semibold text-blue-700">
-                Item Variants
-              </h2>
+              <h2 className="text-lg font-semibold text-blue-700">Item Variants</h2>
               <button
                 onClick={() => setSelectedItem(null)}
                 className="text-red-500 hover:text-red-700 text-xl"

@@ -253,6 +253,7 @@ const createItemRow = (fields: any[] = []) => {
     discountAmount: 0,
     taxAmount: 0,
     netValue: 0,
+    location: "",
   };
   fields.forEach(f => { 
     base[f.key] = f.type === "number" ? 0 : ""; 
@@ -513,6 +514,7 @@ const CreateItems: React.FC = () => {
       discountAmount: row.discountAmount,
       taxAmount: row.taxAmount,
       netValue: row.netValue,
+      location: row.location || "",
       ...branchFields.reduce((acc: any, f: any) => ({ ...acc, [f.key]: row[f.key] || "" }), {}),
     }, false);
     setEditingId(row.id);
@@ -716,6 +718,7 @@ const CreateItems: React.FC = () => {
               discountAmount: variant.discountAmount,
               taxAmount: variant.taxAmount,
               netValue: variant.netValue,
+              location: variant.location || "",
               ...branchFields.reduce((acc: any, f: any) => {
                 acc[f.key] = variant[f.key] || "";
                 return acc;
@@ -816,6 +819,8 @@ const CreateItems: React.FC = () => {
           discountAmount: Number(v.discountAmount),
           taxAmount: Number(v.taxAmount),
           netValue: Number(v.netValue),
+          location: v.location || "", 
+
         };
 
         if (v.id && v.id > 0) {
@@ -880,7 +885,7 @@ const CreateItems: React.FC = () => {
       return;
     }
 
-    if (isSuperAdmin && cur.barcode && cur.barcode.trim() !== "") {
+    if ((isSuperAdmin || isEmployee) && cur.barcode && cur.barcode.trim() !== "") {
       const isUnique = await checkBarcodeUniqueness(cur.barcode, editingId ?? undefined);
       if (!isUnique) {
         toast.error(`Barcode "${cur.barcode}" already exists in this branch. Please use a different barcode.`);
@@ -899,6 +904,7 @@ const CreateItems: React.FC = () => {
       discountAmount: Number(cur.discountAmount) || 0,
       taxAmount: Number(cur.taxAmount) || 0,
       netValue: Number(cur.netValue) || 0,
+      location: cur.location || "",
       ...branchFields.reduce((acc, f) => ({ ...acc, [f.key]: cur[f.key] || "" }), {}),
     };
 
@@ -1068,7 +1074,15 @@ const CreateItems: React.FC = () => {
           }, [values.subCategory, isEditMode, initialItemData?.subCategory, setFieldValue]);
 
           return (
-            <Form className="bg-white p-2 sm:p-3 md:p-4">
+           <Form
+  className="bg-white p-2 sm:p-3 md:p-4"
+  onKeyDown={(e) => {
+    const target = e.target as HTMLElement;
+    if (e.key === "Enter" && target.tagName === "INPUT") {
+      e.preventDefault(); // Enter se form submit nahi hoga
+    }
+  }}
+>
               <BranchWatcher branchFields={branchFields} />
               <ItemCalculatorWatcher />
 
@@ -1252,20 +1266,34 @@ const CreateItems: React.FC = () => {
                       type="text"
                       name="items[0].barcode"
                       value={values.items?.[0]?.barcode || ""}
+                      onKeyDown={async (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();  
+    e.stopPropagation();
+
+    const errors = await validateForm();
+    setTouched({
+      items: [
+        {
+          purchasePrice: true,
+          salesPrice: true,
+          mrp: true,
+          opStock: true,
+          barcode: true,
+        },
+      ],
+    });
+    if (errors.items) return;
+
+    handleAddVariant(values, setFieldValue);
+  }
+}}
                       onChange={(e) => {
                         const newValue = e.target.value.replace(/[^a-zA-Z0-9]/g, "");
                         setFieldValue("items[0].barcode", newValue);
                         setCurrentBarcode(newValue);
                         
-                        if (newValue.length >= 3) {
-                          setTimeout(async () => {
-                            if (currentBarcode === newValue) {
-                              await checkBarcodeUniqueness(newValue, editingId ?? undefined);
-                            }
-                          }, 500);
-                        } else {
-                          setBarcodeError("");
-                        }
+if (newValue.length < 3) setBarcodeError("");
                       }}
                       onBlur={async () => {
                         const val = values.items?.[0]?.barcode;
@@ -1282,7 +1310,10 @@ const CreateItems: React.FC = () => {
                     )}
                   </div>
 
-                  <FormInput label="Op.Stock" name="items[0].opStock" type="number" />
+                  {/* ✅ LOCATION INPUT — yahan add karo */}
+<FormInput label="Location" name="items[0].location" type="text" />
+
+<FormInput label="Op.Stock" name="items[0].opStock" type="number" />
                   <DisplayField label="Net" value={values.items?.[0]?.netValue || "0.00"} />
 
                   <div className="flex items-end gap-1">
@@ -1350,6 +1381,7 @@ const CreateItems: React.FC = () => {
                       { key: "salesPrice", label: "S.Price" },
                       { key: "mrp", label: "M.R.P" },
                       { key: "barcode", label: "Barcode" },
+                      { key: "location", label: "Location" },  
                       { key: "opStock", label: "Op.Stock" },
                     ]}
                     totals={totals}

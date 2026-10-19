@@ -1,9 +1,8 @@
 // src/pages/superadmin/B2BSalesList.tsx
-// B2B SALES LIST — Same design as Sales Register (Addsalesitem)
-// Superadmin ke liye saari B2B Sales dekhne ki page
+// B2B SALES LIST — server-side pagination + search + filters (fast for any data size)
 
 import React, { useEffect, useState } from "react";
-import { FaEye, FaPrint, FaSearch, FaFilter, FaTimes, FaFileExcel, FaPlus, FaBan } from "react-icons/fa";
+import { FaEye, FaSearch, FaFilter, FaTimes, FaFileExcel, FaPlus, FaBan } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import * as XLSX from "xlsx";
@@ -50,7 +49,6 @@ interface PaginatedResponse {
   success?: boolean;
 }
 
-// ─── Filter Options ──────────────────────────────────────────────────────
 interface FilterOptions {
   status: string;
   startDate: string;
@@ -60,11 +58,13 @@ interface FilterOptions {
 // ─── Main Component ──────────────────────────────────────────────────────
 const B2BSalesList: React.FC = () => {
   const navigate = useNavigate();
-  const {canAdd} = usePermission("/b2bsales");
+  const { canAdd } = usePermission("/b2bsales");
 
-  const [allSales, setAllSales] = useState<B2BSale[]>([]);
-  const [filteredSales, setFilteredSales] = useState<B2BSale[]>([]);
+  const [sales, setSales] = useState<B2BSale[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [initialLoad, setInitialLoad] = useState<boolean>(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -86,129 +86,114 @@ const B2BSalesList: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
-  // ─── Fetch all B2B Sales ──────────────────────────────────────────────
-  const fetchSales = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get<PaginatedResponse>(`b2b-sales/?page=1&page_size=1000`);
+  // ─── Search debounce (typing rukne ke 400ms baad hi API call) ───
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
 
-      let allResults: B2BSale[] = [];
-
-      if (response.data.results) {
-        allResults = response.data.results;
-
-        let nextUrl = response.data.next;
-        while (nextUrl) {
-          const nextResponse = await api.get(nextUrl);
-          allResults = [...allResults, ...nextResponse.data.results];
-          nextUrl = nextResponse.data.next;
-        }
-      } else if (Array.isArray(response.data)) {
-        allResults = response.data;
-      }
-
-      // ✅ Map to consistent format
-      const mappedSales = allResults.map((item: any) => ({
-        id: item.id,
-        sale_no: item.sale_no,
-        from_branch_name: item.from_branch_name || item.from_branch?.branch_name || "-",
-        to_branch_name: item.to_branch_name || item.to_branch?.branch_name || "-",
-        sale_date: item.sale_date,
-        status: item.status || "pending",
-        item_count: item.item_count || item.items?.length || 0,
-        created_at: item.created_at,
-        note: item.note,
-        created_by_name: item.created_by_name,
-        items: item.items || [],
-      }));
-
-      setAllSales(mappedSales);
-      setFilteredSales(mappedSales);
-      setTotalItems(mappedSales.length);
-      setTotalPages(Math.ceil(mappedSales.length / pageSize));
-    } catch (err) {
-      console.error("Failed to fetch B2B sales:", err);
-      toast.error("Failed to load B2B sales");
-      setAllSales([]);
-      setFilteredSales([]);
-    } finally {
-      setLoading(false);
-    }
+  // ─── Query string builder ───
+  const buildParams = (page: number, size: number) => {
+    const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("page_size", String(size));
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (filters.status) params.set("status", filters.status);
+    if (filters.startDate) params.set("start_date", filters.startDate);
+    if (filters.endDate) params.set("end_date", filters.endDate);
+    return params.toString();
   };
 
-  // ─── Initial fetch ─────────────────────────────────────────────────────
+  // ─── Server-side fetch: sirf current page ki rows ───
   useEffect(() => {
-    fetchSales();
-  }, []);
+    let cancelled = false;
 
-  // ─── Client-side filtering ─────────────────────────────────────────────
-  useEffect(() => {
-    let filtered = [...allSales];
+    const load = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get<PaginatedResponse>(
+          `b2b-sales/?${buildParams(currentPage, pageSize)}`
+        );
+        if (cancelled) return;
 
-    // Search by sale_no or branch name
-    if (searchTerm.trim() !== "") {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (sale) =>
-          sale.sale_no?.toLowerCase().includes(term) ||
-          sale.from_branch_name?.toLowerCase().includes(term) ||
-          sale.to_branch_name?.toLowerCase().includes(term)
-      );
+        const results = res.data.results || [];
+        const count = res.data.count || 0;
+
+        setSales(
+          results.map((item: any) => ({
+            id: item.id,
+            sale_no: item.sale_no,
+            from_branch_name: item.from_branch_name || "-",
+            to_branch_name: item.to_branch_name || "-",
+            sale_date: item.sale_date,
+            status: item.status || "pending",
+            item_count: item.item_count || 0,
+            created_at: item.created_at,
+            created_by_name: item.created_by_name,
+          }))
+        );
+        setTotalItems(count);
+        setTotalPages(Math.max(1, Math.ceil(count / pageSize)));
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Failed to fetch B2B sales:", err);
+        toast.error("Failed to load B2B sales");
+        setSales([]);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setInitialLoad(false);
+        }
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true; // purani slow request ka result ignore
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, pageSize, debouncedSearch, filters, reloadKey]);
+
+  // ─── Export to Excel (click par hi, filtered data page-by-page) ───
+  const exportToExcel = async () => {
+    try {
+      let page = 1;
+      let all: any[] = [];
+      while (true) {
+        const res = await api.get(`b2b-sales/?${buildParams(page, 200)}`);
+        all = [...all, ...(res.data.results || [])];
+        if (!res.data.next) break;
+        page++;
+      }
+
+      if (all.length === 0) {
+        toast.warning("No data to export");
+        return;
+      }
+
+      const exportData = all.map((sale, index) => ({
+        "SR No": index + 1,
+        "Sale No": sale.sale_no || "-",
+        "From Branch": sale.from_branch_name || "-",
+        "To Branch": sale.to_branch_name || "-",
+        "Date": sale.sale_date || "-",
+        "Status": sale.status || "-",
+        "Items": sale.item_count || 0,
+        "Created By": sale.created_by_name || "-",
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws["!cols"] = [{ wch: 6 }, { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 20 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "B2B Sales List");
+      XLSX.writeFile(wb, `B2B_Sales_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast.success(`Exported ${all.length} records successfully`);
+    } catch (err) {
+      toast.error("Export failed");
     }
-
-    // Filter by status
-    if (filters.status) {
-      filtered = filtered.filter((sale) => sale.status === filters.status);
-    }
-
-    // Filter by date range
-    if (filters.startDate) {
-      filtered = filtered.filter((sale) => sale.sale_date >= filters.startDate);
-    }
-    if (filters.endDate) {
-      filtered = filtered.filter((sale) => sale.sale_date <= filters.endDate);
-    }
-
-    setFilteredSales(filtered);
-    setTotalItems(filtered.length);
-    setTotalPages(Math.ceil(filtered.length / pageSize));
-    setCurrentPage(1);
-  }, [searchTerm, filters, allSales]);
-
-  // ─── Export to Excel ──────────────────────────────────────────────────
-  const exportToExcel = () => {
-    if (filteredSales.length === 0) {
-      toast.warning("No data to export");
-      return;
-    }
-
-    const exportData = filteredSales.map((sale, index) => ({
-      "SR No": index + 1,
-      "Sale No": sale.sale_no || "-",
-      "From Branch": sale.from_branch_name || "-",
-      "To Branch": sale.to_branch_name || "-",
-      "Date": sale.sale_date || "-",
-      "Status": sale.status || "-",
-      "Items": sale.item_count || 0,
-      "Created By": sale.created_by_name || "-",
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    ws["!cols"] = [
-      { wch: 6 },   // SR No
-      { wch: 18 },  // Sale No
-      { wch: 20 },  // From Branch
-      { wch: 20 },  // To Branch
-      { wch: 12 },  // Date
-      { wch: 12 },  // Status
-      { wch: 8 },   // Items
-      { wch: 20 },  // Created By
-    ];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "B2B Sales List");
-    XLSX.writeFile(wb, `B2B_Sales_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    toast.success(`Exported ${filteredSales.length} records successfully`);
   };
 
   // ─── Pagination handlers ──────────────────────────────────────────────
@@ -220,8 +205,7 @@ const B2BSalesList: React.FC = () => {
   };
 
   const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newSize = parseInt(e.target.value);
-    setPageSize(newSize);
+    setPageSize(parseInt(e.target.value));
     setCurrentPage(1);
   };
 
@@ -237,10 +221,12 @@ const B2BSalesList: React.FC = () => {
   // ─── Filter handlers ──────────────────────────────────────────────────
   const handleFilterChange = (key: keyof FilterOptions, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
+    setCurrentPage(1);
   };
 
   const clearFilters = () => {
     setFilters({ status: "", startDate: "", endDate: "" });
+    setCurrentPage(1);
   };
 
   const hasActiveFilters = () => {
@@ -267,14 +253,14 @@ const B2BSalesList: React.FC = () => {
 
   // ─── Cancel Sale ──────────────────────────────────────────────────────
   const handleCancelSale = async (saleId: number) => {
-    if (!confirm("Do you want to cancel this B2B Sale? Unverified items stock will be recovered.")) return;
+    if (!window.confirm("Do you want to cancel this B2B Sale? Unverified items stock will be recovered.")) return;
     setCancelling(true);
     try {
       const res = await api.post(`b2b-sales/${saleId}/cancel/`);
       if (res.data.success) {
         toast.success(res.data.message || "Sale cancelled successfully");
         setSelectedSale(null);
-        fetchSales();
+        setReloadKey((k) => k + 1);
       } else {
         toast.error(res.data.message || "Failed to cancel sale");
       }
@@ -283,11 +269,6 @@ const B2BSalesList: React.FC = () => {
     } finally {
       setCancelling(false);
     }
-  };
-
-  // ─── Get paginated items ─────────────────────────────────────────────
-  const getPaginatedItems = () => {
-    return filteredSales.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   };
 
   // ─── Status badge helper ─────────────────────────────────────────────
@@ -309,8 +290,8 @@ const B2BSalesList: React.FC = () => {
     );
   };
 
-  // ─── Loading State ──────────────────────────────────────────────────
-  if (loading && allSales.length === 0) {
+  // ─── Loading State (sirf pehli baar full-screen spinner) ─────────────
+  if (initialLoad && loading) {
     return (
       <div className="p-6 bg-white min-h-screen flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -318,13 +299,10 @@ const B2BSalesList: React.FC = () => {
     );
   }
 
-  const paginatedItems = getPaginatedItems();
-
   // ─── Detail View ──────────────────────────────────────────────────────
   if (selectedSale) {
     return (
       <div className="p-6 bg-white min-h-screen">
-        {/* Detail Header */}
         <div className="flex justify-between items-center mb-5">
           <div className="flex items-center gap-3">
             <button
@@ -349,14 +327,12 @@ const B2BSalesList: React.FC = () => {
           )}
         </div>
 
-        {/* Detail Content */}
         {detailLoading ? (
           <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Sale Info */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-gray-50 rounded-lg p-4">
               <div>
                 <div className="text-xs text-gray-500">From Branch</div>
@@ -382,7 +358,6 @@ const B2BSalesList: React.FC = () => {
               )}
             </div>
 
-            {/* Items Table */}
             <div className="overflow-x-auto bg-white rounded-lg shadow">
               <table className="w-full text-sm">
                 <thead className="bg-gradient-to-r from-blue-600 to-blue-500 text-white">
@@ -420,7 +395,7 @@ const B2BSalesList: React.FC = () => {
                           {item.is_stock_updated ? (
                             <span className="text-xs text-emerald-600 font-semibold">✓ Verified</span>
                           ) : (
-                            <span className="text-xs text-amber-600 font-semibold"> Pending</span>
+                            <span className="text-xs text-amber-600 font-semibold">Pending</span>
                           )}
                         </td>
                       </tr>
@@ -434,17 +409,17 @@ const B2BSalesList: React.FC = () => {
               </table>
             </div>
 
-            {/* GST Summary */}
-            {selectedSale.items && selectedSale.items.some(i => Number(i.basic_amount || 0) > 0) && (
+            {selectedSale.items && selectedSale.items.some((i) => Number(i.basic_amount || 0) > 0) && (
               <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl p-4 border border-emerald-200">
                 <h3 className="text-sm font-semibold text-gray-800 mb-3">GST Summary</h3>
                 {(() => {
-                  const basic = selectedSale.items.reduce((s, i) => s + Number(i.basic_amount || 0), 0);
-                  const tax = selectedSale.items.reduce((s, i) => s + Number(i.tax_amount || 0), 0);
-                  const cgst = selectedSale.items.reduce((s, i) => s + Number(i.cgst || 0), 0);
-                  const sgst = selectedSale.items.reduce((s, i) => s + Number(i.sgst || 0), 0);
-                  const igst = selectedSale.items.reduce((s, i) => s + Number(i.igst || 0), 0);
-                  const net = selectedSale.items.reduce((s, i) => s + Number(i.net_amount || 0), 0);
+                  const its = selectedSale.items || [];
+                  const basic = its.reduce((s, i) => s + Number(i.basic_amount || 0), 0);
+                  const tax = its.reduce((s, i) => s + Number(i.tax_amount || 0), 0);
+                  const cgst = its.reduce((s, i) => s + Number(i.cgst || 0), 0);
+                  const sgst = its.reduce((s, i) => s + Number(i.sgst || 0), 0);
+                  const igst = its.reduce((s, i) => s + Number(i.igst || 0), 0);
+                  const net = its.reduce((s, i) => s + Number(i.net_amount || 0), 0);
 
                   return (
                     <div className="space-y-1 text-sm">
@@ -491,7 +466,6 @@ const B2BSalesList: React.FC = () => {
   // ─── List View ────────────────────────────────────────────────────────
   return (
     <div className="p-6 bg-white min-h-screen">
-
       {/* Header */}
       <div className="flex justify-between items-center mb-5">
         <h1 className="text-xl font-bold text-gray-800">B2B Sales List</h1>
@@ -504,13 +478,13 @@ const B2BSalesList: React.FC = () => {
             Export Excel
           </button>
           {canAdd && (
-          <button
-            onClick={() => navigate("/b2bsalescreate")}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow transition"
-          >
-            <FaPlus size={14} />
-            New B2B Sale
-          </button>
+            <button
+              onClick={() => navigate("/b2bsalescreate")}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow transition"
+            >
+              <FaPlus size={14} />
+              New B2B Sale
+            </button>
           )}
         </div>
       </div>
@@ -519,7 +493,6 @@ const B2BSalesList: React.FC = () => {
       <div className="bg-gray-50 rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
         <div className="flex flex-wrap gap-3 items-center justify-between">
           <div className="flex gap-2 flex-1">
-            {/* Search Input */}
             <div className="relative flex-1 max-w-md">
               <div className="absolute inset-y-0 left-0 flex items-center pl-3">
                 <FaSearch className="text-gray-400" />
@@ -542,24 +515,23 @@ const B2BSalesList: React.FC = () => {
               )}
             </div>
 
-            {/* Filter Toggle Button */}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 transition ${showFilters || hasActiveFilters()
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 transition ${
+                showFilters || hasActiveFilters()
                   ? "bg-blue-600 text-white"
                   : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
+              }`}
             >
               <FaFilter size={14} />
               Filters
               {hasActiveFilters() && (
                 <span className="ml-1 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5">
-                  {Object.values(filters).filter(v => v !== "").length}
+                  {Object.values(filters).filter((v) => v !== "").length}
                 </span>
               )}
             </button>
 
-            {/* Clear All Filters Button */}
             {hasActiveFilters() && (
               <button
                 onClick={clearFilters}
@@ -572,11 +544,9 @@ const B2BSalesList: React.FC = () => {
           </div>
         </div>
 
-        {/* Filter Panel */}
         {showFilters && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Status Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                 <select
@@ -590,38 +560,60 @@ const B2BSalesList: React.FC = () => {
                   <option value="cancelled">Cancelled</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
+                <input
+                  type="date"
+                  value={filters.startDate}
+                  onChange={(e) => handleFilterChange("startDate", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">To Date</label>
+                <input
+                  type="date"
+                  value={filters.endDate}
+                  onChange={(e) => handleFilterChange("endDate", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
             </div>
           </div>
         )}
       </div>
 
       {/* Results Count */}
-      <div className="mb-4 text-sm text-gray-600">
-        Showing {paginatedItems.length} of {filteredSales.length} B2B sales records
-        {searchTerm && ` matching "${searchTerm}"`}
-        {filters.status && ` with status: ${filters.status}`}
+      <div className="mb-4 text-sm text-gray-600 flex items-center gap-2">
+        <span>
+          Showing {sales.length} of {totalItems} B2B sales records
+          {debouncedSearch && ` matching "${debouncedSearch}"`}
+          {filters.status && ` with status: ${filters.status}`}
+        </span>
+        {loading && <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></span>}
       </div>
 
       {/* Sales Table */}
-      <div className="overflow-x-auto bg-white rounded-lg shadow">
+      <div className={`overflow-x-auto bg-white rounded-lg shadow transition-opacity ${loading ? "opacity-60" : ""}`}>
         <table className="w-full text-sm">
           <thead className="bg-gradient-to-r from-blue-600 to-blue-500 text-white">
             <tr>
-              {["SR", "Sale No", "From Branch", "To Branch", "Date", "Items", "Invoice Approval", "Created By", "Action"]
-  .map((h) => <th key={h} className="p-3 border border-gray-200 whitespace-nowrap text-left font-medium">{h}</th>)}
+              {["SR", "Sale No", "From Branch", "To Branch", "Date", "Items", "Invoice Approval", "Created By", "Action"].map((h) => (
+                <th key={h} className="p-3 border border-gray-200 whitespace-nowrap text-left font-medium">{h}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {paginatedItems.length === 0 ? (
+            {sales.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center p-8 text-gray-500">
-                  {searchTerm || hasActiveFilters()
+                <td colSpan={9} className="text-center p-8 text-gray-500">
+                  {debouncedSearch || hasActiveFilters()
                     ? "No B2B sales match your search/filters"
                     : "No B2B sales found"}
                 </td>
               </tr>
             ) : (
-              paginatedItems.map((sale, index) => (
+              sales.map((sale, index) => (
                 <tr key={sale.id} className="border-b hover:bg-blue-50">
                   <td className="p-3 border border-gray-200 whitespace-nowrap">
                     {(currentPage - 1) * pageSize + index + 1}
@@ -637,17 +629,21 @@ const B2BSalesList: React.FC = () => {
                       {sale.item_count}
                     </span>
                   </td>
-<td className="p-3 border border-gray-200 whitespace-nowrap">
-  {getStatusBadge(sale.status)}
-</td>
-<td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
-  {sale.created_by_name || "-"}   {/* ✅ ADD */}
-</td>
-<td className="p-3 border border-gray-200 whitespace-nowrap text-center">
-  <button onClick={() => handleViewDetail(sale.id)} className="...">
-    <FaEye />
-  </button>
-</td>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap">
+                    {getStatusBadge(sale.status)}
+                  </td>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
+                    {sale.created_by_name || "-"}
+                  </td>
+                  <td className="p-3 border border-gray-200 whitespace-nowrap text-center">
+                    <button
+                      onClick={() => handleViewDetail(sale.id)}
+                      className="text-blue-600 hover:text-blue-800 p-2"
+                      title="View"
+                    >
+                      <FaEye />
+                    </button>
+                  </td>
                 </tr>
               ))
             )}
@@ -656,12 +652,12 @@ const B2BSalesList: React.FC = () => {
       </div>
 
       {/* Pagination Controls */}
-      {totalPages > 0 && filteredSales.length > 0 && (
+      {totalPages > 0 && totalItems > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">
               Showing {(currentPage - 1) * pageSize + 1}–
-              {Math.min(currentPage * pageSize, filteredSales.length)} of {filteredSales.length} items
+              {Math.min(currentPage * pageSize, totalItems)} of {totalItems} items
             </span>
 
             <select
@@ -681,10 +677,11 @@ const B2BSalesList: React.FC = () => {
             <button
               disabled={currentPage === 1}
               onClick={() => handlePageChange(currentPage - 1)}
-              className={`px-3 py-1 rounded ${currentPage === 1
+              className={`px-3 py-1 rounded ${
+                currentPage === 1
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
+              }`}
             >
               Prev
             </button>
@@ -698,7 +695,7 @@ const B2BSalesList: React.FC = () => {
                 startPage = Math.max(1, endPage - maxVisible + 1);
               }
 
-              const pages = [];
+              const pages: number[] = [];
               for (let i = startPage; i <= endPage; i++) {
                 pages.push(i);
               }
@@ -707,10 +704,9 @@ const B2BSalesList: React.FC = () => {
                 <button
                   key={page}
                   onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1 rounded ${currentPage === page
-                      ? "bg-blue-500 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                    }`}
+                  className={`px-3 py-1 rounded ${
+                    currentPage === page ? "bg-blue-500 text-white" : "bg-gray-200 hover:bg-gray-300"
+                  }`}
                 >
                   {page}
                 </button>
@@ -720,10 +716,11 @@ const B2BSalesList: React.FC = () => {
             <button
               disabled={currentPage === totalPages}
               onClick={() => handlePageChange(currentPage + 1)}
-              className={`px-3 py-1 rounded ${currentPage === totalPages
+              className={`px-3 py-1 rounded ${
+                currentPage === totalPages
                   ? "bg-gray-200 text-gray-500 cursor-not-allowed"
                   : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
+              }`}
             >
               Next
             </button>

@@ -1,8 +1,7 @@
 // src/pages/purchaseReturn/PurchaseReturnList.tsx
 
-import React, { useEffect, useState, useRef } from "react";
-import { motion } from "framer-motion";
-import { FaArrowLeft, FaEye, FaTrash, FaFileExcel, FaPrint, FaSearch, FaFilter, FaTimes, FaPlus } from "react-icons/fa";
+import React, { useEffect, useRef, useState } from "react";
+import { FaEye, FaTrash, FaFileExcel, FaPrint, FaSearch, FaFilter, FaTimes, FaPlus } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import api from "../../api/api";
@@ -28,6 +27,7 @@ interface PaginatedResponse {
     next: string | null;
     previous: string | null;
     results: PurchaseReturn[];
+    overall_total?: number;
 }
 
 interface FilterOptions {
@@ -36,128 +36,143 @@ interface FilterOptions {
 
 const PurchaseReturnList: React.FC = () => {
     const navigate = useNavigate();
- 
+
     const { canAdd, canDelete } = usePermission("/purchaseReturnList");
     // Note: Edit nahi hai isme, isliye canEdit use nahi kiya
-    
-    const [allReturns, setAllReturns] = useState<PurchaseReturn[]>([]);
-    const [filteredReturns, setFilteredReturns] = useState<PurchaseReturn[]>([]);
+
+    // ── Server se aane wala sirf current page ──
+    const [returns, setReturns] = useState<PurchaseReturn[]>([]);
+    const [totalCount, setTotalCount] = useState(0);
+    const [overallTotal, setOverallTotal] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [exporting, setExporting] = useState(false);
+    const [refreshKey, setRefreshKey] = useState(0);
+
     const [selectedReturn, setSelectedReturn] = useState<PurchaseReturn | null>(null);
     const [showDetailModal, setShowDetailModal] = useState(false);
-    
+
     const [searchTerm, setSearchTerm] = useState<string>("");
+    const [debouncedSearch, setDebouncedSearch] = useState<string>("");
     const [showFilters, setShowFilters] = useState<boolean>(false);
     const [filters, setFilters] = useState<FilterOptions>({
         return_type: "",
     });
-    
+
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(15);
-    const [totalItems, setTotalItems] = useState(0);
-    const [totalPages, setTotalPages] = useState(1);
 
-    const exportToExcel = () => {
-        if (filteredReturns.length === 0) {
+    const requestId = useRef(0);
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+    // ── Search: 300ms ruk ke hi server ko bhejo ──
+    useEffect(() => {
+        const t = setTimeout(() => {
+            setDebouncedSearch(searchTerm.trim());
+            setCurrentPage(1);
+        }, 300);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
+
+    // ── Data fetch: page / size / search / filter badalte hi ──
+    useEffect(() => {
+        const id = ++requestId.current;
+
+        const load = async () => {
+            setLoading(true);
+            try {
+                const params: Record<string, any> = { page: currentPage, page_size: pageSize };
+                if (debouncedSearch) params.search = debouncedSearch;
+                if (filters.return_type) params.return_type = filters.return_type;
+
+                const res = await api.get<PaginatedResponse>("/purchase-return-list/", { params });
+                if (id !== requestId.current) return; // naya request aa chuka hai, purana ignore
+
+                setReturns(res.data.results || []);
+                setTotalCount(res.data.count || 0);
+                setOverallTotal(Number(res.data.overall_total || 0));
+            } catch (err: any) {
+                if (id !== requestId.current) return;
+                // Last page ke saare records delete ho gaye -> ek page peeche
+                if (err?.response?.status === 404 && currentPage > 1) {
+                    setCurrentPage(currentPage - 1);
+                    return;
+                }
+                console.error("Error fetching returns:", err);
+                toast.error("Failed to load purchase returns");
+                setReturns([]);
+                setTotalCount(0);
+                setOverallTotal(0);
+            } finally {
+                if (id === requestId.current) setLoading(false);
+            }
+        };
+
+        load();
+    }, [currentPage, pageSize, debouncedSearch, filters.return_type, refreshKey]);
+
+    // ── Excel: button dabane par hi saara filtered data laao ──
+    const exportToExcel = async () => {
+        if (totalCount === 0) {
             toast.warning("No data to export");
             return;
         }
 
-        const exportData: any[] = filteredReturns.map((item, index) => ({
-            "SR No": index + 1,
-            "Return No": item.return_no || "-",
-            "Date": item.date || "-",
-            "Party Name": item.party_name || "-",
-            "Reason for Return": item.reason_for_return || "-",
-            "Return Type": item.return_type || "-",
-            "Approved By": item.approved_by || "-",
-            "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
-        }));
-
-        const grandTotal = filteredReturns.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
-        exportData.push({
-            "SR No": "",
-            "Return No": "",
-            "Date": "",
-            "Party Name": "TOTAL",
-            "Reason for Return": "",
-            "Return Type": "",
-            "Approved By": "",
-            "Grand Total (₹)": grandTotal.toFixed(2),
-        });
-
-        const ws = XLSX.utils.json_to_sheet(exportData);
-        ws["!cols"] = [
-            { wch: 6 }, { wch: 18 }, { wch: 12 }, { wch: 25 },
-            { wch: 35 }, { wch: 14 }, { wch: 18 }, { wch: 16 },
-        ];
-
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Purchase Return List");
-        const fileName = `Purchase_Return_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
-        XLSX.writeFile(wb, fileName);
-        toast.success(`Exported ${filteredReturns.length} records successfully`);
-    };
-
-    const fetchReturns = async () => {
-        setLoading(true);
+        setExporting(true);
         try {
-            const res = await api.get<PaginatedResponse>(`/purchase-return-list/?page=1&page_size=1000`);
-            
-            let allResults: PurchaseReturn[] = [];
-            
-            if (res.data.results) {
-                allResults = res.data.results;
-                let nextUrl = res.data.next;
-                while (nextUrl) {
-                    const nextResponse = await api.get(nextUrl);
-                    allResults = [...allResults, ...nextResponse.data.results];
-                    nextUrl = nextResponse.data.next;
-                }
+            const params: Record<string, any> = { page: 1, page_size: 100 };
+            if (debouncedSearch) params.search = debouncedSearch;
+            if (filters.return_type) params.return_type = filters.return_type;
+
+            const first = await api.get<PaginatedResponse>("/purchase-return-list/", { params });
+            let all: PurchaseReturn[] = [...(first.data.results || [])];
+            let nextUrl = first.data.next;
+            while (nextUrl) {
+                const nextRes = await api.get<PaginatedResponse>(nextUrl);
+                all = all.concat(nextRes.data.results || []);
+                nextUrl = nextRes.data.next;
             }
-            
-            setAllReturns(allResults);
-            setFilteredReturns(allResults);
-            setTotalItems(allResults.length);
-            setTotalPages(Math.ceil(allResults.length / pageSize));
+
+            const exportData: any[] = all.map((item, index) => ({
+                "SR No": index + 1,
+                "Return No": item.return_no || "-",
+                "Date": item.date || "-",
+                "Party Name": item.party_name || "-",
+                "Reason for Return": item.reason_for_return || "-",
+                "Return Type": item.return_type || "-",
+                "Approved By": item.approved_by || "-",
+                "Grand Total (₹)": Number(item.grand_total || 0).toFixed(2),
+            }));
+
+            const grandTotal = all.reduce((sum, item) => sum + Number(item.grand_total || 0), 0);
+            exportData.push({
+                "SR No": "",
+                "Return No": "",
+                "Date": "",
+                "Party Name": "TOTAL",
+                "Reason for Return": "",
+                "Return Type": "",
+                "Approved By": "",
+                "Grand Total (₹)": grandTotal.toFixed(2),
+            });
+
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            ws["!cols"] = [
+                { wch: 6 }, { wch: 18 }, { wch: 12 }, { wch: 25 },
+                { wch: 35 }, { wch: 14 }, { wch: 18 }, { wch: 16 },
+            ];
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Purchase Return List");
+            const fileName = `Purchase_Return_List_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+            toast.success(`Exported ${all.length} records successfully`);
         } catch (err) {
-            console.error("Error fetching returns:", err);
-            toast.error("Failed to load purchase returns");
-            setAllReturns([]);
-            setFilteredReturns([]);
+            console.error("Export error:", err);
+            toast.error("Failed to export");
         } finally {
-            setLoading(false);
+            setExporting(false);
         }
     };
-
-    useEffect(() => {
-        fetchReturns();
-    }, []);
-
-    useEffect(() => {
-        let filtered = [...allReturns];
-
-        if (searchTerm.trim() !== "") {
-            const term = searchTerm.toLowerCase();
-            filtered = filtered.filter(
-                (item) =>
-                    item.return_no?.toLowerCase().includes(term) ||
-                    item.party_name?.toLowerCase().includes(term) ||
-                    item.reason_for_return?.toLowerCase().includes(term)
-            );
-        }
-
-        if (filters.return_type) {
-            filtered = filtered.filter(
-                (item) => item.return_type?.toLowerCase() === filters.return_type.toLowerCase()
-            );
-        }
-
-        setFilteredReturns(filtered);
-        setTotalItems(filtered.length);
-        setTotalPages(Math.ceil(filtered.length / pageSize));
-        setCurrentPage(1);
-    }, [searchTerm, filters, allReturns]);
 
     const handlePageChange = (page: number) => {
         if (page >= 1 && page <= totalPages) {
@@ -166,8 +181,7 @@ const PurchaseReturnList: React.FC = () => {
     };
 
     const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newSize = parseInt(e.target.value);
-        setPageSize(newSize);
+        setPageSize(parseInt(e.target.value));
         setCurrentPage(1);
     };
 
@@ -181,12 +195,12 @@ const PurchaseReturnList: React.FC = () => {
 
     const handleFilterChange = (key: keyof FilterOptions, value: string) => {
         setFilters(prev => ({ ...prev, [key]: value }));
+        setCurrentPage(1);
     };
 
     const clearFilters = () => {
-        setFilters({
-            return_type: "",
-        });
+        setFilters({ return_type: "" });
+        setCurrentPage(1);
     };
 
     const hasActiveFilters = () => {
@@ -199,12 +213,12 @@ const PurchaseReturnList: React.FC = () => {
             toast.error("You don't have permission to delete purchase returns");
             return;
         }
-        
+
         if (window.confirm("Are you sure you want to delete this purchase return?")) {
             try {
                 await api.delete(`/purchase-return-delete/${id}/`);
                 toast.success("Purchase return deleted successfully");
-                fetchReturns();
+                setRefreshKey(k => k + 1);
             } catch (err) {
                 console.error("Error deleting return:", err);
                 toast.error("Failed to delete purchase return");
@@ -221,13 +235,9 @@ const PurchaseReturnList: React.FC = () => {
         return type === 'Full' ? 'bg-purple-100 text-purple-800' : 'bg-orange-100 text-orange-800';
     };
 
-    const paginatedReturns = filteredReturns.slice(
-        (currentPage - 1) * pageSize,
-        currentPage * pageSize
-    );
-
-    const displayedTotal = paginatedReturns.reduce((sum, r) => sum + Number(r.grand_total), 0);
-    const overallTotal = filteredReturns.reduce((sum, r) => sum + Number(r.grand_total), 0);
+    const displayedTotal = returns.reduce((sum, r) => sum + Number(r.grand_total), 0);
+    const firstShown = totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const lastShown = Math.min(currentPage * pageSize, totalCount);
 
     return (
         <div className="min-h-screen bg-gray-100 pb-8">
@@ -237,12 +247,13 @@ const PurchaseReturnList: React.FC = () => {
                     <div className="flex gap-2">
                         <button
                             onClick={exportToExcel}
-                            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition"
+                            disabled={exporting}
+                            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition disabled:opacity-60"
                         >
                             <FaFileExcel size={16} />
-                            Export Excel
+                            {exporting ? "Exporting..." : "Export Excel"}
                         </button>
-                        
+
                         {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
                         {canAdd && (
                             <button
@@ -261,7 +272,7 @@ const PurchaseReturnList: React.FC = () => {
                     <div className="flex flex-wrap gap-3 items-center justify-between">
                         <div className="flex gap-2 flex-1">
                             <div className="relative flex-1 max-w-md">
-                                <div className="absolute inset-y-0 left-0 flex items-center pl-3">  
+                                <div className="absolute inset-y-0 left-0 flex items-center pl-3">
                                     <FaSearch className="text-gray-400" />
                                 </div>
                                 <input
@@ -332,8 +343,8 @@ const PurchaseReturnList: React.FC = () => {
                 </div>
 
                 <div className="mb-4 text-sm text-gray-600">
-                    Showing {paginatedReturns.length} of {filteredReturns.length} purchase returns
-                    {searchTerm && ` matching "${searchTerm}"`}
+                    Showing {returns.length} of {totalCount} purchase returns
+                    {debouncedSearch && ` matching "${debouncedSearch}"`}
                     {filters.return_type && ` with type: ${filters.return_type}`}
                 </div>
 
@@ -342,14 +353,14 @@ const PurchaseReturnList: React.FC = () => {
                         <h2 className="text-blue-800 font-bold text-lg">PURCHASE RETURN LIST</h2>
                     </div>
 
-                    {loading ? (
+                    {loading && returns.length === 0 ? (
                         <div className="text-center py-12">
                             <div className="inline-block rounded-full h-8 w-8 border-b-2 border-blue-600 animate-spin"></div>
                             <p className="mt-2 text-gray-500">Loading...</p>
                         </div>
-                    ) : filteredReturns.length === 0 ? (
+                    ) : !loading && totalCount === 0 ? (
                         <div className="text-center py-12 text-gray-500">
-                            <p>{searchTerm || hasActiveFilters() ? "No purchase returns match your search/filters" : "No purchase returns found"}</p>
+                            <p>{debouncedSearch || hasActiveFilters() ? "No purchase returns match your search/filters" : "No purchase returns found"}</p>
                             {canAdd && (
                                 <button
                                     onClick={() => navigate("/purchase-return")}
@@ -360,8 +371,8 @@ const PurchaseReturnList: React.FC = () => {
                             )}
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">  
+                        <div className={`overflow-x-auto transition-opacity ${loading ? "opacity-50" : "opacity-100"}`}>
+                            <table className="w-full text-sm">
                                 <thead className="bg-gray-50">
                                     <tr>
                                         <th className="px-4 py-3 border border-gray-200 whitespace-nowrap text-left">Return No</th>
@@ -375,7 +386,7 @@ const PurchaseReturnList: React.FC = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {paginatedReturns.map((item, index) => (
+                                    {returns.map((item) => (
                                         <tr key={item.id} className="hover:bg-gray-50 transition">
                                             <td className="px-4 py-3 border border-gray-200 whitespace-nowrap font-medium text-blue-600">{item.return_no}</td>
                                             <td className="px-4 py-3 border border-gray-200 whitespace-nowrap">{item.date}</td>
@@ -399,7 +410,7 @@ const PurchaseReturnList: React.FC = () => {
                                                     >
                                                         <FaEye size={16} />
                                                     </button>
-                                                    
+
                                                     {/* ✅ DELETE BUTTON - Sirf canDelete wale ko dikhe */}
                                                     {canDelete && (
                                                         <button
@@ -423,30 +434,29 @@ const PurchaseReturnList: React.FC = () => {
                                         <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right font-bold text-blue-600">
                                             ₹{displayedTotal.toFixed(2)}
                                         </td>
-                                        <td className="px-4 py-3 border border-gray-200"></td>
+                                        <td colSpan={2} className="px-4 py-3 border border-gray-200"></td>
                                     </tr>
-                                    {filteredReturns.length > pageSize && (
+                                    {totalCount > pageSize && (
                                         <tr>
                                             <td colSpan={5} className="px-4 py-3 border border-gray-200 whitespace-nowrap font-semibold text-gray-500">
-                                                Grand Total (All {filteredReturns.length} records)
+                                                Grand Total (All {totalCount} records)
                                             </td>
                                             <td className="px-4 py-3 border border-gray-200 whitespace-nowrap text-right font-bold text-green-600">
                                                 ₹{overallTotal.toFixed(2)}
                                             </td>
-                                            <td className="px-4 py-3 border border-gray-200"></td>
+                                            <td colSpan={2} className="px-4 py-3 border border-gray-200"></td>
                                         </tr>
                                     )}
                                 </tfoot>
                             </table>
-                            
-                            {totalPages > 0 && filteredReturns.length > 0 && (
+
+                            {totalCount > 0 && (
                                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4 p-4 border-t">
                                     <div className="flex items-center gap-3">
                                         <span className="text-sm text-gray-700">
-                                            Showing {(currentPage - 1) * pageSize + 1}–
-                                            {Math.min(currentPage * pageSize, filteredReturns.length)} of {filteredReturns.length} items
+                                            Showing {firstShown}–{lastShown} of {totalCount} items
                                         </span>
-                                        
+
                                         <select
                                             value={pageSize}
                                             onChange={handlePageSizeChange}
@@ -477,16 +487,16 @@ const PurchaseReturnList: React.FC = () => {
                                             const maxVisible = 5;
                                             let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
                                             let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-                                            
+
                                             if (endPage - startPage + 1 < maxVisible) {
                                                 startPage = Math.max(1, endPage - maxVisible + 1);
                                             }
-                                            
+
                                             const pages = [];
                                             for (let i = startPage; i <= endPage; i++) {
                                                 pages.push(i);
                                             }
-                                            
+
                                             return pages.map((page) => (
                                                 <button
                                                     key={page}

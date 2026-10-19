@@ -244,6 +244,14 @@ const BillSearchModal = ({ isOpen, onClose, onSelectBill }: any) => {
     if (isOpen) loadBills("");
   }, [isOpen]);
 
+    const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSearch = (value: string) => {
+    setSearchTerm(value);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => loadBills(value), 300);
+  };
+
   const loadBills = async (search: string) => {
     setLoading(true);
     try {
@@ -271,7 +279,7 @@ const BillSearchModal = ({ isOpen, onClose, onSelectBill }: any) => {
               type="text"
               placeholder="Search by Bill No or Party Name..."
               value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); loadBills(e.target.value); }}
+              onChange={(e) => handleSearch(e.target.value)}
               className="w-full p-2 pl-8 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <FaSearch className="absolute left-2 top-3 text-gray-400" />

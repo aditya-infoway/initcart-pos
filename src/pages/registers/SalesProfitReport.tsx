@@ -366,7 +366,9 @@ const SalesProfitReport: React.FC = () => {
 
         {/* ── Print header ── */}
         <div className="hidden print:block mb-6 text-center border-b-2 border-gray-800 pb-4">
-          <h1 className="text-2xl font-bold">SALES BILL WISE PROFIT REPORT</h1>
+          <h1 className="text-2xl font-bold">SALES BILL WISE PROFIT REPORT 
+             
+          </h1>
           <p className="text-sm text-gray-600 mt-1">
             Generated:{" "}
             {new Date().toLocaleDateString("en-IN", {
@@ -480,8 +482,8 @@ const SalesProfitReport: React.FC = () => {
                         "Items",
                         "Bill Amount",
                         "Sales Net",
-                        "Purchase Cost",
-                        "Profit",
+                        "Avg Purchase Net",
+                        "Gross Profit",
                         "Profit %",
                         "Terms",
                         "GST Type",
@@ -787,7 +789,7 @@ const SalesProfitReport: React.FC = () => {
                       "Tax%",
                       "Net Amount",
                       "Sales Net",
-                      "Purchase Price",
+                      "Avg Purchase Price",
                       "Purchase Cost",
                       "Line Profit",
                     ].map(h => (

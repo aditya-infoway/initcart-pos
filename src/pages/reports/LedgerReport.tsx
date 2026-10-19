@@ -241,6 +241,7 @@ const LedgerReport: React.FC = () => {
             <option value="Supplier">Supplier</option>
             <option value="Bank Account">Bank Account</option>
             <option value="Case In Hand">Cash In Hand</option>
+            <option value="Duties & Taxes">Duties & Taxes</option>
           </select>
         </div>
 
