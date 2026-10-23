@@ -7,6 +7,7 @@ import { FaFileExcel, FaSearch, FaTimes, FaPlus } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { printReceipt } from "../../utils/ReceiptPrint";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 /* ---------------- VALIDATION ---------------- */
 const today = new Date().toISOString().split("T")[0];
@@ -29,7 +30,6 @@ interface ApiErrorResponse {
   [key: string]: any;
 }
 
-// Paginated Response Type
 interface PaginatedResponse {
   count: number;
   next: string | null;
@@ -575,15 +575,15 @@ const CashReceipt: React.FC = () => {
   const [showBillModal, setShowBillModal] = useState(false);
   const [billType, setBillType] = useState<string>('');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [isSuperAdminOrEmployee, setIsSuperAdminOrEmployee] = useState(false);  
+  const [isSuperAdminOrEmployee, setIsSuperAdminOrEmployee] = useState(false);
   const [isBranch, setIsBranch] = useState(false);
 
   // ✅ PERMISSIONS
   const { canAdd } = usePermission("/Cash-receipt");
-  // Note: Edit/Delete nahi hai isme, isliye canEdit/canDelete use nahi kiya
 
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterType, setFilterType] = useState("");
 
   // Pagination state
@@ -592,64 +592,103 @@ const CashReceipt: React.FC = () => {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-// ─── useEffect ───
-useEffect(() => {
-  const role = getUserRole();
-  const isSA = role === "superadmin";
-  const isEmp = role === "employee";
-  
-  setIsSuperAdmin(isSA);
-  setIsSuperAdminOrEmployee(isSA || isEmp);   // ✅ NEW
-}, []);
+  // ─── useEffect ───
+  useEffect(() => {
+    const role = getUserRole();
+    const isSA = role === "superadmin";
+    const isEmp = role === "employee";
+    const isBr = role === "branch";
 
-  // Add Export to Excel function
-  const exportToExcel = () => {
-    if (filteredRows.length === 0) {
-      toast.warning("No data to export");
-      return;
+    setIsSuperAdmin(isSA);
+    setIsBranch(isBr);
+    setIsSuperAdminOrEmployee(isSA || isEmp);
+  }, []);
+
+  // ✅ Search debounce (400ms)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // ✅ Export to Excel — full filtered dataset (chunked)
+  const exportToExcel = async () => {
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      if (!token) {
+        toast.error("Authentication required");
+        return;
+      }
+
+      let all: any[] = [];
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("page_size", "500");
+        if (debouncedSearch) params.set("search", debouncedSearch);
+        if (filterType) params.set("type", filterType);
+
+        const res = await api.get<PaginatedResponse>(`cash-receipts/?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const results = res.data.results || [];
+        all = [...all, ...results];
+        hasMore = !!res.data.next;
+        page += 1;
+
+        if (!results.length) break;
+      }
+
+      if (all.length === 0) {
+        toast.warning("No data to export");
+        return;
+      }
+
+      const exportData: any[] = all.map((row, index) => ({
+        "SR No": index + 1,
+        "Date": row.date || "-",
+        "Voucher No": row.voucher_no || "-",
+        "Type": row.type || "CR",
+        "Cash Account": row.cash_account_name || row.cash_account || "-",
+        "Party Name": row.party_name || row.op_account || "-",
+        "Amount (₹)": Number(row.amount || 0).toFixed(2),
+        "Narration": row.narration || "-",
+      }));
+
+      const grandTotal = all.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      exportData.push({
+        "SR No": "",
+        "Date": "",
+        "Voucher No": "",
+        "Type": "",
+        "Cash Account": "",
+        "Party Name": "TOTAL",
+        "Amount (₹)": grandTotal.toFixed(2),
+        "Narration": "",
+      });
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws["!cols"] = [
+        { wch: 6 }, { wch: 12 }, { wch: 15 }, { wch: 8 },
+        { wch: 25 }, { wch: 25 }, { wch: 15 }, { wch: 40 },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Cash Receipt Register");
+      const fileName = `Cash_Receipt_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+      toast.success(`Exported ${all.length} records successfully`);
+    } catch (err) {
+      console.error("Export error:", err);
+      toast.error("Failed to export");
     }
-
-    const exportData: any[] = filteredRows.map((row, index) => ({
-      "SR No": index + 1,
-      "Date": row.date || "-",
-      "Voucher No": row.voucher_no || "-",
-      "Type": row.type || "CR",
-      "Cash Account": row.cash_account_name || row.cash_account || "-",
-      "Party Name": row.party_name || row.op_account || "-",
-      "Amount (₹)": Number(row.amount || 0).toFixed(2),
-      "Narration": row.narration || "-",
-    }));
-
-    const grandTotal = filteredRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    exportData.push({
-      "SR No": "",
-      "Date": "",
-      "Voucher No": "",
-      "Type": "",
-      "Cash Account": "",
-      "Party Name": "TOTAL",
-      "Amount (₹)": grandTotal.toFixed(2),
-      "Narration": "",
-    });
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    ws["!cols"] = [
-      { wch: 6 },   // SR No
-      { wch: 12 },  // Date
-      { wch: 15 },  // Voucher No
-      { wch: 8 },   // Type
-      { wch: 25 },  // Cash Account
-      { wch: 25 },  // Party Name
-      { wch: 15 },  // Amount
-      { wch: 40 },  // Narration
-    ];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Cash Receipt Register");
-    const fileName = `Cash_Receipt_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-
-    toast.success(`Exported ${filteredRows.length} records successfully`);
   };
 
   const fetchReceipts = async (page = 1) => {
@@ -661,14 +700,20 @@ useEffect(() => {
         return;
       }
 
-      const res = await api.get<PaginatedResponse>(`cash-receipts/?page=${page}&page_size=${pageSize}`, {
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("page_size", String(pageSize));
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      if (filterType) params.set("type", filterType);
+
+      const res = await api.get<PaginatedResponse>(`cash-receipts/?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (res.data && res.data.results) {
         setRows(res.data.results);
         setTotalItems(res.data.count || 0);
-        setTotalPages(Math.ceil((res.data.count || 0) / pageSize));
+        setTotalPages(Math.max(1, Math.ceil((res.data.count || 0) / pageSize)));
         setCurrentPage(page);
       } else if (Array.isArray(res.data)) {
         setRows(res.data);
@@ -690,38 +735,13 @@ useEffect(() => {
 
   useEffect(() => {
     fetchReceipts(currentPage);
-  }, [currentPage, pageSize]);
-
-  const filteredRows = rows.filter(row => {
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      const matchesSearch =
-        (row.voucher_no?.toLowerCase().includes(term)) ||
-        (row.cash_account_name?.toLowerCase().includes(term)) ||
-        (row.party_name?.toLowerCase().includes(term));
-      if (!matchesSearch) return false;
-    }
-    if (filterType && row.type !== filterType) return false;
-    return true;
-  });
-
-  useEffect(() => {
-    setTotalItems(filteredRows.length);
-    setTotalPages(Math.ceil(filteredRows.length / pageSize));
-    setCurrentPage(1);
-  }, [filteredRows.length, pageSize]);
-
-  const getCurrentPageItems = () => {
-    const start = (currentPage - 1) * pageSize;
-    const end = start + pageSize;
-    return filteredRows.slice(start, end);
-  };
-
-  const currentItems = getCurrentPageItems();
+  }, [currentPage, pageSize, debouncedSearch, filterType]);
 
   const clearFilters = () => {
     setSearchTerm("");
+    setDebouncedSearch("");
     setFilterType("");
+    setCurrentPage(1);
   };
 
   const handlePageChange = (page: number) => {
@@ -884,7 +904,6 @@ useEffect(() => {
             Export Excel
           </button>
 
-          {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
           {canAdd && (
             <button
               onClick={handleOpenModal}
@@ -922,7 +941,10 @@ useEffect(() => {
 
         <select
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
+          onChange={(e) => {
+            setFilterType(e.target.value);
+            setCurrentPage(1);
+          }}
           className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white"
         >
           <option value="">All Types</option>
@@ -930,7 +952,7 @@ useEffect(() => {
           <option value="SCR">SCR</option>
           <option value="PRCR">PRCR</option>
           {isSuperAdmin && <option value="STCR">STCR</option>}
-          {isSuperAdmin && <option value="B2BCR">B2BSCR</option>}
+          {isSuperAdmin && <option value="B2BCR">B2BCR</option>}
           {isBranch && <option value="STRCR">STRCR</option>}
         </select>
 
@@ -961,8 +983,8 @@ useEffect(() => {
             </tr>
           </thead>
           <tbody className="text-center">
-            {currentItems.length > 0 ? (
-              currentItems.map((r, i) => (
+            {rows.length > 0 ? (
+              rows.map((r, i) => (
                 <tr key={r.id || i} className="border-t hover:bg-gray-50">
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{(currentPage - 1) * pageSize + i + 1}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.date || "-"}</td>
@@ -1002,8 +1024,9 @@ useEffect(() => {
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-gray-500">
+                <td colSpan={10} className="p-6 text-center text-gray-500">
                   No cash receipts found
+                  {debouncedSearch || filterType ? " — try different search/filter" : ""}
                 </td>
               </tr>
             )}
@@ -1011,12 +1034,18 @@ useEffect(() => {
         </table>
       </div>
 
-      {filteredRows.length > 0 && (
+      {totalItems > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">
-              Showing {(currentPage - 1) * pageSize + 1}–
-              {Math.min(currentPage * pageSize, filteredRows.length)} of {filteredRows.length} items
+              Showing{" "}
+              <span className="font-medium">
+                {(currentPage - 1) * pageSize + 1}
+              </span>–
+              <span className="font-medium">
+                {Math.min(currentPage * pageSize, totalItems)}
+              </span>{" "}
+              of <span className="font-medium">{totalItems}</span> items
             </span>
 
             <select
@@ -1032,60 +1061,11 @@ useEffect(() => {
             </select>
           </div>
 
-          <div className="flex gap-2">
-            <button
-              disabled={currentPage === 1}
-              onClick={() => handlePageChange(currentPage - 1)}
-              className={`px-3 py-1 border rounded ${
-                currentPage === 1
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Prev
-            </button>
-
-            {(() => {
-              const maxVisible = 5;
-              let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-              let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-
-              if (endPage - startPage + 1 < maxVisible) {
-                startPage = Math.max(1, endPage - maxVisible + 1);
-              }
-
-              const pages = [];
-              for (let i = startPage; i <= endPage; i++) {
-                pages.push(i);
-              }
-
-              return pages.map((page) => (
-                <button
-                  key={page}
-                  onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1 border rounded ${
-                    currentPage === page
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                  }`}
-                >
-                  {page}
-                </button>
-              ));
-            })()}
-
-            <button
-              disabled={currentPage === totalPages}
-              onClick={() => handlePageChange(currentPage + 1)}
-              className={`px-3 py-1 border rounded ${
-                currentPage === totalPages
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Next
-            </button>
-          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
         </div>
       )}
 
@@ -1144,7 +1124,7 @@ useEffect(() => {
       }} />
       <span>Manual</span>
     </label>
-    
+
     <label className="flex items-center gap-2">
       <input type="radio" value="salesEntry" checked={values.receiptType === "salesEntry"} onChange={() => {
         setFieldValue("receiptType", "salesEntry");
@@ -1154,7 +1134,7 @@ useEffect(() => {
       }} />
       <span>Sales Entry</span>
     </label>
-    
+
     <label className="flex items-center gap-2">
       <input type="radio" value="purchaseReturn" checked={values.receiptType === "purchaseReturn"} onChange={() => {
         setFieldValue("receiptType", "purchaseReturn");
@@ -1165,7 +1145,6 @@ useEffect(() => {
       <span>Purchase Return</span>
     </label>
 
-    {/* ✅ Stock Transfer - Superadmin OR Employee (donon ko dikhe) */}
     {isSuperAdminOrEmployee && (
       <label className="flex items-center gap-2">
         <input type="radio" value="stockTransfer" checked={values.receiptType === "stockTransfer"} onChange={() => {
@@ -1178,7 +1157,6 @@ useEffect(() => {
       </label>
     )}
 
-    {/* ✅ B2B Sale - Superadmin OR Employee (donon ko dikhe) */}
     {isSuperAdminOrEmployee && (
       <label className="flex items-center gap-2">
         <input type="radio" value="b2bSale" checked={values.receiptType === "b2bSale"} onChange={() => {
@@ -1191,7 +1169,6 @@ useEffect(() => {
       </label>
     )}
 
-    {/* ✅ Stock Return - Sirf normal branch users (superadmin/employee nahi) */}
     {!isSuperAdminOrEmployee && (
       <label className="flex items-center gap-2">
         <input type="radio" value="stockReturn" checked={values.receiptType === "stockReturn"} onChange={() => {
@@ -1239,7 +1216,6 @@ useEffect(() => {
                         </div>
                       )}
 
-                      {/* Stock Transfer section */}
                       {values.receiptType === "stockTransfer" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <div className="relative">
@@ -1264,7 +1240,6 @@ useEffect(() => {
                         </div>
                       )}
 
-                      {/* B2B Sale section */}
                       {values.receiptType === "b2bSale" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <div className="relative">
@@ -1289,7 +1264,6 @@ useEffect(() => {
                         </div>
                       )}
 
-                      {/* Stock Return section */}
                       {values.receiptType === "stockReturn" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <div className="relative">
@@ -1321,7 +1295,7 @@ useEffect(() => {
                         <div className="col-span-3">
                           <hr className="border-t-2 border-dashed border-blue-300 my-2" />
                         </div>
-                        
+
                         {values.receiptType === "stockTransfer" || values.receiptType === "stockReturn" || values.receiptType === "b2bSale" ? (
                           <div className="col-span-3 md:col-span-2">
                             <label className="block text-sm font-medium mb-1">Party Name (Linked Account)</label>
@@ -1341,7 +1315,7 @@ useEffect(() => {
                         )}
                         <Input label="Amount" name="amount" type="number" step="0.01" />
                       </div>
-                      
+
                       <div>
                         <Input label="Narration" name="narration" />
                       </div>

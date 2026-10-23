@@ -1,10 +1,6 @@
 // src/pages/branch/B2BSalesVerify.tsx
-// B2B Purchase VERIFY — Franchise branch users ke liye incoming B2B Purchase verify karne ki page
-// Stock Transfer Verify (StockVerification.tsx) jaisa hi hai, sirf B2B Purchase endpoints ke saath.
-// ✅ Note: yaha verify pe SIRF stock ADD hota hai — deduction superadmin side create karte hi ho chuka hota hai
-
 import { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   FaCheckCircle,
@@ -14,7 +10,6 @@ import {
   FaSearch,
 } from "react-icons/fa";
 import {
-  MdClose,
   MdVerified,
   MdPendingActions,
   MdOutlineInventory,
@@ -23,6 +18,7 @@ import { HiOutlineDocumentText } from "react-icons/hi";
 import { BsCheckAll } from "react-icons/bs";
 import api from "../../api/api";
 import { toast } from "react-toastify";
+import Pagination from "../../components/common/pagination";
 
 // ── Helpers ───────────────────────────────────────────────
 const safeNumber = (val: any): number => {
@@ -97,6 +93,8 @@ interface SaleDetail {
   items: SaleItemDetail[];
 }
 
+const PAGE_SIZE = 15;
+
 // ════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════
@@ -119,6 +117,7 @@ export default function B2BSalesVerify() {
     next: null as string | null,
     previous: null as string | null,
     page: 1,
+    totalPages: 1,
   });
 
   useEffect(() => {
@@ -133,11 +132,13 @@ export default function B2BSalesVerify() {
       );
       if (res.data.results?.success) {
         setSales(res.data.results.data || []);
+        const count = res.data.count || 0;
         setPagination({
-          count: res.data.count || 0,
+          count,
           next: res.data.next || null,
           previous: res.data.previous || null,
           page,
+          totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
         });
       }
     } catch {
@@ -248,6 +249,13 @@ export default function B2BSalesVerify() {
       s.from_branch_name.toLowerCase().includes(q)
     );
   });
+
+  const handlePageChange = (p: number) => {
+    if (p >= 1 && p <= pagination.totalPages) {
+      loadSales(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   // ── Detail View ──────────────────────────────────────────
   if (selectedSale) {
@@ -437,31 +445,23 @@ export default function B2BSalesVerify() {
             </div>
           )}
 
-          {/* Pagination */}
-          {pagination.count > 15 && (
-            <div className="px-5 py-4 border-t bg-gray-50 flex items-center justify-between">
+          {/* ✅ Reusable Pagination */}
+          {pagination.count > 0 && (
+            <div className="px-5 py-4 border-t bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3">
               <p className="text-xs text-gray-500">
-                Total: <b>{pagination.count}</b>
+                Showing{" "}
+                <span className="font-semibold text-gray-700">
+                  {(pagination.page - 1) * PAGE_SIZE + 1}–
+                  {Math.min(pagination.page * PAGE_SIZE, pagination.count)}
+                </span>{" "}
+                of <span className="font-semibold text-gray-700">{pagination.count}</span> B2B Purchase
               </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => loadSales(pagination.page - 1)}
-                  disabled={!pagination.previous}
-                  className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100"
-                >
-                  ← Prev
-                </button>
-                <span className="text-xs px-2">
-                  Page <b>{pagination.page}</b>
-                </span>
-                <button
-                  onClick={() => loadSales(pagination.page + 1)}
-                  disabled={!pagination.next}
-                  className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100"
-                >
-                  Next →
-                </button>
-              </div>
+
+              <Pagination
+                currentPage={pagination.page}
+                totalPages={pagination.totalPages}
+                onPageChange={handlePageChange}
+              />
             </div>
           )}
         </div>
@@ -471,7 +471,7 @@ export default function B2BSalesVerify() {
 }
 
 // ════════════════════════════════════════════════════════════
-// DETAIL VIEW COMPONENT
+// DETAIL VIEW COMPONENT (UNCHANGED)
 // ════════════════════════════════════════════════════════════
 interface DetailViewProps {
   saleId: number;

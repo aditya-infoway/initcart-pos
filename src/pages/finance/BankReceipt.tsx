@@ -7,6 +7,7 @@ import { FaSearch, FaTimes, FaFileExcel, FaPlus } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { printReceipt } from "../../utils/ReceiptPrint";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 /* ---------------- VALIDATION ---------------- */
 const today = new Date().toISOString().split("T")[0];
@@ -33,7 +34,6 @@ interface ApiErrorResponse {
   [key: string]: any;
 }
 
-// Paginated Response Type
 interface PaginatedResponse {
   count: number;
   next: string | null;
@@ -46,7 +46,7 @@ const validationSchema = Yup.object({
   voucherNo: Yup.string().required("Voucher No is required"),
   date: Yup.string().required("Date is required"),
   opAccount: Yup.number().nullable().when("receiptType", {
-    is: (val: string) => val !== "stockTransfer" && val !== "stockReturn" && val !== "b2bSale", 
+    is: (val: string) => val !== "stockTransfer" && val !== "stockReturn" && val !== "b2bSale",
     then: (schema) => schema.required("Party is required"),
     otherwise: (schema) => schema.nullable(),
   }),
@@ -107,7 +107,6 @@ const PartySelect = ({ name, disabled = false }: { name: string; disabled?: bool
   const [field, meta, helpers] = useField(name);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-
 
   useEffect(() => {
     const fetchAccounts = async () => {
@@ -594,14 +593,13 @@ const BankReceipt: React.FC = () => {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isBranch, setIsBranch] = useState(false);
   const [isSuperAdminOrEmployee, setIsSuperAdminOrEmployee] = useState(false);
-  
 
   // ✅ PERMISSIONS
   const { canAdd } = usePermission("/Bank-receipt");
-  // Note: Edit/Delete nahi hai isme, isliye canEdit/canDelete use nahi kiya
 
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterType, setFilterType] = useState("");
 
   // Pagination state
@@ -610,66 +608,112 @@ const BankReceipt: React.FC = () => {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-// ─── useEffect ───
-useEffect(() => {
-  const role = getUserRole();
-  const isSA = role === "superadmin";
-  const isEmp = role === "employee";
-  
-  setIsSuperAdmin(isSA);
-  setIsSuperAdminOrEmployee(isSA || isEmp);   // ✅ NEW
-}, []);
+  // ─── useEffect ───
+  useEffect(() => {
+    const role = getUserRole();
+    const isSA = role === "superadmin";
+    const isEmp = role === "employee";
+    const isBr = role === "branch";
 
-  // Add Export to Excel function
-  const exportToExcel = () => {
-    if (filteredRows.length === 0) {
-      toast.warning("No data to export");
-      return;
+    setIsSuperAdmin(isSA);
+    setIsBranch(isBr);
+    setIsSuperAdminOrEmployee(isSA || isEmp);
+  }, []);
+
+  // ✅ Search debounce (400ms)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // ✅ Export to Excel — full filtered dataset (chunked)
+  const exportToExcel = async () => {
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      if (!token) {
+        toast.error("Authentication required");
+        return;
+      }
+
+      let all: any[] = [];
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("page_size", "500");
+        if (debouncedSearch) params.set("search", debouncedSearch);
+        if (filterType) params.set("type", filterType);
+
+        const res = await api.get<PaginatedResponse>(`bank-receipts/?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const results = res.data.results || [];
+        all = [...all, ...results];
+        hasMore = !!res.data.next;
+        page += 1;
+
+        if (!results.length) break;
+      }
+
+      if (all.length === 0) {
+        toast.warning("No data to export");
+        return;
+      }
+
+      const exportData: any[] = all.map((row, index) => ({
+        "SR No": index + 1,
+        "Date": row.date || "-",
+        "Type": row.type || "BR",
+        "Voucher No": row.voucher_no || "-",
+        "Bank Account": row.bank_account_name || row.bank_account || "-",
+        "Party Name": row.party_name || row.op_account || "-",
+        "Amount (₹)": Number(row.amount || 0).toFixed(2),
+        "Mode": row.mode || "-",
+        "Cheque No": row.cheque_no || "-",
+        "Cheque Date": row.cheque_date || "-",
+        "Clear Date": row.cheque_clear_date || "-",
+      }));
+
+      const grandTotal = all.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      exportData.push({
+        "SR No": "",
+        "Date": "",
+        "Type": "",
+        "Voucher No": "",
+        "Bank Account": "",
+        "Party Name": "TOTAL",
+        "Amount (₹)": grandTotal.toFixed(2),
+        "Mode": "",
+        "Cheque No": "",
+        "Cheque Date": "",
+        "Clear Date": "",
+      });
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws["!cols"] = [
+        { wch: 6 }, { wch: 12 }, { wch: 8 }, { wch: 15 }, { wch: 25 },
+        { wch: 25 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 12 },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Bank Receipt Register");
+      const fileName = `Bank_Receipt_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+      toast.success(`Exported ${all.length} records successfully`);
+    } catch (err) {
+      console.error("Export error:", err);
+      toast.error("Failed to export");
     }
-
-    const exportData: any[] = filteredRows.map((row, index) => ({
-      "SR No": index + 1,
-      "Date": row.date || "-",
-      "Type": row.type || "BR",
-      "Voucher No": row.voucher_no || "-",
-      "Bank Account": row.bank_account_name || row.bank_account || "-",
-      "Party Name": row.party_name || row.op_account || "-",
-      "Amount (₹)": Number(row.amount || 0).toFixed(2),
-      "Mode": row.mode || "-",
-      "Cheque No": row.cheque_no || "-",
-      "Cheque Date": row.cheque_date || "-",
-      "Clear Date": row.cheque_clear_date || "-",
-    }));
-
-    const grandTotal = filteredRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    exportData.push({
-      "SR No": "",
-      "Date": "",
-      "Type": "",
-      "Voucher No": "",
-      "Bank Account": "",
-      "Party Name": "TOTAL",
-      "Amount (₹)": grandTotal.toFixed(2),
-      "Mode": "",
-      "Cheque No": "",
-      "Cheque Date": "",
-      "Clear Date": "",
-    });
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    ws["!cols"] = [
-      { wch: 6 }, { wch: 12 }, { wch: 8 }, { wch: 15 }, { wch: 25 },
-      { wch: 25 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 12 },
-    ];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Bank Receipt Register");
-    const fileName = `Bank_Receipt_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-
-    toast.success(`Exported ${filteredRows.length} records successfully`);
   };
 
+  // Fetch receipts with server-side pagination + search + filter
   const fetchReceipts = async (page = 1) => {
     setLoading(true);
     try {
@@ -679,14 +723,20 @@ useEffect(() => {
         return;
       }
 
-      const res = await api.get<PaginatedResponse>(`bank-receipts/?page=${page}&page_size=${pageSize}`, {
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("page_size", String(pageSize));
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      if (filterType) params.set("type", filterType);
+
+      const res = await api.get<PaginatedResponse>(`bank-receipts/?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (res.data && res.data.results) {
         setRows(res.data.results);
         setTotalItems(res.data.count || 0);
-        setTotalPages(Math.ceil((res.data.count || 0) / pageSize));
+        setTotalPages(Math.max(1, Math.ceil((res.data.count || 0) / pageSize)));
         setCurrentPage(page);
       } else if (Array.isArray(res.data)) {
         setRows(res.data);
@@ -708,41 +758,17 @@ useEffect(() => {
 
   useEffect(() => {
     fetchReceipts(currentPage);
-  }, [currentPage, pageSize]);
+  }, [currentPage, pageSize, debouncedSearch, filterType]);
 
-  const filteredRows = rows.filter(row => {
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      const matchesSearch =
-        (row.voucher_no?.toLowerCase().includes(term)) ||
-        (row.bank_account_name?.toLowerCase().includes(term)) ||
-        (row.party_name?.toLowerCase().includes(term)) ||
-        (row.mode?.toLowerCase().includes(term));
-      if (!matchesSearch) return false;
-    }
-    if (filterType && row.type !== filterType) return false;
-    return true;
-  });
-
-  useEffect(() => {
-    setTotalItems(filteredRows.length);
-    setTotalPages(Math.ceil(filteredRows.length / pageSize));
-    setCurrentPage(1);
-  }, [filteredRows.length, pageSize]);
-
-  const getCurrentPageItems = () => {
-    const start = (currentPage - 1) * pageSize;
-    const end = start + pageSize;
-    return filteredRows.slice(start, end);
-  };
-
-  const currentItems = getCurrentPageItems();
-
+  // Clear filters
   const clearFilters = () => {
     setSearchTerm("");
+    setDebouncedSearch("");
     setFilterType("");
+    setCurrentPage(1);
   };
 
+  // Pagination handlers
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) {
       setCurrentPage(page);
@@ -925,7 +951,6 @@ useEffect(() => {
             Export Excel
           </button>
 
-          {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
           {canAdd && (
             <button
               onClick={handleOpenModal}
@@ -964,7 +989,10 @@ useEffect(() => {
 
         <select
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
+          onChange={(e) => {
+            setFilterType(e.target.value);
+            setCurrentPage(1);
+          }}
           className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white"
         >
           <option value="">All Types</option>
@@ -972,7 +1000,7 @@ useEffect(() => {
           <option value="SBR">SBR</option>
           <option value="PRBR">PRBR</option>
           {isSuperAdmin && <option value="STBR">STBR</option>}
-          {isSuperAdmin && <option value="B2BBR">B2BSBR</option>}
+          {isSuperAdmin && <option value="B2BBR">B2BBR</option>}
           {isBranch && <option value="STRBR">STRBR</option>}
         </select>
 
@@ -1007,8 +1035,8 @@ useEffect(() => {
             </tr>
           </thead>
           <tbody className="text-center">
-            {currentItems.length > 0 ? (
-              currentItems.map((r, i) => (
+            {rows.length > 0 ? (
+              rows.map((r, i) => (
                 <tr key={r.id || i} className="border-t hover:bg-gray-50">
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{(currentPage - 1) * pageSize + i + 1}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.date || "-"}</td>
@@ -1038,8 +1066,8 @@ useEffect(() => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_date || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.cheque_clear_date || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
-  {r.created_by_name || "-"}   {/* ✅ ADD */}
-</td>
+                    {r.created_by_name || "-"}
+                  </td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">
                     <button
                       type="button"
@@ -1053,8 +1081,9 @@ useEffect(() => {
               ))
             ) : (
               <tr>
-                <td colSpan={12} className="p-6 text-center text-gray-500">
+                <td colSpan={13} className="p-6 text-center text-gray-500">
                   No bank receipts found
+                  {debouncedSearch || filterType ? " — try different search/filter" : ""}
                 </td>
               </tr>
             )}
@@ -1062,13 +1091,19 @@ useEffect(() => {
         </table>
       </div>
 
-      {/* Pagination */}
-      {filteredRows.length > 0 && (
+      {/* ✅ Reusable Pagination */}
+      {totalItems > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">
-              Showing {(currentPage - 1) * pageSize + 1}–
-              {Math.min(currentPage * pageSize, filteredRows.length)} of {filteredRows.length} items
+              Showing{" "}
+              <span className="font-medium">
+                {(currentPage - 1) * pageSize + 1}
+              </span>–
+              <span className="font-medium">
+                {Math.min(currentPage * pageSize, totalItems)}
+              </span>{" "}
+              of <span className="font-medium">{totalItems}</span> items
             </span>
 
             <select
@@ -1084,60 +1119,11 @@ useEffect(() => {
             </select>
           </div>
 
-          <div className="flex gap-2">
-            <button
-              disabled={currentPage === 1}
-              onClick={() => handlePageChange(currentPage - 1)}
-              className={`px-3 py-1 border rounded ${
-                currentPage === 1
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Prev
-            </button>
-
-            {(() => {
-              const maxVisible = 5;
-              let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-              let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-
-              if (endPage - startPage + 1 < maxVisible) {
-                startPage = Math.max(1, endPage - maxVisible + 1);
-              }
-
-              const pages = [];
-              for (let i = startPage; i <= endPage; i++) {
-                pages.push(i);
-              }
-
-              return pages.map((page) => (
-                <button
-                  key={page}
-                  onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1 border rounded ${
-                    currentPage === page
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                  }`}
-                >
-                  {page}
-                </button>
-              ));
-            })()}
-
-            <button
-              disabled={currentPage === totalPages}
-              onClick={() => handlePageChange(currentPage + 1)}
-              className={`px-3 py-1 border rounded ${
-                currentPage === totalPages
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Next
-            </button>
-          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
         </div>
       )}
 
@@ -1201,7 +1187,7 @@ useEffect(() => {
       }} />
       <span>Manual</span>
     </label>
-    
+
     <label className="flex items-center gap-2">
       <input type="radio" value="salesEntry" checked={values.receiptType === "salesEntry"} onChange={() => {
         setFieldValue("receiptType", "salesEntry");
@@ -1211,7 +1197,7 @@ useEffect(() => {
       }} />
       <span>Sales Entry</span>
     </label>
-    
+
     <label className="flex items-center gap-2">
       <input type="radio" value="purchaseReturn" checked={values.receiptType === "purchaseReturn"} onChange={() => {
         setFieldValue("receiptType", "purchaseReturn");
@@ -1222,7 +1208,7 @@ useEffect(() => {
       <span>Purchase Return</span>
     </label>
 
-    {/* ✅ Stock Transfer - Superadmin OR Employee (donon ko dikhe) */}
+    {/* ✅ Stock Transfer - Superadmin OR Employee */}
     {isSuperAdminOrEmployee && (
       <label className="flex items-center gap-2">
         <input type="radio" value="stockTransfer" checked={values.receiptType === "stockTransfer"} onChange={() => {
@@ -1235,7 +1221,7 @@ useEffect(() => {
       </label>
     )}
 
-    {/* ✅ B2B Sale - Superadmin OR Employee (donon ko dikhe) */}
+    {/* ✅ B2B Sale - Superadmin OR Employee */}
     {isSuperAdminOrEmployee && (
       <label className="flex items-center gap-2">
         <input type="radio" value="b2bSale" checked={values.receiptType === "b2bSale"} onChange={() => {
@@ -1248,7 +1234,7 @@ useEffect(() => {
       </label>
     )}
 
-    {/* ✅ Stock Return - Sirf normal branch users (superadmin/employee nahi) */}
+    {/* ✅ Stock Return - Sirf normal branch users */}
     {!isSuperAdminOrEmployee && (
       <label className="flex items-center gap-2">
         <input type="radio" value="stockReturn" checked={values.receiptType === "stockReturn"} onChange={() => {
@@ -1380,7 +1366,7 @@ useEffect(() => {
                         <div className="col-span-3">
                           <hr className="border-t-2 border-dashed border-blue-300 my-2" />
                         </div>
-                        
+
                         {values.receiptType === "stockTransfer" || values.receiptType === "stockReturn" || values.receiptType === "b2bSale" ? (
                           <div className="col-span-3 md:col-span-2">
                             <label className="block text-sm font-medium mb-1">Party Name (Linked Account)</label>
@@ -1422,7 +1408,7 @@ useEffect(() => {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded">
                           <Input label="Cheque No" name="chequeNo" />
                           <Input label="Cheque Date" name="chequeDate" type="date" />
-                          <Input label="Cheque Clear Date" name="chequeClearDate" type="date" />  
+                          <Input label="Cheque Clear Date" name="chequeClearDate" type="date" />
                         </div>
                       )}
 

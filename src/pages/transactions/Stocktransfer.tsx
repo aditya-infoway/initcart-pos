@@ -1,9 +1,11 @@
 // src/pages/superadmin/StockTransfer.tsx
 // UPDATED — GST Summary only (table me sirf Rate × Qty = Amount)
 // GST breakup table me nahi, sirf neeche summary card me show hoga
-// + NEW: HOLD / RESUME feature for in-progress manual transfers
+// + HOLD / RESUME feature for in-progress manual transfers
 //   (localStorage based — branch + items save hote hain "Hold" par,
 //    aur "Hold List" se wapas resume kiye ja sakte hain)
+// + PAGINATION: reusable <Pagination /> used in both
+//   (Order Tracking list + Manual Transfer list)
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useAuthStore } from "../../store/authStore";
@@ -22,6 +24,7 @@ import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 // Add this after the imports
 const safeNumber = (val: any): number => {
@@ -731,7 +734,7 @@ return (
 
 // ════════════════════════════════════════════════════════════
 // ORDER TRACKING SECTION
-// ✅ UPDATED — GST ab order REQUEST time par calculate/show nahi hoti.
+// ✅ GST ab order REQUEST time par calculate/show nahi hoti.
 //    Superadmin jab items ko adjust karke SEND/PROCESS karta hai, tabhi
 //    current approved quantity + branch ke GST toggle ke hisaab se
 //    live GST calculate hoti hai (stock-transfer-item-tax/ API se) aur
@@ -1075,16 +1078,26 @@ function OrderTracking() {
             </div>
           )}
 
-          {filteredOrders.length > PAGE_SIZE && (
-            <div className="px-5 py-4 border-t bg-gray-50 flex items-center justify-between">
-              <p className="text-xs text-gray-500">Total: <b>{filteredOrders.length}</b></p>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setListPage(p => Math.max(1, p - 1))} disabled={listPage <= 1}
-                  className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">← Prev</button>
-                <span className="text-xs px-2">Page <b>{listPage}</b> / {totalPages}</span>
-                <button onClick={() => setListPage(p => Math.min(totalPages, p + 1))} disabled={listPage >= totalPages}
-                  className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">Next →</button>
-              </div>
+          {/* ✅ Reusable Pagination */}
+          {filteredOrders.length > 0 && (
+            <div className="px-5 py-4 border-t bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3">
+              <p className="text-xs text-gray-500">
+                Showing{" "}
+                <span className="font-semibold text-gray-700">
+                  {Math.min((listPage - 1) * PAGE_SIZE + 1, filteredOrders.length)}–
+                  {Math.min(listPage * PAGE_SIZE, filteredOrders.length)}
+                </span>{" "}
+                of <span className="font-semibold text-gray-700">{filteredOrders.length}</span> orders
+              </p>
+
+              <Pagination
+                currentPage={listPage}
+                totalPages={totalPages}
+                onPageChange={(p) => {
+                  setListPage(p);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+              />
             </div>
           )}
         </div>
@@ -1994,21 +2007,30 @@ function updateRow(i: number, key: "quantity" | "rate" | "discountPercent", val:
                         ))}
                       </tbody>
                     </table>
-                    {manualFilteredTransfers.length > MANUAL_PAGE_SIZE && (
-                      <div className="px-5 py-4 border-t bg-gray-50 flex items-center justify-between">
-                        <p className="text-xs text-gray-500">
-                          Showing <b>{Math.min((manualListPage - 1) * MANUAL_PAGE_SIZE + 1, manualFilteredTransfers.length)}</b>–<b>{Math.min(manualListPage * MANUAL_PAGE_SIZE, manualFilteredTransfers.length)}</b> of <b>{manualFilteredTransfers.length}</b>
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => setManualListPage(p => Math.max(1, p - 1))} disabled={manualListPage <= 1}
-                            className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">← Prev</button>
-                          <span className="text-xs bg-white border border-gray-200 px-3 py-1.5 rounded-lg">Page <b>{manualListPage}</b> / {manualTotalPages}</span>
-                          <button onClick={() => setManualListPage(p => Math.min(manualTotalPages, p + 1))} disabled={manualListPage >= manualTotalPages}
-                            className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100">Next →</button>
-                        </div>
-                      </div>
-                    )}
                   </div>
+
+                  {/* ✅ Reusable Pagination */}
+                  {manualFilteredTransfers.length > 0 && (
+                    <div className="px-5 py-4 border-t bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3">
+                      <p className="text-xs text-gray-500">
+                        Showing{" "}
+                        <span className="font-semibold text-gray-700">
+                          {Math.min((manualListPage - 1) * MANUAL_PAGE_SIZE + 1, manualFilteredTransfers.length)}–
+                          {Math.min(manualListPage * MANUAL_PAGE_SIZE, manualFilteredTransfers.length)}
+                        </span>{" "}
+                        of <span className="font-semibold text-gray-700">{manualFilteredTransfers.length}</span> transfers
+                      </p>
+
+                      <Pagination
+                        currentPage={manualListPage}
+                        totalPages={manualTotalPages}
+                        onPageChange={(p) => {
+                          setManualListPage(p);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2523,4 +2545,3 @@ function DetailView({ detail, onBack, onComplete, onCancel }: {
     </motion.div>
   );
 }
- 

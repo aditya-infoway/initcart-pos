@@ -1,9 +1,10 @@
 // MySchemeOffers.tsx
 import React, { useEffect, useState } from "react";
 import { toast } from "react-toastify";
-import { FaGift, FaEye } from "react-icons/fa";
+import { FaGift, FaEye, FaSearch, FaTimes } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
+import Pagination from "../../components/common/pagination";
 
 interface SchemeOffer {
   id: number;
@@ -15,6 +16,13 @@ interface SchemeOffer {
   amount: string | number;
   scheme_type: string;
   status: "active" | "inactive";
+}
+
+interface PaginatedResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: SchemeOffer[];
 }
 
 const StatusBadge: React.FC<{ status: string }> = ({ status }) => (
@@ -30,45 +38,98 @@ const MySchemeOffers: React.FC = () => {
   const navigate = useNavigate();
   const [schemes, setSchemes] = useState<SchemeOffer[]>([]);
   const [loading, setLoading] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(10);
 
-  const fetchSchemes = () => {
+  // ✅ Server-side pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // ✅ Search (debounced)
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // ✅ Search debounce (400ms)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // ✅ Fetch with server-side pagination
+  const fetchSchemes = async (page = 1) => {
     setLoading(true);
-    api
-      .get("my-branch-schemes/")
-      .then((res) => {
-        let data: any[] = [];
-        if (res.data?.data && Array.isArray(res.data.data)) {
-          data = res.data.data;
-        } else if (res.data?.results && Array.isArray(res.data.results)) {
-          data = res.data.results;
-        } else if (Array.isArray(res.data)) {
-          data = res.data;
-        }
-        setSchemes(data);
-      })
-      .catch((err) => {
-        console.error(err);
-        toast.error("Failed to load scheme offers");
+    try {
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("page_size", String(pageSize));
+      if (debouncedSearch) params.set("search", debouncedSearch);
+
+      const res = await api.get(`my-branch-schemes/?${params.toString()}`);
+      const data = res.data;
+
+      // Paginated response
+      if (data && !Array.isArray(data) && data.results) {
+        setSchemes(data.results || []);
+        setTotalItems(data.count || 0);
+        setTotalPages(Math.max(1, Math.ceil((data.count || 0) / pageSize)));
+        setCurrentPage(page);
+      } else if (data?.data && Array.isArray(data.data)) {
+        // Legacy wrapper: { data: [...] }
+        const all = data.data;
+        setTotalItems(all.length);
+        setTotalPages(Math.max(1, Math.ceil(all.length / pageSize)));
+        setCurrentPage(page);
+        const start = (page - 1) * pageSize;
+        setSchemes(all.slice(start, start + pageSize));
+      } else if (Array.isArray(data)) {
+        // Fallback (purana backend, no pagination)
+        setTotalItems(data.length);
+        setTotalPages(Math.max(1, Math.ceil(data.length / pageSize)));
+        setCurrentPage(page);
+        const start = (page - 1) * pageSize;
+        setSchemes(data.slice(start, start + pageSize));
+      } else {
         setSchemes([]);
-      })
-      .finally(() => setLoading(false));
+        setTotalItems(0);
+        setTotalPages(1);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load scheme offers");
+      setSchemes([]);
+      setTotalItems(0);
+      setTotalPages(1);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchSchemes();
-  }, []);
+    fetchSchemes(currentPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, pageSize, debouncedSearch]);
 
   const handleViewReport = (schemeId: number) => {
     navigate(`/SchemeOfferRegister/${schemeId}/report`);
   };
 
-  const totalPages = Math.ceil(schemes.length / pageSize);
-  const paginatedSchemes = schemes.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  const clearSearch = () => {
+    setSearchTerm("");
+    setDebouncedSearch("");
+    setCurrentPage(1);
+  };
+
+  const handlePageChange = (page: number) => {
+    if (page >= 1 && page <= totalPages) setCurrentPage(page);
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(parseInt(e.target.value));
+    setCurrentPage(1);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-6">
@@ -78,6 +139,31 @@ const MySchemeOffers: React.FC = () => {
             <h1 className="text-white font-bold text-lg flex items-center gap-2">
               <FaGift /> SCHEME OFFERS FOR MY BRANCH
             </h1>
+          </div>
+        </div>
+
+        {/* ✅ Search bar */}
+        <div className="mb-4 flex flex-wrap gap-3 items-center">
+          <div className="relative flex-1 max-w-md">
+            <div className="absolute inset-y-0 left-0 flex items-center pl-3">
+              <FaSearch className="text-gray-400" size={14} />
+            </div>
+            <input
+              type="text"
+              placeholder="Search by Offer Name or Branch..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white"
+              autoComplete="off"
+            />
+            {searchTerm && (
+              <button
+                onClick={clearSearch}
+                className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+              >
+                <FaTimes size={14} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -103,7 +189,7 @@ const MySchemeOffers: React.FC = () => {
                     </td>
                   </tr>
                 )}
-                {!loading && paginatedSchemes.length === 0 && (
+                {!loading && schemes.length === 0 && (
                   <tr>
                     <td colSpan={7} className="text-center py-10 text-gray-400">
                       <FaGift className="inline mr-2 text-2xl text-gray-300" />
@@ -112,7 +198,7 @@ const MySchemeOffers: React.FC = () => {
                     </td>
                   </tr>
                 )}
-                {paginatedSchemes.map((scheme) => (
+                {schemes.map((scheme) => (
                   <tr
                     key={scheme.id}
                     className="border-b border-gray-100 hover:bg-gray-50 transition"
@@ -150,53 +236,38 @@ const MySchemeOffers: React.FC = () => {
             </table>
           </div>
 
-          {totalPages > 1 && (
-            <div className="flex justify-between items-center px-4 py-3 border-t">
-              <span className="text-sm text-gray-500">
-                Showing {(currentPage - 1) * pageSize + 1} to{" "}
-                {Math.min(currentPage * pageSize, schemes.length)} of {schemes.length}
-              </span>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          {/* ✅ Reusable Pagination */}
+          {totalItems > 0 && (
+            <div className="flex flex-col sm:flex-row justify-between items-center px-4 py-3 border-t gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-500">
+                  Showing{" "}
+                  <span className="font-medium">
+                    {(currentPage - 1) * pageSize + 1}
+                  </span>{" "}
+                  to{" "}
+                  <span className="font-medium">
+                    {Math.min(currentPage * pageSize, totalItems)}
+                  </span>{" "}
+                  of <span className="font-medium">{totalItems}</span>
+                </span>
+                <select
+                  value={pageSize}
+                  onChange={handlePageSizeChange}
+                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  Previous
-                </button>
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  let pageNum;
-                  if (totalPages <= 5) {
-                    pageNum = i + 1;
-                  } else if (currentPage <= 3) {
-                    pageNum = i + 1;
-                  } else if (currentPage >= totalPages - 2) {
-                    pageNum = totalPages - 4 + i;
-                  } else {
-                    pageNum = currentPage - 2 + i;
-                  }
-                  return (
-                    <button
-                      key={pageNum}
-                      onClick={() => setCurrentPage(pageNum)}
-                      className={`px-3 py-1 border rounded text-sm ${
-                        currentPage === pageNum
-                          ? "bg-blue-600 text-white border-blue-600"
-                          : "hover:bg-gray-100"
-                      }`}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-                <button
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                >
-                  Next
-                </button>
+                  <option value={10}>10 per page</option>
+                  <option value={15}>15 per page</option>
+                  <option value={25}>25 per page</option>
+                  <option value={50}>50 per page</option>
+                </select>
               </div>
+
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+              />
             </div>
           )}
         </div>

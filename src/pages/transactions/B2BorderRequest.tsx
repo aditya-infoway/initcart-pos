@@ -1,14 +1,9 @@
 // src/pages/branch/B2BOrderRequest.tsx
-// B2B Order Request — sirf MERI khud ki placed requests (requesting_branch = me).
-// Full requester-side journey lives HERE: place order -> see verified qty -> Confirm ->
-// Receive (one item at a time OR all remaining at once).
-// Fulfiller-side (Verify order, Start Packaging, Packaging Ready) lives in B2BStockTransfer.tsx, NOT here.
-
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FaSearch, FaTrash, FaCheckCircle, FaBox, FaPlus, FaMinus, FaArrowLeft, FaListAlt,
-  FaSave, FaClipboardList, FaSpinner, FaBarcode, FaChevronLeft, FaChevronRight,
+  FaSave, FaClipboardList, FaSpinner, FaBarcode,
   FaFilter, FaTimes, FaCalendarAlt, FaEdit, FaWarehouse, FaShoppingBag,
   FaTruck, FaCheckDouble, FaBoxOpen,
 } from "react-icons/fa";
@@ -19,6 +14,7 @@ import { toast } from "react-toastify";
 import { useAuthStore } from "../../store/authStore";
 import { useNavigate } from "react-router-dom";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+import Pagination from "../../components/common/pagination";
 
 function useDebounce(value: string, delay = 300) {
   const [d, setD] = useState(value);
@@ -124,40 +120,6 @@ const DisplayField: React.FC<{ label: string; value: string | number; icon?: any
   </div>
 );
 
-function PaginationBar({ pagination, onPage, label = "records" }: { pagination: PaginationState; onPage: (p: number) => void; label?: string }) {
-  const { count, page, totalPages, previous, next } = pagination;
-  if (count <= PAGE_SIZE) return null;
-  const from = (page - 1) * PAGE_SIZE + 1, to = Math.min(page * PAGE_SIZE, count);
-  const pages: (number | "...")[] = [];
-  if (totalPages <= 7) for (let i = 1; i <= totalPages; i++) pages.push(i);
-  else {
-    pages.push(1);
-    if (page > 3) pages.push("...");
-    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
-    if (page < totalPages - 2) pages.push("...");
-    pages.push(totalPages);
-  }
-  return (
-    <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4 px-1">
-      <span className="text-sm text-gray-700">Showing {from}–{to} of {count} {label}</span>
-      <div className="flex gap-2 flex-wrap justify-center">
-        <button onClick={() => onPage(page - 1)} disabled={!previous}
-          className={`px-3 py-1 rounded flex items-center gap-1 ${!previous ? "bg-gray-300 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}>
-          <FaChevronLeft size={9} /> Prev
-        </button>
-        {pages.map((p, i) => p === "..." ? <span key={i} className="px-2 text-sm text-gray-400">…</span> : (
-          <button key={p} onClick={() => onPage(p as number)}
-            className={`px-3 py-1 rounded ${p === page ? "bg-indigo-500 text-white" : "bg-gray-200 hover:bg-gray-300"}`}>{p}</button>
-        ))}
-        <button onClick={() => onPage(page + 1)} disabled={!next}
-          className={`px-3 py-1 rounded flex items-center gap-1 ${!next ? "bg-gray-300 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}>
-          Next <FaChevronRight size={9} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function B2BOrderRequest() {
   const { user } = useAuthStore();
@@ -214,7 +176,7 @@ export default function B2BOrderRequest() {
       if (statusFilter) data = data.filter((o) => o.status === statusFilter);
       setOrders(data);
       const count = res.data.count || 0;
-      setOrdersPagination({ count, next: res.data.next || null, previous: res.data.previous || null, page, totalPages: Math.ceil(count / PAGE_SIZE) });
+      setOrdersPagination({ count, next: res.data.next || null, previous: res.data.previous || null, page, totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)) });
     } catch { toast.error("Could not load orders"); }
     setOrderLoading(false);
   }, [debouncedListSearch, statusFilter]);
@@ -252,7 +214,7 @@ export default function B2BOrderRequest() {
 
   const openCreateTab = () => {
     setTab("create"); setCart([]); setOrderNote(""); setSourceBranchId("");
-    fetchOrderIdPreview();   // ✅ ADD THIS
+    fetchOrderIdPreview();
     setCurrent({ variantId: null, item_name: "", variant_label: "", size: null, color: null, barcode: null, hsnCode: null, taxSlab: null, price: 0, quantity: "" });
   };
 
@@ -266,7 +228,7 @@ export default function B2BOrderRequest() {
       const results = res.data.results ?? res.data;
       setModalItems(results.data || []);
       const count = res.data.count || 0;
-      setModalPagination({ count, next: res.data.next || null, previous: res.data.previous || null, page, totalPages: Math.ceil(count / PAGE_SIZE) });
+      setModalPagination({ count, next: res.data.next || null, previous: res.data.previous || null, page, totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)) });
     } catch { toast.error("Could not load items"); }
     setModalLoading(false);
   }, [sourceBranchId, debouncedModalSearch]);
@@ -347,6 +309,19 @@ export default function B2BOrderRequest() {
   const totals = {
     totalQty: cart.reduce((s, c) => s + c.requested_quantity, 0),
     totalAmount: cart.reduce((s, c) => s + c.requested_quantity * c.branch_price, 0),
+  };
+
+  const handleListPageChange = (p: number) => {
+    if (p >= 1 && p <= ordersPagination.totalPages) {
+      loadOrders(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handleModalPageChange = (p: number) => {
+    if (p >= 1 && p <= modalPagination.totalPages) {
+      loadModalItems(p);
+    }
   };
 
   // ── Order Detail View ──
@@ -475,7 +450,29 @@ export default function B2BOrderRequest() {
             </tbody>
           </table>
         </div>
-        <PaginationBar pagination={ordersPagination} onPage={loadOrders} label="orders" />
+
+        {/* ✅ Reusable Pagination (orders) */}
+        {ordersPagination.count > 0 && (
+          <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4 px-1">
+            <span className="text-sm text-gray-700">
+              Showing{" "}
+              <span className="font-medium">
+                {(ordersPagination.page - 1) * PAGE_SIZE + 1}
+              </span>
+              –
+              <span className="font-medium">
+                {Math.min(ordersPagination.page * PAGE_SIZE, ordersPagination.count)}
+              </span>{" "}
+              of <span className="font-medium">{ordersPagination.count}</span> orders
+            </span>
+
+            <Pagination
+              currentPage={ordersPagination.page}
+              totalPages={ordersPagination.totalPages}
+              onPageChange={handleListPageChange}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -522,20 +519,18 @@ export default function B2BOrderRequest() {
               </div>
 
               <div className="space-y-1 lg:col-span-2">
-  <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-    <FaEdit className="text-gray-400 text-sm" /> Order Note (Optional)
-  </label>
-  <input
-    type="text"
-    placeholder="Optional note..."
-    value={orderNote}
-    onChange={(e) => setOrderNote(e.target.value)}
-    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
-  />
-</div>
-
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <FaEdit className="text-gray-400 text-sm" /> Order Note (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Optional note..."
+                  value={orderNote}
+                  onChange={(e) => setOrderNote(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+              </div>
             </div>
-
 
             {sourceBranchId && destBranchDetails && (
               <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
@@ -737,7 +732,29 @@ export default function B2BOrderRequest() {
                       </tbody>
                     </table>
                   </div>
-                  <PaginationBar pagination={modalPagination} onPage={loadModalItems} label="items" />
+
+                  {/* ✅ Reusable Pagination (modal items) */}
+                  {modalPagination.count > 0 && (
+                    <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
+                      <span className="text-sm text-gray-700">
+                        Showing{" "}
+                        <span className="font-medium">
+                          {(modalPagination.page - 1) * PAGE_SIZE + 1}
+                        </span>
+                        –
+                        <span className="font-medium">
+                          {Math.min(modalPagination.page * PAGE_SIZE, modalPagination.count)}
+                        </span>{" "}
+                        of <span className="font-medium">{modalPagination.count}</span> items
+                      </span>
+
+                      <Pagination
+                        currentPage={modalPagination.page}
+                        totalPages={modalPagination.totalPages}
+                        onPageChange={handleModalPageChange}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-center py-4 border-t bg-white flex-shrink-0">
                   <button onClick={() => setOpenModal(false)} className="px-8 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition">Close</button>
@@ -752,11 +769,7 @@ export default function B2BOrderRequest() {
 }
 
 // ════════════════════════════════════════════════════════════
-// ORDER DETAIL FULL VIEW — requester side, full lifecycle:
-// pending (waiting Verify) -> sent (Confirm) -> confirmed (waiting Start Packaging)
-// -> packaging_start (waiting Packaging Ready) -> packaging_ready (Receive, per item
-// or all at once) -> partially_received (Receive remaining) -> received.
-// Also Cancel Order / Cancel Transfer.
+// ORDER DETAIL FULL VIEW
 // ════════════════════════════════════════════════════════════
 function OrderDetailFullView({ order, onBack, onCancelOrder }: { order: OrderDetail; onBack: () => void; onCancelOrder: (id: number) => void }) {
   const { checkLocation } = useBranchLocationCheck();

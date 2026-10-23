@@ -5,6 +5,7 @@ import { toast } from "react-toastify";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 const VARIANTS_PER_PAGE = 10;
 
@@ -195,7 +196,7 @@ const Addsalesitem: React.FC = () => {
   };
 
   // ── Handlers ──
-  const totalPages = Math.ceil(totalCount / pageSize);
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) setCurrentPage(page);
@@ -499,13 +500,20 @@ const Addsalesitem: React.FC = () => {
         </table>
       </div>
 
-      {/* Pagination Controls */}
-      {totalPages > 0 && totalCount > 0 && (
+      {/* ✅ Pagination Controls (reusable) */}
+      {totalCount > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">
-              Showing {(currentPage - 1) * pageSize + 1}–
-              {Math.min(currentPage * pageSize, totalCount)} of {totalCount} items
+              Showing{" "}
+              <span className="font-medium">
+                {(currentPage - 1) * pageSize + 1}
+              </span>{" "}
+              to{" "}
+              <span className="font-medium">
+                {Math.min(currentPage * pageSize, totalCount)}
+              </span>{" "}
+              of <span className="font-medium">{totalCount}</span> items
             </span>
 
             <select
@@ -521,57 +529,11 @@ const Addsalesitem: React.FC = () => {
             </select>
           </div>
 
-          <div className="flex gap-2 flex-wrap justify-center">
-            <button
-              disabled={currentPage === 1}
-              onClick={() => handlePageChange(currentPage - 1)}
-              className={`px-3 py-1 rounded ${currentPage === 1
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
-            >
-              Prev
-            </button>
-
-            {(() => {
-              const maxVisible = 5;
-              let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-              let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-
-              if (endPage - startPage + 1 < maxVisible) {
-                startPage = Math.max(1, endPage - maxVisible + 1);
-              }
-
-              const pages = [];
-              for (let i = startPage; i <= endPage; i++) {
-                pages.push(i);
-              }
-
-              return pages.map((page) => (
-                <button
-                  key={page}
-                  onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1 rounded ${currentPage === page
-                      ? "bg-blue-500 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                >
-                  {page}
-                </button>
-              ));
-            })()}
-
-            <button
-              disabled={currentPage === totalPages}
-              onClick={() => handlePageChange(currentPage + 1)}
-              className={`px-3 py-1 rounded ${currentPage === totalPages
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
-            >
-              Next
-            </button>
-          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
         </div>
       )}
 
@@ -734,26 +696,14 @@ const Addsalesitem: React.FC = () => {
               </table>
             </div>
 
-            {/* Variants Pagination */}
+            {/* ✅ Variants Pagination (reusable) */}
             {Math.ceil(variants.length / VARIANTS_PER_PAGE) > 1 && (
-              <div className="flex justify-center gap-2 mt-4">
-                <button
-                  disabled={variantPage === 1}
-                  onClick={() => setVariantPage(p => p - 1)}
-                  className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
-                >
-                  Prev
-                </button>
-                <span className="px-3 py-1">
-                  Page {variantPage} of {Math.ceil(variants.length / VARIANTS_PER_PAGE)}
-                </span>
-                <button
-                  disabled={variantPage === Math.ceil(variants.length / VARIANTS_PER_PAGE)}
-                  onClick={() => setVariantPage(p => p + 1)}
-                  className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
-                >
-                  Next
-                </button>
+              <div className="flex justify-center mt-4">
+                <Pagination
+                  currentPage={variantPage}
+                  totalPages={Math.max(1, Math.ceil(variants.length / VARIANTS_PER_PAGE))}
+                  onPageChange={(p) => setVariantPage(p)}
+                />
               </div>
             )}
 

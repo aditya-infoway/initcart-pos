@@ -5,6 +5,7 @@ import api from "../../api/api";
 import { FaEye, FaSearch, FaFilter, FaFileExcel } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { useAuthStore } from "../../store/authStore";
+import Pagination from "../../components/common/pagination";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -45,10 +46,9 @@ interface PaginatedResponse<T> {
 const LedgerReport: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  
+
   const isSuperAdmin = user?.role === 'superadmin';
   const isEmployee = user?.role === 'employee';
-  
 
   const canViewAllBranches = isSuperAdmin || isEmployee;
 
@@ -60,11 +60,11 @@ const LedgerReport: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
   const [total, setTotal] = useState(0);
-  const [branches, setBranches] = useState<{id: number, branch_name: string}[]>([]);
+  const [branches, setBranches] = useState<{ id: number, branch_name: string }[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   const [selectedBranchName, setSelectedBranchName] = useState<string>("");
 
-  const totalPages = Math.ceil(total / pageSize);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   // ── fetch account list ────────────────────────────────────────────────────
   const fetchAccounts = useCallback(
@@ -101,7 +101,6 @@ const LedgerReport: React.FC = () => {
     if (canViewAllBranches) {
       api.get("branches/", { headers: authHeader() })
         .then(res => {
-
           let branchData = [];
           if (res.data?.data && Array.isArray(res.data.data)) {
             branchData = res.data.data;
@@ -169,6 +168,18 @@ const LedgerReport: React.FC = () => {
     }
   };
 
+  const handlePageChange = (p: number) => {
+    if (p >= 1 && p <= totalPages) {
+      fetchAccounts(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(Number(e.target.value));
+    setPage(1);
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
@@ -183,7 +194,6 @@ const LedgerReport: React.FC = () => {
           )}
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* ✅ Branch Filter - Sirf canViewAllBranches wale ko dikhe */}
           {canViewAllBranches && (
             <div className="flex items-center gap-2">
               <label className="text-blue-100 text-sm whitespace-nowrap">Branch:</label>
@@ -247,7 +257,7 @@ const LedgerReport: React.FC = () => {
 
         <select
           value={pageSize}
-          onChange={(e) => setPageSize(Number(e.target.value))}
+          onChange={handlePageSizeChange}
           className="border rounded-lg px-3 py-2 text-sm outline-none"
         >
           {[10, 15, 25, 50, 100].map((s) => (
@@ -302,17 +312,17 @@ const LedgerReport: React.FC = () => {
                     </span>
                   </td>
                   <td className="p-3 border border-gray-100">
-<button
-  onClick={() => navigate(
-    selectedBranchId
-      ? `/ledger-detail/${acc.id}?branch_id=${selectedBranchId}`
-      : `/ledger-detail/${acc.id}`
-  )}
-  className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition"
-  title="View Ledger"
->
-  <FaEye />
-</button>
+                    <button
+                      onClick={() => navigate(
+                        selectedBranchId
+                          ? `/ledger-detail/${acc.id}?branch_id=${selectedBranchId}`
+                          : `/ledger-detail/${acc.id}`
+                      )}
+                      className="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition"
+                      title="View Ledger"
+                    >
+                      <FaEye />
+                    </button>
                   </td>
                 </tr>
               ))
@@ -321,42 +331,26 @@ const LedgerReport: React.FC = () => {
         </table>
       </div>
 
-      {/* Pagination */}
+      {/* ✅ Reusable Pagination */}
       {total > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-3">
           <span className="text-sm text-gray-600">
-            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} accounts
+            Showing{" "}
+            <span className="font-medium">
+              {(page - 1) * pageSize + 1}
+            </span>
+            –
+            <span className="font-medium">
+              {Math.min(page * pageSize, total)}
+            </span>{" "}
+            of <span className="font-medium">{total}</span> accounts
           </span>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              disabled={page === 1}
-              onClick={() => fetchAccounts(page - 1)}
-              className="px-3 py-1 rounded border text-sm disabled:opacity-40 bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-not-allowed"
-            >
-              Prev
-            </button>
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const start = Math.max(1, Math.min(page - 2, totalPages - 4));
-              return start + i;
-            }).map((p) => (
-              <button
-                key={p}
-                onClick={() => fetchAccounts(p)}
-                className={`px-3 py-1 rounded border text-sm ${
-                  page === p ? "bg-blue-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-            <button
-              disabled={page === totalPages}
-              onClick={() => fetchAccounts(page + 1)}
-              className="px-3 py-1 rounded border text-sm disabled:opacity-40 bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-not-allowed"
-            >
-              Next
-            </button>
-          </div>
+
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
         </div>
       )}
     </div>

@@ -5,6 +5,7 @@ import { toast } from "react-toastify";
 import api from "../../api/api";
 import * as XLSX from "xlsx";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 // ------------------ Common variant columns ------------------
 const COMMON_VARIANT_COLUMNS = [
@@ -235,7 +236,7 @@ const Addpurchaseitem: React.FC = () => {
   };
 
   // ------------------ Pagination Handlers ------------------
-  const totalPages = Math.ceil(totalCount / pageSize);
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) {
@@ -496,13 +497,20 @@ const Addpurchaseitem: React.FC = () => {
         </table>
       </div>
 
-      {/* ------------------ Pagination Controls ------------------ */}
-      {totalPages > 0 && totalCount > 0 && (
+      {/* ------------------ Pagination Controls (reusable) ------------------ */}
+      {totalCount > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">
-              Showing {(currentPage - 1) * pageSize + 1}–
-              {Math.min(currentPage * pageSize, totalCount)} of {totalCount} items
+              Showing{" "}
+              <span className="font-medium">
+                {(currentPage - 1) * pageSize + 1}
+              </span>{" "}
+              to{" "}
+              <span className="font-medium">
+                {Math.min(currentPage * pageSize, totalCount)}
+              </span>{" "}
+              of <span className="font-medium">{totalCount}</span> items
             </span>
 
             <select
@@ -518,60 +526,11 @@ const Addpurchaseitem: React.FC = () => {
             </select>
           </div>
 
-          <div className="flex gap-2 flex-wrap justify-center">
-            <button
-              disabled={currentPage === 1}
-              onClick={() => handlePageChange(currentPage - 1)}
-              className={`px-3 py-1 rounded transition ${
-                currentPage === 1
-                  ? "bg-gray-300 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Previous
-            </button>
-
-            {(() => {
-              const maxVisible = 5;
-              let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-              let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-
-              if (endPage - startPage + 1 < maxVisible) {
-                startPage = Math.max(1, endPage - maxVisible + 1);
-              }
-
-              const pages = [];
-              for (let i = startPage; i <= endPage; i++) {
-                pages.push(i);
-              }
-
-              return pages.map((page) => (
-                <button
-                  key={page}
-                  onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1 rounded transition ${
-                    currentPage === page
-                      ? "bg-blue-500 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                  }`}
-                >
-                  {page}
-                </button>
-              ));
-            })()}
-
-            <button
-              disabled={currentPage === totalPages}
-              onClick={() => handlePageChange(currentPage + 1)}
-              className={`px-3 py-1 rounded transition ${
-                currentPage === totalPages
-                  ? "bg-gray-300 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Next
-            </button>
-          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
         </div>
       )}
 

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
 import { useAuthStore } from "../../store/authStore";
+import Pagination from "../../components/common/pagination";
 
 interface FilterOptions {
   terms: string;
@@ -15,11 +16,11 @@ interface FilterOptions {
 const SalesEntryReport: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  
+
   const isSuperAdmin = user?.role === 'superadmin';
   const isEmployee = user?.role === 'employee';
   const canViewAllBranches = isSuperAdmin || isEmployee;
-  
+
   const [allItems, setAllItems] = useState<any[]>([]);
   const [filteredItems, setFilteredItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,20 +55,17 @@ const SalesEntryReport: React.FC = () => {
     setLoading(true);
     try {
       const token = sessionStorage.getItem("token");
-      
-      // ✅ Use provided branchId or current selectedBranchId
+
       const effectiveBranchId = branchId !== undefined ? branchId : selectedBranchId;
-      
+
       let url = `salesentry-list/?page=1&page_size=1000`;
       if (effectiveBranchId) {
         url += `&branch_id=${effectiveBranchId}`;
       }
-      
-      console.log("🔄 Fetching sales with URL:", url);
-      
+
       const response = await api.get(url);
       let itemsArray: any[] = [];
-      
+
       if (response.data.results) {
         itemsArray = response.data.results;
         let nextUrl = response.data.next;
@@ -79,33 +77,31 @@ const SalesEntryReport: React.FC = () => {
       } else if (Array.isArray(response.data)) {
         itemsArray = response.data;
       }
-      
+
       const mapped = itemsArray.map((item: any, index: number) => ({
-        uid: index, 
-        id: item.id, 
-        billNo: item.bill_no, 
+        uid: index,
+        id: item.id,
+        billNo: item.bill_no,
         date: item.date,
-        due_date: item.dueDate, 
+        due_date: item.dueDate,
         grand_total: item.grand_total,
-        total_basic: item.total_basic, 
+        total_basic: item.total_basic,
         total_tax: item.total_tax,
-        terms: item.payment_terms, 
+        terms: item.payment_terms,
         narration: item.narration,
-        party_name_name: item.customer_name, 
+        party_name_name: item.customer_name,
         F_O_R: (Number(item.frightcharge)||0)+(Number(item.otherexpnse)||0)+(Number(item.roundamount)||0),
         variants: Array.isArray(item.items) ? [...item.items] : [],
       }));
-      
-      console.log(`✅ Loaded ${mapped.length} records for branch:`, effectiveBranchId || 'default');
-      
+
       setAllItems(mapped);
       setFilteredItems(mapped);
     } catch (err) {
       console.error("Fetch error:", err);
-      setAllItems([]); 
+      setAllItems([]);
       setFilteredItems([]);
-    } finally { 
-      setLoading(false); 
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -113,13 +109,12 @@ const SalesEntryReport: React.FC = () => {
   useEffect(() => {
     fetchItems();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency - only run once on mount
+  }, []);
 
   // ✅ Branch change handler
   const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
     setSelectedBranchId(val);
-    // ✅ Fetch with new branch ID
     fetchItems(val);
   };
 
@@ -138,7 +133,7 @@ const SalesEntryReport: React.FC = () => {
     setCurrentPage(1);
   }, [searchTerm, filters, allItems]);
 
-  const totalPages = Math.ceil(filteredItems.length / pageSize);
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const paginatedItems = filteredItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const totalBasic = filteredItems.reduce((s, i) => s + Number(i.total_basic || 0), 0);
@@ -148,30 +143,30 @@ const SalesEntryReport: React.FC = () => {
 
   const exportToExcel = () => {
     const rows = filteredItems.map((item, idx) => ({
-      "SR No": idx + 1, 
-      "Date": item.date || "-", 
+      "SR No": idx + 1,
+      "Date": item.date || "-",
       "Terms": item.terms || "-",
-      "Party Name": item.party_name_name || "-", 
+      "Party Name": item.party_name_name || "-",
       "Bill No": item.billNo || "-",
-      "Due Date": item.due_date || "-", 
+      "Due Date": item.due_date || "-",
       "Narration": item.narration || "-",
       "Total Basic (₹)": Number(item.total_basic || 0).toFixed(2),
       "Total Tax (₹)":   Number(item.total_tax   || 0).toFixed(2),
       "F+O+R (₹)":       Number(item.F_O_R       || 0).toFixed(2),
       "Grand Total (₹)": Number(item.grand_total  || 0).toFixed(2),
     }));
-    rows.push({ 
-      "SR No": "" as any, 
+    rows.push({
+      "SR No": "" as any,
       "Date":"",
       "Terms":"",
       "Party Name":"TOTAL",
       "Bill No":"",
       "Due Date":"",
       "Narration":"",
-      "Total Basic (₹)": totalBasic.toFixed(2), 
+      "Total Basic (₹)": totalBasic.toFixed(2),
       "Total Tax (₹)": totalTax.toFixed(2),
-      "F+O+R (₹)": totalFOR.toFixed(2), 
-      "Grand Total (₹)": grandTotal.toFixed(2) 
+      "F+O+R (₹)": totalFOR.toFixed(2),
+      "Grand Total (₹)": grandTotal.toFixed(2)
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [{wch:6},{wch:12},{wch:10},{wch:28},{wch:18},{wch:12},{wch:32},{wch:16},{wch:14},{wch:12},{wch:16}];
@@ -193,6 +188,18 @@ const SalesEntryReport: React.FC = () => {
   };
 
   const selectedBranchName = branches.find(b => String(b.id) === selectedBranchId)?.branch_name || "My Branch";
+
+  const handlePageChange = (p: number) => {
+    if (p >= 1 && p <= totalPages) {
+      setCurrentPage(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(Number(e.target.value));
+    setCurrentPage(1);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -381,34 +388,33 @@ const SalesEntryReport: React.FC = () => {
                 </table>
               </div>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
+              {/* ✅ Reusable Pagination */}
+              {filteredItems.length > 0 && (
                 <div className="no-print flex flex-col sm:flex-row justify-between items-center gap-4 px-4 py-3 border-t border-gray-200 bg-gray-50/60">
                   <div className="flex items-center gap-3 text-sm text-gray-600">
-                    Showing {(currentPage-1)*pageSize+1}–{Math.min(currentPage*pageSize,filteredItems.length)} of {filteredItems.length}
-                    <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-                      className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-blue-400">
+                    Showing{" "}
+                    <span className="font-medium">
+                      {(currentPage-1)*pageSize+1}
+                    </span>
+                    –
+                    <span className="font-medium">
+                      {Math.min(currentPage*pageSize,filteredItems.length)}
+                    </span>{" "}
+                    of <span className="font-medium">{filteredItems.length}</span>
+                    <select
+                      value={pageSize}
+                      onChange={handlePageSizeChange}
+                      className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-blue-400"
+                    >
                       {[10,15,25,50,100].map(n => <option key={n} value={n}>{n} / page</option>)}
                     </select>
                   </div>
-                  <div className="flex gap-1.5 flex-wrap justify-center">
-                    <button disabled={currentPage===1} onClick={() => setCurrentPage(p=>p-1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${currentPage===1?"bg-gray-200 text-gray-400 cursor-not-allowed":"bg-slate-700 text-white hover:bg-slate-800"}`}>
-                      ← Prev
-                    </button>
-                    {(() => {
-                      const max=5; let start=Math.max(1,currentPage-2); let end=Math.min(totalPages,start+max-1);
-                      if(end-start+1<max) start=Math.max(1,end-max+1);
-                      return Array.from({length:end-start+1},(_,i)=>start+i).map(p=>(
-                        <button key={p} onClick={()=>setCurrentPage(p)}
-                          className={`px-3 py-1.5 rounded text-sm transition ${currentPage===p?"bg-blue-600 text-white":"bg-gray-200 hover:bg-gray-300"}`}>{p}</button>
-                      ));
-                    })()}
-                    <button disabled={currentPage===totalPages} onClick={() => setCurrentPage(p=>p+1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${currentPage===totalPages?"bg-gray-200 text-gray-400 cursor-not-allowed":"bg-slate-700 text-white hover:bg-slate-800"}`}>
-                      Next →
-                    </button>
-                  </div>
+
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={handlePageChange}
+                  />
                 </div>
               )}
             </>

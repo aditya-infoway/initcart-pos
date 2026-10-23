@@ -8,6 +8,7 @@ import api from "../../api/api";
 import { FaArrowLeft, FaPrint, FaBoxOpen, FaFileExcel } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { toast } from "react-toastify";
+import Pagination from "../../components/common/pagination";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -21,10 +22,6 @@ const fmt = (n: number) =>
     maximumFractionDigits: 2,
   }).format(Number.isFinite(n) ? n : 0);
 
-/**
- * ✅ Safe per-unit price calculation
- * Handles: null/undefined billAmount, qty=0, division by zero
- */
 const perUnitPrice = (qty: number, billAmount: number): number | null => {
   const q = Math.abs(Number(qty) || 0);
   const amt = Number(billAmount) || 0;
@@ -114,7 +111,6 @@ const StockDetail: React.FC = () => {
         ? res.data
         : [];
 
-      // ✅ Sanitize every row so no NaN / undefined reaches UI
       const sanitized = data.map((r) => ({
         date: r.date ?? null,
         type: r.type ?? "Unknown",
@@ -161,7 +157,7 @@ const StockDetail: React.FC = () => {
     .filter((r) => r.type === "Sale (POS)" || r.type === "Sale (Website)")
     .reduce((s, r) => s + Math.abs(r.qty), 0);
 
-  // ── pagination helpers ────────────────────────────────────────────────────
+  // ── pagination (client-side) ──────────────────────────────────────────────
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
@@ -624,47 +620,31 @@ const StockDetail: React.FC = () => {
         )}
       </div>
 
-      {/* ── Pagination ───────────────────────────────────────────────────── */}
+      {/* ── ✅ Reusable Pagination (client-side) ─────────────────────── */}
       {totalRows > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-3">
           <span className="text-sm text-gray-600">
-            Showing {(page - 1) * pageSize + 1}–
-            {Math.min(page * pageSize, totalRows)} of {totalRows} entries
+            Showing{" "}
+            <span className="font-medium">
+              {(page - 1) * pageSize + 1}
+            </span>
+            –
+            <span className="font-medium">
+              {Math.min(page * pageSize, totalRows)}
+            </span>{" "}
+            of <span className="font-medium">{totalRows}</span> entries
           </span>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="px-3 py-1 rounded border text-sm disabled:opacity-40 bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-not-allowed"
-            >
-              Prev
-            </button>
 
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const start = Math.max(1, Math.min(page - 2, totalPages - 4));
-              return start + i;
-            }).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPage(p)}
-                className={`px-3 py-1 rounded border text-sm ${
-                  page === p
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-
-            <button
-              disabled={page === totalPages || totalPages === 0}
-              onClick={() => setPage((p) => p + 1)}
-              className="px-3 py-1 rounded border text-sm disabled:opacity-40 bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-not-allowed"
-            >
-              Next
-            </button>
-          </div>
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={(p) => {
+              if (p >= 1 && p <= totalPages) {
+                setPage(p);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }
+            }}
+          />
         </div>
       )}
     </div>

@@ -8,6 +8,7 @@ import api from "../../api/api";
 import { FaArrowLeft, FaPrint, FaFileExcel } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { toast } from "react-toastify";
+import Pagination from "../../components/common/pagination";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -90,11 +91,9 @@ const PAGE_SIZES = [15, 25, 50, 100, 200];
 // ─── main component ───────────────────────────────────────────────────────────
 
 const LedgerDetail: React.FC = () => {
-  // ✅ FIX: use `id`
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  // ✅ FIX: read branch_id from URL query (passed by Ledger Report page)
   const [searchParams] = useSearchParams();
   const branchIdFromUrl = searchParams.get("branch_id") || "";
 
@@ -118,7 +117,6 @@ const LedgerDetail: React.FC = () => {
       return;
     }
 
-    // Prepare main data for export
     const exportData = ledgerData.ledger.map((row, index) => ({
       "SR No": index + 1,
       "Date": row.date || "-",
@@ -130,7 +128,6 @@ const LedgerDetail: React.FC = () => {
       "Balance": `${fmt(row.balance)} ${row.balance_dr_cr}`,
     }));
 
-    // Create worksheet
     const ws = XLSX.utils.json_to_sheet(exportData);
 
     ws["!cols"] = [
@@ -138,7 +135,6 @@ const LedgerDetail: React.FC = () => {
       { wch: 35 }, { wch: 15 }, { wch: 15 }, { wch: 18 }
     ];
 
-    // Add summary section
     const summaryStartRow = exportData.length + 3;
     const summaryData = [
       [],
@@ -179,7 +175,6 @@ const LedgerDetail: React.FC = () => {
   // ── fetch ledger ─────────────────────────────────────────────────────────
   const fetchLedger = useCallback(
     async (df = dateFrom, dt = dateTo) => {
-      // ✅ FIX: use `id`
       if (!id) return;
       setLoading(true);
       setError("");
@@ -187,16 +182,14 @@ const LedgerDetail: React.FC = () => {
         const params = new URLSearchParams();
         if (df) params.set("date_from", df);
         if (dt) params.set("date_to", dt);
-        // ✅ FIX: send branch_id from URL (employee ke liye zaroori)
         if (branchIdFromUrl) params.set("branch_id", branchIdFromUrl);
 
-        // ✅ FIX: use `id`
         const res = await api.get<LedgerData>(
           `ledger-history/${id}/?${params}`,
           { headers: authHeader() }
         );
         setLedgerData(res.data);
-        setPage(1); // reset to first page on new fetch
+        setPage(1);
       } catch (e: any) {
         setError("Failed to load ledger. Please try again.");
         console.error(e);
@@ -204,7 +197,6 @@ const LedgerDetail: React.FC = () => {
         setLoading(false);
       }
     },
-    // ✅ FIX: use `id` and branchIdFromUrl in deps
     [id, dateFrom, dateTo, branchIdFromUrl]
   );
 
@@ -229,10 +221,8 @@ const LedgerDetail: React.FC = () => {
   // ── client-side pagination helpers ────────────────────────────────────────
   const allRows = ledgerData?.ledger ?? [];
   const totalRows = allRows.length;
-  const totalPages = Math.ceil(totalRows / pageSize);
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const pagedRows = allRows.slice((page - 1) * pageSize, page * pageSize);
-
-  // serial number offset — opening row is always row 0, so transactions start at 1
   const srOffset = (page - 1) * pageSize;
 
   // ── print ─────────────────────────────────────────────────────────────────
@@ -280,6 +270,18 @@ const LedgerDetail: React.FC = () => {
       </body></html>`);
     w.document.close();
     w.print();
+  };
+
+  const handlePageChange = (p: number) => {
+    if (p >= 1 && p <= totalPages) {
+      setPage(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(Number(e.target.value));
+    setPage(1);
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -362,15 +364,11 @@ const LedgerDetail: React.FC = () => {
           </button>
         )}
 
-        {/* page size selector right-aligned */}
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm text-gray-500">Rows per page:</span>
           <select
             value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value));
-              setPage(1);
-            }}
+            onChange={handlePageSizeChange}
             className="border rounded-lg px-3 py-1.5 text-sm outline-none"
           >
             {PAGE_SIZES.map((s) => (
@@ -484,7 +482,7 @@ const LedgerDetail: React.FC = () => {
                 </tr>
               )}
 
-              {/* Transaction rows — paginated, oldest first (already sorted by API) */}
+              {/* Transaction rows */}
               {pagedRows.length === 0 ? (
                 <tr>
                   <td
@@ -538,7 +536,7 @@ const LedgerDetail: React.FC = () => {
                 ))
               )}
 
-              {/* Totals footer — show on last page or if all rows fit on one page */}
+              {/* Totals footer */}
               {(page === totalPages || totalPages === 0) && ledgerData && (
                 <tr className="bg-indigo-50 font-bold border-t-2 border-indigo-300">
                   <td
@@ -572,51 +570,26 @@ const LedgerDetail: React.FC = () => {
         )}
       </div>
 
-      {/* ── Pagination ──────────────────────────────────────────────────── */}
+      {/* ── ✅ Reusable Pagination (client-side) ─────────────────────────── */}
       {totalRows > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-3">
           <span className="text-sm text-gray-600">
-            Showing {(page - 1) * pageSize + 1}–
-            {Math.min(page * pageSize, totalRows)} of {totalRows} entries
+            Showing{" "}
+            <span className="font-medium">
+              {(page - 1) * pageSize + 1}
+            </span>
+            –
+            <span className="font-medium">
+              {Math.min(page * pageSize, totalRows)}
+            </span>{" "}
+            of <span className="font-medium">{totalRows}</span> entries
           </span>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="px-3 py-1 rounded border text-sm disabled:opacity-40 bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-not-allowed"
-            >
-              Prev
-            </button>
 
-            {/* page numbers — show 5 around current */}
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const start = Math.max(
-                1,
-                Math.min(page - 2, totalPages - 4)
-              );
-              return start + i;
-            }).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPage(p)}
-                className={`px-3 py-1 rounded border text-sm ${
-                  page === p
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-
-            <button
-              disabled={page === totalPages || totalPages === 0}
-              onClick={() => setPage((p) => p + 1)}
-              className="px-3 py-1 rounded border text-sm disabled:opacity-40 bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-not-allowed"
-            >
-              Next
-            </button>
-          </div>
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
         </div>
       )}
     </div>

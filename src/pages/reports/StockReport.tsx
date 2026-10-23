@@ -12,6 +12,7 @@ import {
 import * as XLSX from "xlsx";
 import { toast } from "react-toastify";
 import { useAuthStore } from "../../store/authStore";
+import Pagination from "../../components/common/pagination";
 
 // ─── Branch-type specific variant fields ─────────────────────────────────────
 const VARIANT_BY_BRANCH: Record<string, string[]> = {
@@ -244,7 +245,7 @@ const StockReport: React.FC = () => {
     setCurrentPage(1);
   }, [searchTerm, filters, allItems]);
 
-  // ── Pagination ───────────────────────────────────────────────────────────
+  // ── Pagination (client-side) ─────────────────────────────────────────────
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const paginatedItems = filteredItems.slice(
     (currentPage - 1) * pageSize,
@@ -713,14 +714,20 @@ const StockReport: React.FC = () => {
         </table>
       </div>
 
-      {/* Pagination */}
-      {filteredItems.length > pageSize && (
+      {/* ✅ Reusable Pagination (client-side) */}
+      {filteredItems.length > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-600">
-              {(currentPage - 1) * pageSize + 1}–
-              {Math.min(currentPage * pageSize, filteredItems.length)} of{" "}
-              {filteredItems.length}
+              Showing{" "}
+              <span className="font-medium">
+                {(currentPage - 1) * pageSize + 1}
+              </span>{" "}
+              to{" "}
+              <span className="font-medium">
+                {Math.min(currentPage * pageSize, filteredItems.length)}
+              </span>{" "}
+              of <span className="font-medium">{filteredItems.length}</span> items
             </span>
             <select
               value={pageSize}
@@ -738,58 +745,11 @@ const StockReport: React.FC = () => {
             </select>
           </div>
 
-          <div className="flex gap-1 flex-wrap justify-center">
-            <button
-              disabled={currentPage === 1}
-              onClick={() => handlePageChange(currentPage - 1)}
-              className={`px-3 py-1 border rounded text-sm transition ${
-                currentPage === 1
-                  ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Prev
-            </button>
-
-            {(() => {
-              const maxVisible = 5;
-              let start = Math.max(
-                1,
-                currentPage - Math.floor(maxVisible / 2)
-              );
-              let end = Math.min(totalPages, start + maxVisible - 1);
-              if (end - start + 1 < maxVisible)
-                start = Math.max(1, end - maxVisible + 1);
-              return Array.from(
-                { length: end - start + 1 },
-                (_, i) => start + i
-              ).map((page) => (
-                <button
-                  key={page}
-                  onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1 border rounded text-sm transition ${
-                    currentPage === page
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 hover:bg-gray-200"
-                  }`}
-                >
-                  {page}
-                </button>
-              ));
-            })()}
-
-            <button
-              disabled={currentPage === totalPages}
-              onClick={() => handlePageChange(currentPage + 1)}
-              className={`px-3 py-1 border rounded text-sm transition ${
-                currentPage === totalPages
-                  ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Next
-            </button>
-          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
         </div>
       )}
     </div>

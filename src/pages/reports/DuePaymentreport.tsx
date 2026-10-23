@@ -7,6 +7,7 @@ import * as XLSX from "xlsx";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useAuthStore } from "../../store/authStore";
+import Pagination from "../../components/common/pagination";
 
 interface DueBill {
   id: number;
@@ -78,17 +79,15 @@ const typeIcon: Record<string, string> = {
 const DuePaymentReport: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  
+
   const isSuperAdmin = user?.role === 'superadmin';
   const isEmployee = user?.role === 'employee';
-  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
   const canViewAllBranches = isSuperAdmin || isEmployee;
 
   const [allBills, setAllBills]     = useState<DueBill[]>([]);
   const [summary, setSummary]       = useState<Summary | null>(null);
   const [loading, setLoading]       = useState(false);
-  
-  // ✅ Branch state
+
   const [branches, setBranches]     = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
@@ -101,7 +100,7 @@ const DuePaymentReport: React.FC = () => {
   });
   const [overdueOnly, setOverdueOnly] = useState(false);
 
-  // pagination
+  // pagination (client-side)
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize]        = useState(15);
 
@@ -109,7 +108,7 @@ const DuePaymentReport: React.FC = () => {
   const [sortKey, setSortKey]   = useState<string>("due_date");
   const [sortDir, setSortDir]   = useState<"asc" | "desc">("asc");
 
-  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  // ✅ Fetch branches
   useEffect(() => {
     if (canViewAllBranches) {
       api.get("branches/")
@@ -134,18 +133,13 @@ const DuePaymentReport: React.FC = () => {
     try {
       const params = new URLSearchParams();
       if (overdueOnly) params.append("overdue_only", "true");
-      // ✅ branch_id add karo agar selected hai
       const effectiveBranchId = branchId !== undefined ? branchId : selectedBranchId;
       if (effectiveBranchId) params.append("branch_id", effectiveBranchId);
-      
+
       const url = `due-payment-report/?${params}`;
-      console.log("🔄 Fetching due payment report with URL:", url);
-      
       const res = await api.get(url);
       setAllBills(res.data.bills || []);
       setSummary(res.data.summary);
-      
-      console.log(`✅ Loaded ${res.data.bills?.length || 0} due bills`);
     } catch (err) {
       console.error("Fetch error:", err);
       toast.error("Failed to load due payment report");
@@ -154,12 +148,10 @@ const DuePaymentReport: React.FC = () => {
     }
   }, [overdueOnly, selectedBranchId]);
 
-  // ✅ Initial fetch
-  useEffect(() => { 
-    fetchData(); 
+  useEffect(() => {
+    fetchData();
   }, [fetchData]);
 
-  // ✅ Branch change handler
   const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
     const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
@@ -183,7 +175,6 @@ const DuePaymentReport: React.FC = () => {
     if (filters.dateFrom) rows = rows.filter(r => (r.due_date || "") >= filters.dateFrom);
     if (filters.dateTo)   rows = rows.filter(r => (r.due_date || "") <= filters.dateTo);
 
-    // Sort
     rows.sort((a: any, b: any) => {
       let av = a[sortKey], bv = b[sortKey];
       if (sortKey === "due_date" || sortKey === "bill_date") {
@@ -200,8 +191,8 @@ const DuePaymentReport: React.FC = () => {
   // reset page on filter change
   useEffect(() => { setCurrentPage(1); }, [searchTerm, filters, overdueOnly, sortKey, sortDir]);
 
-  const totalPages    = Math.ceil(filtered.length / pageSize);
-  const paginated     = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated  = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   // ── Totals ──────────────────────────────────────────────────────
   const totalAmt     = filtered.reduce((s, r) => s + r.total_amount, 0);
@@ -272,6 +263,18 @@ const DuePaymentReport: React.FC = () => {
     setTimeout(() => { win.focus(); win.print(); win.close(); }, 500);
   };
 
+  const handlePageChange = (p: number) => {
+    if (p >= 1 && p <= totalPages) {
+      setCurrentPage(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(Number(e.target.value));
+    setCurrentPage(1);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <style>{`@media print{.no-print{display:none!important}body{background:white}}`}</style>
@@ -291,7 +294,6 @@ const DuePaymentReport: React.FC = () => {
                 Due Payment Report
               </h1>
               <p className="text-xs text-gray-400">
-                {/* ✅ Branch name show karo */}
                 {canViewAllBranches && selectedBranchId && (
                   <span className="font-semibold text-gray-600">{selectedBranchName} · </span>
                 )}
@@ -300,7 +302,6 @@ const DuePaymentReport: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* ✅ Branch Filter - Superadmin + Employee */}
             {canViewAllBranches && (
               <div className="flex items-center gap-2 mr-2">
                 <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
@@ -352,7 +353,7 @@ const DuePaymentReport: React.FC = () => {
             >
               <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">{c.label}</p>
               <p className={`text-xl font-bold mt-1 ${c.text}`}>
-                {c.isCount ? c.value : `₹${fmt(c.value)}`}
+                {c.isCount ? c.value : `₹${fmt(c.value as number)}`}
               </p>
             </div>
           ))}
@@ -361,7 +362,6 @@ const DuePaymentReport: React.FC = () => {
         {/* ── Search + Filter + Overdue toggle ── */}
         <div className="no-print bg-white rounded-xl border border-gray-200 shadow-sm p-4">
           <div className="flex flex-wrap gap-3 items-center">
-            {/* Search */}
             <div className="relative flex-1 min-w-[220px] max-w-lg">
               <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={13} />
               <input
@@ -382,7 +382,6 @@ const DuePaymentReport: React.FC = () => {
               )}
             </div>
 
-            {/* Filter button */}
             <button
               onClick={() => setShowFilters(!showFilters)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
@@ -408,7 +407,6 @@ const DuePaymentReport: React.FC = () => {
               </button>
             )}
 
-            {/* Overdue toggle */}
             <label className="flex items-center gap-2 cursor-pointer select-none ml-auto no-print">
               <span className="text-sm font-medium text-gray-600">Overdue Only</span>
               <div
@@ -639,7 +637,6 @@ const DuePaymentReport: React.FC = () => {
                     )}
                   </tbody>
 
-                  {/* ── Footer ── */}
                   <tfoot>
                     <tr className="bg-slate-50 border-t-2 border-slate-300 font-bold text-gray-800">
                       <td colSpan={8} className="px-3 py-3 text-sm font-bold text-gray-700">
@@ -662,15 +659,22 @@ const DuePaymentReport: React.FC = () => {
                 </table>
               </div>
 
-              {/* ── Pagination ── */}
-              {totalPages > 1 && (
+              {/* ── ✅ Reusable Pagination ── */}
+              {filtered.length > 0 && (
                 <div className="no-print flex flex-col sm:flex-row justify-between items-center gap-4 px-4 py-3 border-t border-gray-200 bg-gray-50/60">
                   <div className="flex items-center gap-3 text-sm text-gray-600">
-                    Showing {(currentPage - 1) * pageSize + 1}–
-                    {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
+                    Showing{" "}
+                    <span className="font-medium">
+                      {(currentPage - 1) * pageSize + 1}
+                    </span>
+                    –
+                    <span className="font-medium">
+                      {Math.min(currentPage * pageSize, filtered.length)}
+                    </span>{" "}
+                    of <span className="font-medium">{filtered.length}</span>
                     <select
                       value={pageSize}
-                      onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                      onChange={handlePageSizeChange}
                       className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-blue-400"
                     >
                       {[10, 15, 25, 50, 100].map(n => (
@@ -678,49 +682,12 @@ const DuePaymentReport: React.FC = () => {
                       ))}
                     </select>
                   </div>
-                  <div className="flex gap-1.5 flex-wrap justify-center">
-                    <button
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(p => p - 1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${
-                        currentPage === 1
-                          ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                          : "bg-slate-700 text-white hover:bg-slate-800"
-                      }`}
-                    >
-                      ← Prev
-                    </button>
-                    {(() => {
-                      const max = 5;
-                      let start = Math.max(1, currentPage - 2);
-                      let end = Math.min(totalPages, start + max - 1);
-                      if (end - start + 1 < max) start = Math.max(1, end - max + 1);
-                      return Array.from({ length: end - start + 1 }, (_, i) => start + i).map(p => (
-                        <button
-                          key={p}
-                          onClick={() => setCurrentPage(p)}
-                          className={`px-3 py-1.5 rounded text-sm transition ${
-                            currentPage === p
-                              ? "bg-blue-600 text-white"
-                              : "bg-gray-200 hover:bg-gray-300"
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      ));
-                    })()}
-                    <button
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(p => p + 1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${
-                        currentPage === totalPages
-                          ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                          : "bg-slate-700 text-white hover:bg-slate-800"
-                      }`}
-                    >
-                      Next →
-                    </button>
-                  </div>
+
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={handlePageChange}
+                  />
                 </div>
               )}
             </>

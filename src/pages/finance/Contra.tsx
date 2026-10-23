@@ -6,6 +6,7 @@ import { toast } from "react-toastify";
 import { FaSearch, FaTimes, FaFileExcel, FaPlus } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 const today = new Date().toISOString().split("T")[0];
 
@@ -17,6 +18,13 @@ interface ContraFormValues {
     date: string;
     amount: number;
     narration?: string;
+}
+
+interface PaginatedResponse {
+    count: number;
+    next: string | null;
+    previous: string | null;
+    results: any[];
 }
 
 const validationSchema: Yup.ObjectSchema<ContraFormValues> = Yup.object({
@@ -162,15 +170,15 @@ const BankAccountSelect = ({ label, name, otherValue }: { label: string; name: s
             >
                 <option value="">Select {label}</option>
                 {accounts.map((a) => {
-                    const isDisabled = otherValue !== undefined && 
-                                      otherValue !== null && 
-                                      otherValue !== "" && 
+                    const isDisabled = otherValue !== undefined &&
+                                      otherValue !== null &&
+                                      otherValue !== "" &&
                                       String(a.id) === String(otherValue);
-                    
+
                     return (
-                        <option 
-                            key={a.id} 
-                            value={a.id} 
+                        <option
+                            key={a.id}
+                            value={a.id}
                             disabled={isDisabled}
                         >
                             {a.account_name}
@@ -191,73 +199,32 @@ const Contra = () => {
     const [rows, setRows] = useState<any[]>([]);
     const [, setPrefixes] = useState<any>({});
     const [, setAccounts] = useState<any[]>([]);
-    
+    const [loading, setLoading] = useState(true);
+
     // ✅ PERMISSIONS
     const { canAdd } = usePermission("/Contra");
-    // Note: Edit/Delete nahi hai isme, isliye canEdit/canDelete use nahi kiya
-    
+
     // Search and Filter state
     const [searchTerm, setSearchTerm] = useState("");
+    const [debouncedSearch, setDebouncedSearch] = useState("");
     const [filterType, setFilterType] = useState("");
-    
+
+    // Pagination
     const [currentPage, setCurrentPage] = useState(1);
-    const rowsPerPage = 15;
+    const [pageSize, setPageSize] = useState(15);
+    const [totalItems, setTotalItems] = useState(0);
+    const [totalPages, setTotalPages] = useState(1);
 
-    // ✅ Add Export to Excel function
-    const exportToExcel = () => {
-        if (filteredRows.length === 0) {
-            toast.warning("No data to export");
-            return;
-        }
+    // ✅ Search debounce (400ms)
+    useEffect(() => {
+        const t = setTimeout(() => {
+            setDebouncedSearch(searchTerm.trim());
+            setCurrentPage(1);
+        }, 400);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
 
-        // Prepare data for export
-        const exportData: any[] = filteredRows.map((row, index) => ({
-            "SR No": index + 1,
-            "Voucher No": row.voucher_no || "-",
-            "Date": row.date || "-",
-            "Type": row.type || "-",
-            "Cash/Bank Account": row.cash_account_name || "-",
-            "Opposite Account": row.party_name || "-",
-            "Amount (₹)": Number(row.amount || 0).toFixed(2),
-        }));
-
-        // Add grand total row
-        const grandTotal = filteredRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-        exportData.push({
-            "SR No": "",
-            "Voucher No": "",
-            "Date": "",
-            "Type": "TOTAL",
-            "Cash/Bank Account": "",
-            "Opposite Account": "",
-            "Amount (₹)": grandTotal.toFixed(2),
-        });
-
-        // Create worksheet
-        const ws = XLSX.utils.json_to_sheet(exportData);
-        
-        // Set column widths
-        ws["!cols"] = [
-            { wch: 6 },   // SR No
-            { wch: 15 },  // Voucher No
-            { wch: 12 },  // Date
-            { wch: 18 },  // Type
-            { wch: 25 },  // Cash/Bank Account
-            { wch: 25 },  // Opposite Account
-            { wch: 15 },  // Amount
-        ];
-
-        // Create workbook and download
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Contra Register");
-        
-        // Generate filename with current date
-        const fileName = `Contra_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
-        XLSX.writeFile(wb, fileName);
-        
-        toast.success(`Exported ${filteredRows.length} records successfully`);
-    };
-
+    // ✅ Fetch settings
     useEffect(() => {
         api
             .get("settings/")
@@ -265,48 +232,152 @@ const Contra = () => {
             .catch(() => console.error("Failed to fetch settings"));
     }, []);
 
-    useEffect(() => {
-        api.get("contra/").then((res) => setAccounts(res.data)).catch(console.error);
-        fetchContraEntries();
-    }, []);
-
-    const fetchContraEntries = async () => {
+    // ✅ Server-side fetch with pagination + search + filter
+    const fetchContraEntries = async (page = 1) => {
+        setLoading(true);
         try {
-            const res = await api.get("contra/");
-            setRows(res.data);
+            const params = new URLSearchParams();
+            params.set("page", String(page));
+            params.set("page_size", String(pageSize));
+            if (debouncedSearch) params.set("search", debouncedSearch);
+            if (filterType) params.set("type", filterType);
+
+            const res = await api.get<PaginatedResponse>(`contra/?${params.toString()}`);
+
+            // Paginated response
+            if (res.data && !Array.isArray(res.data) && (res.data as any).results) {
+                setRows((res.data as any).results);
+                setTotalItems((res.data as any).count || 0);
+                setTotalPages(Math.max(1, Math.ceil(((res.data as any).count || 0) / pageSize)));
+                setCurrentPage(page);
+            } else if (Array.isArray(res.data)) {
+                // Fallback (agar backend purana ho)
+                const all = res.data as any[];
+                setTotalItems(all.length);
+                setTotalPages(Math.max(1, Math.ceil(all.length / pageSize)));
+                setCurrentPage(page);
+                const start = (page - 1) * pageSize;
+                setRows(all.slice(start, start + pageSize));
+            } else {
+                setRows([]);
+                setTotalItems(0);
+                setTotalPages(1);
+            }
         } catch (err) {
-            console.error("Failed to load contra entries");
+            console.error("Failed to load contra entries", err);
+            toast.error("Failed to load contra entries");
+            setRows([]);
+        } finally {
+            setLoading(false);
         }
     };
 
-    // Filtered rows based on search and type filter
-    const filteredRows = rows.filter(row => {
-        // Filter by search term
-        if (searchTerm) {
-            const term = searchTerm.toLowerCase();
-            const matchesSearch = 
-                (row.voucher_no?.toLowerCase().includes(term)) ||
-                (row.cash_account_name?.toLowerCase().includes(term)) ||
-                (row.party_name?.toLowerCase().includes(term));
-            if (!matchesSearch) return false;
+    useEffect(() => {
+        fetchContraEntries(currentPage);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentPage, pageSize, debouncedSearch, filterType]);
+
+    // ✅ Export to Excel — full filtered dataset (chunked)
+    const exportToExcel = async () => {
+        try {
+            let all: any[] = [];
+            let page = 1;
+            let hasMore = true;
+
+            while (hasMore) {
+                const params = new URLSearchParams();
+                params.set("page", String(page));
+                params.set("page_size", "500");
+                if (debouncedSearch) params.set("search", debouncedSearch);
+                if (filterType) params.set("type", filterType);
+
+                const res = await api.get<PaginatedResponse>(`contra/?${params.toString()}`);
+
+                let results: any[] = [];
+                let next: string | null = null;
+                if (res.data && !Array.isArray(res.data) && (res.data as any).results) {
+                    results = (res.data as any).results || [];
+                    next = (res.data as any).next || null;
+                } else if (Array.isArray(res.data)) {
+                    results = res.data;
+                    next = null; // fallback: no pagination
+                }
+
+                all = [...all, ...results];
+                hasMore = !!next;
+                page += 1;
+
+                if (!results.length) break;
+            }
+
+            if (all.length === 0) {
+                toast.warning("No data to export");
+                return;
+            }
+
+            const exportData: any[] = all.map((row, index) => ({
+                "SR No": index + 1,
+                "Voucher No": row.voucher_no || "-",
+                "Date": row.date || "-",
+                "Type": row.type || "-",
+                "Cash/Bank Account": row.cash_account_name || "-",
+                "Opposite Account": row.party_name || "-",
+                "Amount (₹)": Number(row.amount || 0).toFixed(2),
+            }));
+
+            const grandTotal = all.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+            exportData.push({
+                "SR No": "",
+                "Voucher No": "",
+                "Date": "",
+                "Type": "TOTAL",
+                "Cash/Bank Account": "",
+                "Opposite Account": "",
+                "Amount (₹)": grandTotal.toFixed(2),
+            });
+
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            ws["!cols"] = [
+                { wch: 6 },
+                { wch: 15 },
+                { wch: 12 },
+                { wch: 18 },
+                { wch: 25 },
+                { wch: 25 },
+                { wch: 15 },
+            ];
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Contra Register");
+            const fileName = `Contra_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+
+            toast.success(`Exported ${all.length} records successfully`);
+        } catch (err) {
+            console.error("Export error:", err);
+            toast.error("Failed to export");
         }
-        
-        // Filter by type
-        if (filterType && row.type !== filterType) return false;
-        
-        return true;
-    });
+    };
 
     // Clear filters
     const clearFilters = () => {
         setSearchTerm("");
+        setDebouncedSearch("");
         setFilterType("");
+        setCurrentPage(1);
     };
 
-    const indexOfLastRow = currentPage * rowsPerPage;
-    const indexOfFirstRow = indexOfLastRow - rowsPerPage;
-    const totalPages = Math.ceil(filteredRows.length / rowsPerPage);
-    const currentRows = filteredRows.slice(indexOfFirstRow, indexOfLastRow);
+    const handlePageChange = (page: number) => {
+        if (page >= 1 && page <= totalPages) {
+            setCurrentPage(page);
+        }
+    };
+
+    const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const newSize = parseInt(e.target.value);
+        setPageSize(newSize);
+        setCurrentPage(1);
+    };
 
     const handleSubmit = async (values: any, { resetForm }: any) => {
         try {
@@ -319,12 +390,11 @@ const Contra = () => {
                 amount: values.amount,
                 narration: values.narration,
             };
-            const res = await api.post("contra/", payload);
-            setRows([res.data, ...rows]);
+            await api.post("contra/", payload);
             toast.success("Contra entry saved!");
             resetForm();
             setOpen(false);
-            fetchContraEntries();
+            fetchContraEntries(currentPage);
         } catch (err) {
             toast.error("Error saving entry");
             console.error(err);
@@ -337,7 +407,6 @@ const Contra = () => {
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold text-gray-800">Contra Entry</h1>
                 <div className="flex gap-2">
-                    {/* ✅ Export Excel Button */}
                     <button
                         onClick={exportToExcel}
                         className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md shadow-md transition"
@@ -345,8 +414,7 @@ const Contra = () => {
                         <FaFileExcel size={16} />
                         Export Excel
                     </button>
-                    
-                    {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
+
                     {canAdd && (
                         <button
                             onClick={() => setOpen(true)}
@@ -385,7 +453,10 @@ const Contra = () => {
 
                 <select
                     value={filterType}
-                    onChange={(e) => setFilterType(e.target.value)}
+                    onChange={(e) => {
+                        setFilterType(e.target.value);
+                        setCurrentPage(1);
+                    }}
                     className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white"
                 >
                     <option value="">All Types</option>
@@ -420,10 +491,18 @@ const Contra = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {currentRows.length > 0 ? (
-                            currentRows.map((row, idx) => (
-                                <tr key={idx} className="hover:bg-gray-50 border-b">
-                                    <td className="p-3 border border-gray-200 whitespace-nowrap text-center">{indexOfFirstRow + idx + 1}</td>
+                        {loading ? (
+                            <tr>
+                                <td colSpan={8} className="p-6 text-center text-gray-500">
+                                    <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+                                </td>
+                            </tr>
+                        ) : rows.length > 0 ? (
+                            rows.map((row, idx) => (
+                                <tr key={row.id || idx} className="hover:bg-gray-50 border-b">
+                                    <td className="p-3 border border-gray-200 whitespace-nowrap text-center">
+                                        {(currentPage - 1) * pageSize + idx + 1}
+                                    </td>
                                     <td className="p-3 border border-gray-200 whitespace-nowrap">{row.voucher_no}</td>
                                     <td className="p-3 border border-gray-200 whitespace-nowrap">{row.date}</td>
                                     <td className="p-3 border border-gray-200 whitespace-nowrap">
@@ -446,63 +525,47 @@ const Contra = () => {
                             <tr>
                                 <td colSpan={8} className="p-6 text-center text-gray-500">
                                     No contra entries found
+                                    {debouncedSearch || filterType ? " — try different search/filter" : ""}
                                 </td>
                             </tr>
                         )}
                     </tbody>
                 </table>
             </div>
-            
-            {/* Pagination */}
-            {filteredRows.length > 0 && (
-                <div className="flex justify-between items-center mt-4">
-                    <span className="text-sm">
-                        Showing {indexOfFirstRow + 1}–
-                        {Math.min(indexOfLastRow, filteredRows.length)} of {filteredRows.length}
-                    </span>
 
-                    <div className="flex gap-2 flex-wrap justify-center">
-                        <button
-                            disabled={currentPage === 1}
-                            onClick={() => setCurrentPage((p) => p - 1)}
-                            className={`px-3 py-1 border rounded ${currentPage === 1 ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"}`}
+            {/* ✅ Reusable Pagination */}
+            {totalItems > 0 && (
+                <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-700">
+                            Showing{" "}
+                            <span className="font-medium">
+                                {(currentPage - 1) * pageSize + 1}
+                            </span>–
+                            <span className="font-medium">
+                                {Math.min(currentPage * pageSize, totalItems)}
+                            </span>{" "}
+                            of <span className="font-medium">{totalItems}</span> items
+                        </span>
+
+                        <select
+                            value={pageSize}
+                            onChange={handlePageSizeChange}
+                            className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
-                            Prev
-                        </button>
-
-                        {(() => {
-                            const maxVisible = 5;
-                            let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-                            let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-                            
-                            if (endPage - startPage + 1 < maxVisible) {
-                                startPage = Math.max(1, endPage - maxVisible + 1);
-                            }
-                            
-                            const pages = [];
-                            for (let i = startPage; i <= endPage; i++) {
-                                pages.push(i);
-                            }
-                            
-                            return pages.map((page) => (
-                                <button
-                                    key={page}
-                                    onClick={() => setCurrentPage(page)}
-                                    className={`px-3 py-1 border rounded ${currentPage === page ? "bg-blue-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-                                >
-                                    {page}
-                                </button>
-                            ));
-                        })()}
-
-                        <button
-                            disabled={currentPage === totalPages}
-                            onClick={() => setCurrentPage((p) => p + 1)}
-                            className={`px-3 py-1 border rounded ${currentPage === totalPages ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"}`}
-                        >
-                            Next
-                        </button>
+                            <option value={10}>10 per page</option>
+                            <option value={15}>15 per page</option>
+                            <option value={25}>25 per page</option>
+                            <option value={50}>50 per page</option>
+                            <option value={100}>100 per page</option>
+                        </select>
                     </div>
+
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        onPageChange={handlePageChange}
+                    />
                 </div>
             )}
 
@@ -510,7 +573,6 @@ const Contra = () => {
             {open && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="bg-white w-full max-w-3xl rounded-lg shadow-2xl overflow-hidden">
-                        {/* Header */}
                         <div className="bg-blue-600 text-white px-6 py-3 flex justify-between items-center">
                             <h2 className="text-lg font-semibold">Add Contra</h2>
                             <button
@@ -521,7 +583,6 @@ const Contra = () => {
                             </button>
                         </div>
 
-                        {/* Form */}
                         <Formik
                             initialValues={{
                                 type: "Cash Deposit",
@@ -556,7 +617,7 @@ const Contra = () => {
 
                                 useEffect(() => {
                                     if (!open) return;
-                                    
+
                                     const fetchVoucher = async () => {
                                         try {
                                             const res = await api.get(`voucher/generate/?type=CT`);
@@ -566,13 +627,12 @@ const Contra = () => {
                                             toast.error("Failed to fetch latest voucher number");
                                         }
                                     };
-                                    
-                                    fetchVoucher(); 
+
+                                    fetchVoucher();
                                 }, [open, setFieldValue]);
 
                                 return (
                                     <Form className="p-6 space-y-5">
-                                        {/* Type Radio */}
                                         <div className="flex items-center gap-6">
                                             <span className="font-bold text-sm">Type:</span>
                                             {["Cash Deposit", "Cash Withdrawal", "Bank Transfer"].map((t) => (
@@ -594,7 +654,6 @@ const Contra = () => {
                                             ))}
                                         </div>
 
-                                        {/* Top Row */}
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             {isCashDeposit && <AccountSelect label={topLabel} name="account" />}
                                             {isCashWithdrawal && <BankAccountSelect label={topLabel} name="account" />}
@@ -604,7 +663,6 @@ const Contra = () => {
                                             <Input label="Date" name="date" type="date" />
                                         </div>
 
-                                        {/* Middle Row */}
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             {isCashDeposit && <BankAccountSelect label={middleLabel} name="opaccount" />}
                                             {isCashWithdrawal && <AccountSelect label={middleLabel} name="opaccount" />}
@@ -617,7 +675,6 @@ const Contra = () => {
 
                                         <Input label="Narration" name="narration" />
 
-                                        {/* Actions */}
                                         <div className="flex justify-end gap-3 mt-6">
                                             <button type="submit" className="px-4 py-2 bg-blue-700 text-white rounded">
                                                 Save

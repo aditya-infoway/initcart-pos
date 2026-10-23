@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   FaArrowLeft, FaArrowRight, FaBox, FaCheckCircle, FaExchangeAlt,
   FaEye, FaSearch, FaSpinner, FaTimes, FaClipboardList,
-  FaChevronLeft, FaChevronRight, FaCheckDouble,
+  FaCheckDouble,
   FaBoxes, FaWarehouse, FaPhone, FaEnvelope, FaMapMarkerAlt, FaUser,
   FaStickyNote, FaExclamationTriangle, FaRoute,
 } from "react-icons/fa";
@@ -11,6 +11,7 @@ import { MdPendingActions, MdClose } from "react-icons/md";
 import Swal from "sweetalert2";
 import api from "../../api/api";
 import { toast } from "react-toastify";
+import Pagination from "../../components/common/pagination";
 
 // ── GST helpers ───────────────────────────────────────────
 const safeNum = (val: any): number => {
@@ -165,10 +166,6 @@ interface ReturnListItem {
   source_b2b_transfer_no: string;
 }
 
-interface PaginationState {
-  count: number; next: string | null; previous: string | null; page: number; totalPages: number;
-}
-
 interface StatusColumnConfig { key: string; label: string; badgeClass: string; }
 
 interface ReturnBranchSummaryRow {
@@ -268,53 +265,6 @@ async function fetchAllReturns(): Promise<ReturnListItem[]> {
     throw new Error("Could not load returns");
   }
   return all;
-}
-
-// ── Pagination Bar ──────────────────────────────────────────
-
-function PaginationBar({ pagination, onPage, label = "records" }: {
-  pagination: PaginationState; onPage: (page: number) => void; label?: string;
-}) {
-  const { count, page, totalPages, previous, next } = pagination;
-  if (count <= PAGE_SIZE) return null;
-  const from = (page - 1) * PAGE_SIZE + 1;
-  const to = Math.min(page * PAGE_SIZE, count);
-  const pages: (number | "...")[] = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-  } else {
-    pages.push(1);
-    if (page > 3) pages.push("...");
-    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
-    if (page < totalPages - 2) pages.push("...");
-    pages.push(totalPages);
-  }
-  return (
-    <div className="px-5 py-3.5 border-t bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-3">
-      <p className="text-xs text-gray-500">
-        Showing <span className="font-semibold text-gray-700">{from}–{to}</span> of{" "}
-        <span className="font-semibold text-gray-700">{count}</span> {label}
-      </p>
-      <div className="flex items-center gap-1">
-        <button onClick={() => onPage(page - 1)} disabled={!previous}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-          <FaChevronLeft size={9} /> Prev
-        </button>
-        {pages.map((p, i) => p === "..." ? (
-          <span key={`dots-${i}`} className="px-2 text-xs text-gray-400">…</span>
-        ) : (
-          <button key={p} onClick={() => onPage(p as number)}
-            className={`w-8 h-8 text-xs rounded-lg font-semibold transition-all ${p === page ? "bg-blue-600 text-white shadow-sm" : "border border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600"}`}>
-            {p}
-          </button>
-        ))}
-        <button onClick={() => onPage(page + 1)} disabled={!next}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-          Next <FaChevronRight size={9} />
-        </button>
-      </div>
-    </div>
-  );
 }
 
 // ════════════════════════════════════════════════════════════
@@ -447,13 +397,6 @@ export default function B2BStockReturnManagement() {
 
   const totalPages = Math.max(1, Math.ceil(filteredReturns.length / PAGE_SIZE));
   const pagedReturns = filteredReturns.slice((listPage - 1) * PAGE_SIZE, listPage * PAGE_SIZE);
-
-  const pagination: PaginationState = {
-    count: filteredReturns.length,
-    next: listPage < totalPages ? "next" : null,
-    previous: listPage > 1 ? "prev" : null,
-    page: listPage, totalPages,
-  };
 
   function openBranchStatus(branch_name: string, status: string) {
     setBranchFilter({ branch_name, status });
@@ -708,7 +651,29 @@ export default function B2BStockReturnManagement() {
                       </tbody>
                     </table>
                   </div>
-                  <PaginationBar pagination={pagination} onPage={setListPage} label="returns" />
+
+                  {/* ✅ Reusable Pagination */}
+                  {filteredReturns.length > 0 && (
+                    <div className="px-5 py-4 border-t bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3">
+                      <p className="text-xs text-gray-500">
+                        Showing{" "}
+                        <span className="font-semibold text-gray-700">
+                          {Math.min((listPage - 1) * PAGE_SIZE + 1, filteredReturns.length)}–
+                          {Math.min(listPage * PAGE_SIZE, filteredReturns.length)}
+                        </span>{" "}
+                        of <span className="font-semibold text-gray-700">{filteredReturns.length}</span> returns
+                      </p>
+
+                      <Pagination
+                        currentPage={listPage}
+                        totalPages={totalPages}
+                        onPageChange={(p) => {
+                          setListPage(p);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </div>

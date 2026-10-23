@@ -1,5 +1,5 @@
 // src/pages/branch/MyBranches.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Formik, Form } from "formik";
 import * as Yup from "yup";
 import api from "../../api/api";
@@ -46,7 +46,16 @@ interface FormValues {
     sundry_debitor_account: number | string;
     sundry_creditor_account: number | string;
     status: "active" | "inactive";
-    role: "branch" | "branch_customer" | "branch_agent" | "branch_both" | "vendor"; 
+    role: "branch" | "branch_customer" | "branch_agent" | "branch_both" | "vendor";
+}
+
+interface PaginationInfo {
+    count: number;
+    total_pages: number;
+    current_page: number;
+    page_size: number;
+    has_next: boolean;
+    has_previous: boolean;
 }
 
 const CreateSchema = Yup.object().shape({
@@ -95,6 +104,8 @@ const UpdateSchema = Yup.object().shape({
         .required("Account type is required"),
 });
 
+const SEARCH_DEBOUNCE_MS = 400;
+
 const MyBranches: React.FC = () => {
     const { canAdd, canEdit, canDelete } = usePermission("/myBranches");
 
@@ -106,8 +117,16 @@ const MyBranches: React.FC = () => {
     const [viewBranch, setViewBranch] = useState<MyBranch | null>(null);
     const [editingBranch, setEditingBranch] = useState<MyBranch | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
+    const [debouncedSearch, setDebouncedSearch] = useState("");
     const [filterStatus, setFilterStatus] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // ✅ Server-side pagination state
+    const [pagination, setPagination] = useState<PaginationInfo>({
+        count: 0, total_pages: 1, current_page: 1,
+        page_size: 15, has_next: false, has_previous: false,
+    });
+    const reqIdRef = useRef(0);
 
     const [debitorAccounts, setDebitorAccounts] = useState<{ id: number, account_name: string }[]>([]);
     const [creditorAccounts, setCreditorAccounts] = useState<{ id: number, account_name: string }[]>([]);
@@ -115,20 +134,47 @@ const MyBranches: React.FC = () => {
     const [states, setStates] = useState<any[]>([]);
     const [cities, setCities] = useState<any[]>([]);
 
-    const fetchBranches = async () => {
+    // ✅ Server-side fetch
+    const fetchBranches = useCallback(async () => {
+        const reqId = ++reqIdRef.current;
         setLoading(true);
         try {
-            const res = await api.get("/my-branches/");
+            const params: Record<string, any> = {
+                page: pagination.current_page,
+                page_size: pagination.page_size,
+            };
+            if (debouncedSearch) params.search = debouncedSearch;
+            if (filterStatus) params.status = filterStatus;
+
+            const res = await api.get("/my-branches/", { params });
+            if (reqId !== reqIdRef.current) return;
+
             if (res.data.success) {
                 setBranches(res.data.data || []);
+                if (res.data.pagination) {
+                    setPagination(res.data.pagination);
+                } else {
+                    // fallback (agar backend purana ho)
+                    const items = res.data.data || [];
+                    setPagination({
+                        count: items.length,
+                        total_pages: 1,
+                        current_page: 1,
+                        page_size: items.length || 15,
+                        has_next: false,
+                        has_previous: false,
+                    });
+                }
             }
         } catch (err) {
+            if (reqId !== reqIdRef.current) return;
             console.error(err);
             toast.error("Failed to load branches");
+            setBranches([]);
         } finally {
-            setLoading(false);
+            if (reqId === reqIdRef.current) setLoading(false);
         }
-    };
+    }, [pagination.current_page, pagination.page_size, debouncedSearch, filterStatus]);
 
     const fetchMyGstPan = async () => {
         try {
@@ -145,10 +191,24 @@ const MyBranches: React.FC = () => {
     };
 
     useEffect(() => {
-        fetchBranches();
         fetchMyGstPan();
     }, []);
 
+    // ✅ Search debounce
+    useEffect(() => {
+        const t = setTimeout(() => {
+            setDebouncedSearch(searchTerm.trim());
+            setPagination(prev => ({ ...prev, current_page: 1 }));
+        }, SEARCH_DEBOUNCE_MS);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
+
+    // ✅ Fetch whenever page / pageSize / search / status changes
+    useEffect(() => {
+        fetchBranches();
+    }, [fetchBranches]);
+
+    // Linked accounts modal ke liye (unchanged)
     useEffect(() => {
         const params = editingBranch ? `?branch_id=${editingBranch.id}` : "";
         api.get(`/branch-linkable-accounts/${params}`).then(res => {
@@ -157,6 +217,7 @@ const MyBranches: React.FC = () => {
         }).catch(() => {});
     }, [modalOpen, editingBranch]);
 
+    // Country/state/city prefill for edit (unchanged)
     useEffect(() => {
         if (editingBranch?.country) {
             const countryData = countries.find((c) => c.name === editingBranch.country);
@@ -171,19 +232,6 @@ const MyBranches: React.FC = () => {
             }
         }
     }, [editingBranch]);
-
-    const filteredBranches = branches.filter((b) => {
-        const term = searchTerm.toLowerCase();
-        const matches =
-            b.branch_name?.toLowerCase().includes(term) ||
-            b.owner_name?.toLowerCase().includes(term) ||
-            b.email?.toLowerCase().includes(term) ||
-            b.phone?.includes(term) ||
-            b.city?.toLowerCase().includes(term);
-        if (!matches) return false;
-        if (filterStatus && b.status !== filterStatus) return false;
-        return true;
-    });
 
     const handleAdd = () => {
         setEditingBranch(null);
@@ -208,7 +256,12 @@ const MyBranches: React.FC = () => {
             const res = await api.delete(`/my-branches/${branch.id}/`);
             if (res.data.success) {
                 toast.success("Branch deleted successfully");
-                fetchBranches();
+                // agar last item delete hua aur page empty ho gaya to previous page pe jao
+                if (branches.length === 1 && pagination.current_page > 1) {
+                    setPagination(prev => ({ ...prev, current_page: prev.current_page - 1 }));
+                } else {
+                    fetchBranches();
+                }
             } else {
                 toast.error(res.data.message || "Failed to delete branch");
             }
@@ -271,6 +324,11 @@ const MyBranches: React.FC = () => {
         }
     };
 
+    const totalCount = pagination.count;
+    const totalPages = Math.max(1, pagination.total_pages);
+    const currentPageNum = pagination.current_page;
+    const pageSize = pagination.page_size;
+
     if (loading && branches.length === 0) {
         return (
             <div className="p-6 bg-gray-50 min-h-screen flex justify-center items-center">
@@ -306,14 +364,20 @@ const MyBranches: React.FC = () => {
                         className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     />
                     {searchTerm && (
-                        <button onClick={() => setSearchTerm("")} className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600">
+                        <button
+                            onClick={() => setSearchTerm("")}
+                            className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                        >
                             <FaTimes size={14} />
                         </button>
                     )}
                 </div>
                 <select
                     value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
+                    onChange={(e) => {
+                        setFilterStatus(e.target.value);
+                        setPagination(prev => ({ ...prev, current_page: 1 }));
+                    }}
                     className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
                 >
                     <option value="">All Status</option>
@@ -322,7 +386,7 @@ const MyBranches: React.FC = () => {
                 </select>
             </div>
 
-            <div className="bg-white rounded-lg shadow overflow-x-auto">
+            <div className={`bg-white rounded-lg shadow overflow-x-auto ${loading ? "opacity-60" : "opacity-100"}`}>
                 <table className="w-full text-sm">
                     <thead className="bg-blue-600 text-white text-center">
                         <tr>
@@ -337,10 +401,12 @@ const MyBranches: React.FC = () => {
                         </tr>
                     </thead>
                     <tbody className="text-center">
-                        {filteredBranches.length > 0 ? (
-                            filteredBranches.map((branch, i) => (
+                        {branches.length > 0 ? (
+                            branches.map((branch, i) => (
                                 <tr key={branch.id} className="border-t hover:bg-gray-50">
-                                    <td className="p-3 border border-gray-200">{i + 1}</td>
+                                    <td className="p-3 border border-gray-200">
+                                        {(currentPageNum - 1) * pageSize + i + 1}
+                                    </td>
                                     <td className="p-3 border border-gray-200 font-medium">{branch.branch_name}</td>
                                     <td className="p-3 border border-gray-200">{branch.owner_name}</td>
                                     <td className="p-3 border border-gray-200">{branch.email}</td>
@@ -379,12 +445,60 @@ const MyBranches: React.FC = () => {
                             ))
                         ) : (
                             <tr>
-                                <td colSpan={8} className="p-6 text-center text-gray-500">No branches found</td>
+                                <td colSpan={8} className="p-6 text-center text-gray-500">
+                                    {debouncedSearch || filterStatus ? "No matching branches found" : "No branches found"}
+                                </td>
                             </tr>
                         )}
                     </tbody>
                 </table>
             </div>
+
+            {/* ✅ Pagination Section (server-side) */}
+            {totalCount > 0 && (
+                <div className="flex flex-col sm:flex-row justify-between items-center px-4 py-3 bg-white border-t border-gray-200 gap-3 mt-4 rounded-lg shadow">
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-700">
+                            Showing{" "}
+                            <span className="font-medium">
+                                {(currentPageNum - 1) * pageSize + 1}
+                            </span>{" "}
+                            to{" "}
+                            <span className="font-medium">
+                                {Math.min(currentPageNum * pageSize, totalCount)}
+                            </span>{" "}
+                            of <span className="font-medium">{totalCount}</span> branches
+                        </span>
+
+                        <select
+                            value={pageSize}
+                            onChange={(e) => {
+                                const newSize = Number(e.target.value);
+                                setPagination(prev => ({
+                                    ...prev,
+                                    page_size: newSize,
+                                    current_page: 1,
+                                }));
+                            }}
+                            className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value={10}>10 per page</option>
+                            <option value={15}>15 per page</option>
+                            <option value={25}>25 per page</option>
+                            <option value={50}>50 per page</option>
+                            <option value={100}>100 per page</option>
+                        </select>
+                    </div>
+
+                    <Pagination
+                        currentPage={currentPageNum}
+                        totalPages={totalPages}
+                        onPageChange={(page) =>
+                            setPagination(prev => ({ ...prev, current_page: page }))
+                        }
+                    />
+                </div>
+            )}
 
             {/* View Modal */}
             {viewModalOpen && viewBranch && (
@@ -498,41 +612,41 @@ const MyBranches: React.FC = () => {
 
                                     <hr className="border-t-2 border-dashed border-blue-300 my-2" />
 
-<div>
-    <label className="text-sm font-medium block mb-1">Linked Account</label>
-    <select
-        value={values.sundry_debitor_account || values.sundry_creditor_account || ""}
-        onChange={(e) => {
-            const selectedId = e.target.value;
-            if (!selectedId) {
-                setFieldValue("sundry_debitor_account", "");
-                setFieldValue("sundry_creditor_account", "");
-                return;
-            }
-            const isDebitor = debitorAccounts.some((a) => String(a.id) === selectedId);
-            if (isDebitor) {
-                setFieldValue("sundry_debitor_account", selectedId);
-                setFieldValue("sundry_creditor_account", "");
-            } else {
-                setFieldValue("sundry_creditor_account", selectedId);
-                setFieldValue("sundry_debitor_account", "");
-            }
-        }}
-        className="w-full border p-2 rounded border-gray-300"
-    >
-        <option value="">-- Select Account --</option>
-        {debitorAccounts.length > 0 && (
-            <optgroup label="Sundry Debitor Accounts">
-                {debitorAccounts.map((a) => <option key={`d-${a.id}`} value={a.id}>{a.account_name}</option>)}
-            </optgroup>
-        )}
-        {creditorAccounts.length > 0 && (
-            <optgroup label="Sundry Creditor Accounts">
-                {creditorAccounts.map((a) => <option key={`c-${a.id}`} value={a.id}>{a.account_name}</option>)}
-            </optgroup>
-        )}
-    </select>
-</div>
+                                    <div>
+                                        <label className="text-sm font-medium block mb-1">Linked Account</label>
+                                        <select
+                                            value={values.sundry_debitor_account || values.sundry_creditor_account || ""}
+                                            onChange={(e) => {
+                                                const selectedId = e.target.value;
+                                                if (!selectedId) {
+                                                    setFieldValue("sundry_debitor_account", "");
+                                                    setFieldValue("sundry_creditor_account", "");
+                                                    return;
+                                                }
+                                                const isDebitor = debitorAccounts.some((a) => String(a.id) === selectedId);
+                                                if (isDebitor) {
+                                                    setFieldValue("sundry_debitor_account", selectedId);
+                                                    setFieldValue("sundry_creditor_account", "");
+                                                } else {
+                                                    setFieldValue("sundry_creditor_account", selectedId);
+                                                    setFieldValue("sundry_debitor_account", "");
+                                                }
+                                            }}
+                                            className="w-full border p-2 rounded border-gray-300"
+                                        >
+                                            <option value="">-- Select Account --</option>
+                                            {debitorAccounts.length > 0 && (
+                                                <optgroup label="Sundry Debitor Accounts">
+                                                    {debitorAccounts.map((a) => <option key={`d-${a.id}`} value={a.id}>{a.account_name}</option>)}
+                                                </optgroup>
+                                            )}
+                                            {creditorAccounts.length > 0 && (
+                                                <optgroup label="Sundry Creditor Accounts">
+                                                    {creditorAccounts.map((a) => <option key={`c-${a.id}`} value={a.id}>{a.account_name}</option>)}
+                                                </optgroup>
+                                            )}
+                                        </select>
+                                    </div>
 
                                     <hr className="border-t-2 border-dashed border-blue-300 my-2" />
 
@@ -600,7 +714,6 @@ const MyBranches: React.FC = () => {
 
                                     <hr className="border-t-2 border-dashed border-blue-300 my-2" />
 
-                                    {/* Read-only GST/PAN — franchise's own tax details */}
                                     <div className="border border-indigo-200 bg-indigo-50/50 rounded-lg p-4">
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
 import { useAuthStore } from "../../store/authStore";
+import Pagination from "../../components/common/pagination";
 
 interface DayBookEntry {
   id: number;
@@ -36,38 +37,35 @@ interface Branch {
 const DayBook: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  
+
   const isSuperAdmin = user?.role === 'superadmin';
   const isEmployee = user?.role === 'employee';
-  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
   const canViewAllBranches = isSuperAdmin || isEmployee;
-  
-  // Get today's date in YYYY-MM-DD format
+
   const getTodayDate = () => {
     const today = new Date();
     return today.toISOString().split("T")[0];
   };
-  
+
   const [allEntries, setAllEntries] = useState<DayBookEntry[]>([]);
   const [filteredEntries, setFilteredEntries] = useState<DayBookEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [filters, setFilters] = useState<FilterOptions>({ 
-    dateFrom: getTodayDate(), 
-    dateTo: getTodayDate(), 
-    transactionCategory: "", 
-    type: "" 
+  const [filters, setFilters] = useState<FilterOptions>({
+    dateFrom: getTodayDate(),
+    dateTo: getTodayDate(),
+    transactionCategory: "",
+    type: ""
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
-  
-  // ✅ Branch state
+
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
 
-  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  // ✅ Fetch branches
   useEffect(() => {
     if (canViewAllBranches) {
       api.get("branches/")
@@ -86,19 +84,15 @@ const DayBook: React.FC = () => {
     }
   }, [canViewAllBranches]);
 
-  // ✅ FIX: fetchEntries with branch parameter
+  // ✅ fetchEntries with branch parameter
   const fetchEntries = async (branchId?: string) => {
     setLoading(true);
     try {
       const token = sessionStorage.getItem("token") || sessionStorage.getItem("accessToken");
-      
-      // ✅ Use provided branchId or current selectedBranchId
+
       const effectiveBranchId = branchId !== undefined ? branchId : selectedBranchId;
       const branchParam = effectiveBranchId ? `&branch_id=${effectiveBranchId}` : '';
-      
-      console.log("🔄 Fetching day book with branch:", effectiveBranchId || 'default');
-      
-      // Fetch all cash and bank transactions
+
       const [cashPaymentsRes, cashReceiptsRes, bankPaymentsRes, bankReceiptsRes] = await Promise.all([
         api.get(`cash-payments/?page=1&page_size=1000${branchParam}`, { headers: { Authorization: `Bearer ${token}` } }),
         api.get(`cash-receipts/?page=1&page_size=1000${branchParam}`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -111,7 +105,6 @@ const DayBook: React.FC = () => {
       let bankPayments: any[] = [];
       let bankReceipts: any[] = [];
 
-      // Process Cash Payments
       if (cashPaymentsRes.data.results) {
         cashPayments = cashPaymentsRes.data.results;
         let nextUrl = cashPaymentsRes.data.next;
@@ -124,7 +117,6 @@ const DayBook: React.FC = () => {
         cashPayments = cashPaymentsRes.data;
       }
 
-      // Process Cash Receipts
       if (cashReceiptsRes.data.results) {
         cashReceipts = cashReceiptsRes.data.results;
         let nextUrl = cashReceiptsRes.data.next;
@@ -137,7 +129,6 @@ const DayBook: React.FC = () => {
         cashReceipts = cashReceiptsRes.data;
       }
 
-      // Process Bank Payments
       if (bankPaymentsRes.data.results) {
         bankPayments = bankPaymentsRes.data.results;
         let nextUrl = bankPaymentsRes.data.next;
@@ -150,7 +141,6 @@ const DayBook: React.FC = () => {
         bankPayments = bankPaymentsRes.data;
       }
 
-      // Process Bank Receipts
       if (bankReceiptsRes.data.results) {
         bankReceipts = bankReceiptsRes.data.results;
         let nextUrl = bankReceiptsRes.data.next;
@@ -163,7 +153,6 @@ const DayBook: React.FC = () => {
         bankReceipts = bankReceiptsRes.data;
       }
 
-      // Map Cash Payments
       const cashPaymentEntries: DayBookEntry[] = cashPayments.map((p: any) => ({
         id: p.id,
         date: p.date,
@@ -180,7 +169,6 @@ const DayBook: React.FC = () => {
         entry_category: "cash_payment"
       }));
 
-      // Map Cash Receipts
       const cashReceiptEntries: DayBookEntry[] = cashReceipts.map((r: any) => ({
         id: r.id,
         date: r.date,
@@ -197,7 +185,6 @@ const DayBook: React.FC = () => {
         entry_category: "cash_receipt"
       }));
 
-      // Map Bank Payments
       const bankPaymentEntries: DayBookEntry[] = bankPayments.map((p: any) => ({
         id: p.id,
         date: p.date,
@@ -214,7 +201,6 @@ const DayBook: React.FC = () => {
         entry_category: "bank_payment"
       }));
 
-      // Map Bank Receipts
       const bankReceiptEntries: DayBookEntry[] = bankReceipts.map((r: any) => ({
         id: r.id,
         date: r.date,
@@ -231,10 +217,8 @@ const DayBook: React.FC = () => {
         entry_category: "bank_receipt"
       }));
 
-      // Combine all entries
       const all = [...cashPaymentEntries, ...cashReceiptEntries, ...bankPaymentEntries, ...bankReceiptEntries];
-      
-      // Sort by date and time (newest first)
+
       all.sort((a, b) => {
         if (a.date !== b.date) {
           return b.date.localeCompare(a.date);
@@ -242,11 +226,8 @@ const DayBook: React.FC = () => {
         return b.created_at.localeCompare(a.created_at);
       });
 
-      console.log(`✅ Loaded ${all.length} day book entries`);
-      
       setAllEntries(all);
-      
-      // Apply initial filter for today's date
+
       const todayFiltered = all.filter(entry => entry.date === getTodayDate());
       setFilteredEntries(todayFiltered);
     } catch (err) {
@@ -274,16 +255,14 @@ const DayBook: React.FC = () => {
 
   useEffect(() => {
     let f = [...allEntries];
-    
-    // Date range filter
+
     if (filters.dateFrom) {
       f = f.filter(i => i.date >= filters.dateFrom);
     }
     if (filters.dateTo) {
       f = f.filter(i => i.date <= filters.dateTo);
     }
-    
-    // Transaction category filter (Cash/Bank)
+
     if (filters.transactionCategory) {
       if (filters.transactionCategory === "cash") {
         f = f.filter(i => i.entry_category === "cash_payment" || i.entry_category === "cash_receipt");
@@ -291,56 +270,53 @@ const DayBook: React.FC = () => {
         f = f.filter(i => i.entry_category === "bank_payment" || i.entry_category === "bank_receipt");
       }
     }
-    
-    // Type filter (Payment/Receipt)
+
     if (filters.type) {
       f = f.filter(i => i.transaction_type?.toLowerCase() === filters.type.toLowerCase());
     }
-    
-    // Search filter
+
     if (searchTerm.trim()) {
       const t = searchTerm.toLowerCase();
-      f = f.filter(i => 
-        i.voucher_no?.toLowerCase().includes(t) || 
+      f = f.filter(i =>
+        i.voucher_no?.toLowerCase().includes(t) ||
         i.party_name?.toLowerCase().includes(t) ||
         i.account_name?.toLowerCase().includes(t) ||
         i.narration?.toLowerCase().includes(t) ||
         i.type?.toLowerCase().includes(t)
       );
     }
-    
+
     setFilteredEntries(f);
     setCurrentPage(1);
   }, [searchTerm, filters, allEntries]);
 
-  const totalPages = Math.ceil(filteredEntries.length / pageSize);
+  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / pageSize));
   const paginatedEntries = filteredEntries.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  // Calculate totals
   const totalReceipts = filteredEntries
     .filter(e => e.amount > 0)
     .reduce((s, e) => s + e.amount, 0);
-  
+
   const totalPayments = filteredEntries
     .filter(e => e.amount < 0)
     .reduce((s, e) => s + Math.abs(e.amount), 0);
-  
+
   const cashReceipts = filteredEntries
     .filter(e => e.amount > 0 && (e.entry_category === "cash_receipt"))
     .reduce((s, e) => s + e.amount, 0);
-  
+
   const cashPayments = filteredEntries
     .filter(e => e.amount < 0 && (e.entry_category === "cash_payment"))
     .reduce((s, e) => s + Math.abs(e.amount), 0);
-  
+
   const bankReceipts = filteredEntries
     .filter(e => e.amount > 0 && (e.entry_category === "bank_receipt"))
     .reduce((s, e) => s + e.amount, 0);
-  
+
   const bankPayments = filteredEntries
     .filter(e => e.amount < 0 && (e.entry_category === "bank_payment"))
     .reduce((s, e) => s + Math.abs(e.amount), 0);
-  
+
   const closingBalance = totalReceipts - totalPayments;
   const cashBalance = cashReceipts - cashPayments;
   const bankBalance = bankReceipts - bankPayments;
@@ -360,12 +336,12 @@ const DayBook: React.FC = () => {
       "Payment (₹)": item.amount < 0 ? Math.abs(item.amount).toFixed(2) : "-",
       "Narration": item.narration || "-",
     }));
-    
+
     rows.push({ "SR No": "" as any, "Date": "", "Voucher No": "", "Type": "", "Transaction Type": "", "Account Name": "", "Party Name": "TOTAL", "Mode": "", "Cheque No": "", "Receipt (₹)": totalReceipts.toFixed(2), "Payment (₹)": totalPayments.toFixed(2), "Narration": "" });
     rows.push({ "SR No": "" as any, "Date": "", "Voucher No": "", "Type": "", "Transaction Type": "", "Account Name": "", "Party Name": "CASH BALANCE", "Mode": "", "Cheque No": "", "Receipt (₹)": cashReceipts.toFixed(2), "Payment (₹)": cashPayments.toFixed(2), "Narration": `Closing: ₹${cashBalance.toFixed(2)}` });
     rows.push({ "SR No": "" as any, "Date": "", "Voucher No": "", "Type": "", "Transaction Type": "", "Account Name": "", "Party Name": "BANK BALANCE", "Mode": "", "Cheque No": "", "Receipt (₹)": bankReceipts.toFixed(2), "Payment (₹)": bankPayments.toFixed(2), "Narration": `Closing: ₹${bankBalance.toFixed(2)}` });
     rows.push({ "SR No": "" as any, "Date": "", "Voucher No": "", "Type": "", "Transaction Type": "", "Account Name": "", "Party Name": "GRAND TOTAL", "Mode": "", "Cheque No": "", "Receipt (₹)": totalReceipts.toFixed(2), "Payment (₹)": totalPayments.toFixed(2), "Narration": `Closing Balance: ₹${closingBalance.toFixed(2)}` });
-    
+
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [{wch:6},{wch:12},{wch:18},{wch:10},{wch:14},{wch:28},{wch:28},{wch:10},{wch:12},{wch:14},{wch:14},{wch:32}];
     const wb = XLSX.utils.book_new();
@@ -377,30 +353,30 @@ const DayBook: React.FC = () => {
     const hasDateFilter = filters.dateFrom !== getTodayDate() || filters.dateTo !== getTodayDate();
     return !!(hasDateFilter || filters.transactionCategory || filters.type);
   };
-  
+
   const clearFilters = () => {
-    setFilters({ 
-      dateFrom: getTodayDate(), 
-      dateTo: getTodayDate(), 
-      transactionCategory: "", 
-      type: "" 
+    setFilters({
+      dateFrom: getTodayDate(),
+      dateTo: getTodayDate(),
+      transactionCategory: "",
+      type: ""
     });
     setSearchTerm("");
   };
 
   const applyTodayFilter = () => {
-    setFilters({ 
-      dateFrom: getTodayDate(), 
-      dateTo: getTodayDate(), 
-      transactionCategory: "", 
-      type: "" 
+    setFilters({
+      dateFrom: getTodayDate(),
+      dateTo: getTodayDate(),
+      transactionCategory: "",
+      type: ""
     });
     setSearchTerm("");
   };
 
   const getTypeColor = (type: string, transactionType: string) => {
     const lowerType = type?.toLowerCase() || "";
-    
+
     if (lowerType === "cr") return "bg-green-100 text-green-800 border border-green-300";
     if (lowerType === "scr") return "bg-emerald-100 text-emerald-800 border border-emerald-300";
     if (lowerType === "prcr") return "bg-teal-100 text-teal-800 border border-teal-300";
@@ -413,7 +389,7 @@ const DayBook: React.FC = () => {
     if (lowerType === "bp") return "bg-red-100 text-red-800 border border-red-300";
     if (lowerType === "pbp") return "bg-orange-100 text-orange-800 border border-orange-300";
     if (lowerType === "srbp") return "bg-rose-100 text-rose-800 border border-rose-300";
-    
+
     return "bg-gray-100 text-gray-600";
   };
 
@@ -425,6 +401,18 @@ const DayBook: React.FC = () => {
   };
 
   const isShowingToday = filters.dateFrom === getTodayDate() && filters.dateTo === getTodayDate() && !filters.transactionCategory && !filters.type && !searchTerm;
+
+  const handlePageChange = (p: number) => {
+    if (p >= 1 && p <= totalPages) {
+      setCurrentPage(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(Number(e.target.value));
+    setCurrentPage(1);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -440,7 +428,6 @@ const DayBook: React.FC = () => {
             <div>
               <h1 className="text-lg font-bold text-gray-800 leading-tight">Day Book</h1>
               <p className="text-xs text-gray-400">
-                {/* ✅ Branch name show karo */}
                 {canViewAllBranches && selectedBranchId && (
                   <span className="font-semibold text-gray-600">{selectedBranchName} · </span>
                 )}
@@ -449,7 +436,6 @@ const DayBook: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* ✅ Branch Filter - Superadmin + Employee */}
             {canViewAllBranches && (
               <div className="flex items-center gap-2 mr-2">
                 <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
@@ -486,24 +472,24 @@ const DayBook: React.FC = () => {
           <div className="flex flex-wrap gap-3 items-center">
             <div className="relative flex-1 min-w-[220px] max-w-lg">
               <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={13} />
-              <input 
-                type="text" 
-                placeholder="Search by Voucher No, Party, Account, Narration…" 
+              <input
+                type="text"
+                placeholder="Search by Voucher No, Party, Account, Narration…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-9 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
-                autoComplete="off" 
+                className="w-full pl-9 pr-9 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                autoComplete="off"
               />
               {searchTerm && (
-                <button 
-                  onClick={() => setSearchTerm("")} 
+                <button
+                  onClick={() => setSearchTerm("")}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
                   <FaTimes size={13} />
                 </button>
               )}
             </div>
-            <button 
+            <button
               onClick={() => setShowFilters(!showFilters)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${showFilters || hasActiveFilters() ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
             >
@@ -525,26 +511,26 @@ const DayBook: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">From Date</label>
-                  <input 
-                    type="date" 
-                    value={filters.dateFrom} 
+                  <input
+                    type="date"
+                    value={filters.dateFrom}
                     onChange={(e) => setFilters(p => ({ ...p, dateFrom: e.target.value }))}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">To Date</label>
-                  <input 
-                    type="date" 
-                    value={filters.dateTo} 
+                  <input
+                    type="date"
+                    value={filters.dateTo}
                     onChange={(e) => setFilters(p => ({ ...p, dateTo: e.target.value }))}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Transaction Category</label>
-                  <select 
-                    value={filters.transactionCategory} 
+                  <select
+                    value={filters.transactionCategory}
                     onChange={(e) => setFilters(p => ({ ...p, transactionCategory: e.target.value }))}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   >
@@ -555,8 +541,8 @@ const DayBook: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Transaction Type</label>
-                  <select 
-                    value={filters.type} 
+                  <select
+                    value={filters.type}
                     onChange={(e) => setFilters(p => ({ ...p, type: e.target.value }))}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   >
@@ -671,50 +657,33 @@ const DayBook: React.FC = () => {
                 </table>
               </div>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
+              {/* ✅ Reusable Pagination */}
+              {filteredEntries.length > 0 && (
                 <div className="no-print flex flex-col sm:flex-row justify-between items-center gap-4 px-4 py-3 border-t border-gray-200 bg-gray-50/60">
                   <div className="flex items-center gap-3 text-sm text-gray-600">
-                    Showing {(currentPage-1)*pageSize+1}–{Math.min(currentPage*pageSize, filteredEntries.length)} of {filteredEntries.length}
-                    <select 
-                      value={pageSize} 
-                      onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                    Showing{" "}
+                    <span className="font-medium">
+                      {(currentPage-1)*pageSize+1}
+                    </span>
+                    –
+                    <span className="font-medium">
+                      {Math.min(currentPage*pageSize, filteredEntries.length)}
+                    </span>{" "}
+                    of <span className="font-medium">{filteredEntries.length}</span>
+                    <select
+                      value={pageSize}
+                      onChange={handlePageSizeChange}
                       className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-blue-400"
                     >
                       {[10,15,25,50,100].map(n => <option key={n} value={n}>{n} / page</option>)}
                     </select>
                   </div>
-                  <div className="flex gap-1.5 flex-wrap justify-center">
-                    <button 
-                      disabled={currentPage === 1} 
-                      onClick={() => setCurrentPage(p => p-1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${currentPage === 1 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-slate-700 text-white hover:bg-slate-800"}`}
-                    >
-                      ← Prev
-                    </button>
-                    {(() => {
-                      const max=5; 
-                      let start = Math.max(1, currentPage - 2); 
-                      let end = Math.min(totalPages, start + max - 1);
-                      if (end - start + 1 < max) start = Math.max(1, end - max + 1);
-                      return Array.from({ length: end - start + 1 }, (_, i) => start + i).map(p => (
-                        <button 
-                          key={p} 
-                          onClick={() => setCurrentPage(p)}
-                          className={`px-3 py-1.5 rounded text-sm transition ${currentPage === p ? "bg-blue-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-                        >
-                          {p}
-                        </button>
-                      ));
-                    })()}
-                    <button 
-                      disabled={currentPage === totalPages} 
-                      onClick={() => setCurrentPage(p => p+1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${currentPage === totalPages ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-slate-700 text-white hover:bg-slate-800"}`}
-                    >
-                      Next →
-                    </button>
-                  </div>
+
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={handlePageChange}
+                  />
                 </div>
               )}
             </>

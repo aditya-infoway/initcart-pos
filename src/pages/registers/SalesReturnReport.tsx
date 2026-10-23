@@ -5,6 +5,7 @@ import { toast } from "react-toastify";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
 import { useAuthStore } from "../../store/authStore";
+import Pagination from "../../components/common/pagination";
 
 interface SalesReturn {
   id: number; return_no: string; date: string; customer_name: string;
@@ -27,12 +28,11 @@ interface Branch {
 const SalesReturnReport: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  
+
   const isSuperAdmin = user?.role === 'superadmin';
   const isEmployee = user?.role === 'employee';
-  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
   const canViewAllBranches = isSuperAdmin || isEmployee;
-  
+
   const [allReturns, setAllReturns] = useState<SalesReturn[]>([]);
   const [filteredReturns, setFilteredReturns] = useState<SalesReturn[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +46,7 @@ const SalesReturnReport: React.FC = () => {
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   const [selectedBranchName, setSelectedBranchName] = useState<string>("My Branch");
 
-  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  // ✅ Fetch branches
   useEffect(() => {
     if (canViewAllBranches) {
       api.get("branches/")
@@ -65,7 +65,7 @@ const SalesReturnReport: React.FC = () => {
     }
   }, [canViewAllBranches]);
 
-  // ✅ FIX: fetchReturns function - proper branch parameter
+  // ✅ fetchReturns function
   const fetchReturns = async (branchId?: string) => {
     setLoading(true);
     try {
@@ -73,9 +73,7 @@ const SalesReturnReport: React.FC = () => {
       if (branchId) {
         url += `&branch_id=${branchId}`;
       }
-      
-      console.log("🔄 Fetching sales returns with URL:", url);
-      
+
       const res = await api.get(url);
       let all: SalesReturn[] = [];
       if (res.data.results) {
@@ -87,24 +85,22 @@ const SalesReturnReport: React.FC = () => {
           nextUrl = nextRes.data.next;
         }
       }
-      
-      console.log(`✅ Loaded ${all.length} sales returns for branch:`, branchId || 'default');
-      
-      setAllReturns(all); 
+
+      setAllReturns(all);
       setFilteredReturns(all);
     } catch (err) {
-      console.error(err); 
+      console.error(err);
       toast.error("Failed to load sales returns");
-      setAllReturns([]); 
+      setAllReturns([]);
       setFilteredReturns([]);
-    } finally { 
-      setLoading(false); 
+    } finally {
+      setLoading(false);
     }
   };
 
   // ✅ Initial fetch
-  useEffect(() => { 
-    fetchReturns(); 
+  useEffect(() => {
+    fetchReturns();
   }, []);
 
   // ✅ Branch change handler
@@ -129,7 +125,7 @@ const SalesReturnReport: React.FC = () => {
     setFilteredReturns(f); setCurrentPage(1);
   }, [searchTerm, filters, allReturns]);
 
-  const totalPages = Math.ceil(filteredReturns.length / pageSize);
+  const totalPages = Math.max(1, Math.ceil(filteredReturns.length / pageSize));
   const paginatedReturns = filteredReturns.slice((currentPage-1)*pageSize, currentPage*pageSize);
 
   const grandTotal = filteredReturns.reduce((s,i) => s + Number(i.grand_total||0), 0);
@@ -160,6 +156,18 @@ const SalesReturnReport: React.FC = () => {
   const typeColor = (type: string) =>
     type === "Full" ? "bg-purple-100 text-purple-800 border border-purple-300" : "bg-orange-100 text-orange-800 border border-orange-300";
 
+  const handlePageChange = (p: number) => {
+    if (p >= 1 && p <= totalPages) {
+      setCurrentPage(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(Number(e.target.value));
+    setCurrentPage(1);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <style>{`@media print { .no-print{display:none!important} body{background:white} }`}</style>
@@ -182,7 +190,6 @@ const SalesReturnReport: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* ✅ Branch Filter - Superadmin + Employee */}
             {canViewAllBranches && (
               <div className="flex items-center gap-2 mr-2">
                 <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
@@ -343,34 +350,33 @@ const SalesReturnReport: React.FC = () => {
                 </table>
               </div>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
+              {/* ✅ Reusable Pagination */}
+              {filteredReturns.length > 0 && (
                 <div className="no-print flex flex-col sm:flex-row justify-between items-center gap-4 px-4 py-3 border-t border-gray-200 bg-gray-50/60">
                   <div className="flex items-center gap-3 text-sm text-gray-600">
-                    Showing {(currentPage-1)*pageSize+1}–{Math.min(currentPage*pageSize,filteredReturns.length)} of {filteredReturns.length}
-                    <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-                      className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-blue-400">
+                    Showing{" "}
+                    <span className="font-medium">
+                      {(currentPage-1)*pageSize+1}
+                    </span>
+                    –
+                    <span className="font-medium">
+                      {Math.min(currentPage*pageSize,filteredReturns.length)}
+                    </span>{" "}
+                    of <span className="font-medium">{filteredReturns.length}</span>
+                    <select
+                      value={pageSize}
+                      onChange={handlePageSizeChange}
+                      className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-blue-400"
+                    >
                       {[10,15,25,50,100].map(n => <option key={n} value={n}>{n} / page</option>)}
                     </select>
                   </div>
-                  <div className="flex gap-1.5 flex-wrap justify-center">
-                    <button disabled={currentPage===1} onClick={() => setCurrentPage(p=>p-1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${currentPage===1?"bg-gray-200 text-gray-400 cursor-not-allowed":"bg-slate-700 text-white hover:bg-slate-800"}`}>
-                      ← Prev
-                    </button>
-                    {(() => {
-                      const max=5; let start=Math.max(1,currentPage-2); let end=Math.min(totalPages,start+max-1);
-                      if(end-start+1<max) start=Math.max(1,end-max+1);
-                      return Array.from({length:end-start+1},(_,i)=>start+i).map(p=>(
-                        <button key={p} onClick={()=>setCurrentPage(p)}
-                          className={`px-3 py-1.5 rounded text-sm transition ${currentPage===p?"bg-blue-600 text-white":"bg-gray-200 hover:bg-gray-300"}`}>{p}</button>
-                      ));
-                    })()}
-                    <button disabled={currentPage===totalPages} onClick={() => setCurrentPage(p=>p+1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${currentPage===totalPages?"bg-gray-200 text-gray-400 cursor-not-allowed":"bg-slate-700 text-white hover:bg-slate-800"}`}>
-                      Next →
-                    </button>
-                  </div>
+
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={handlePageChange}
+                  />
                 </div>
               )}
             </>
@@ -389,7 +395,6 @@ const SalesReturnReport: React.FC = () => {
               </div>
               <button onClick={() => setSelectedReturn(null)} className="text-white hover:text-red-300 text-xl transition">✕</button>
             </div>
-            {/* Summary row */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 py-4 bg-gray-50 border-b border-gray-200 text-sm">
               <div><p className="text-xs text-gray-500">Reason</p><p className="font-medium text-gray-800">{selectedReturn.reason_for_return||"-"}</p></div>
               <div><p className="text-xs text-gray-500">Type</p>
