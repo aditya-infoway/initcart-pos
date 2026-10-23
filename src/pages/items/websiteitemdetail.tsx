@@ -10,6 +10,14 @@ import {
 import { MdOutlineStorefront } from 'react-icons/md';
 import api from '../../api/api';
 
+const RETURN_OPTIONS = [
+  { label: '7 Days Return', days: 7 },
+  { label: '15 Days Return', days: 15 },
+  { label: '30 Days Return', days: 30 },
+  { label: 'No Return', days: 0 },
+  { label: 'Exchange Only', days: 0 },
+];
+
 // Types
 interface Variant {
   id: number;
@@ -50,6 +58,7 @@ interface WebsiteItem {
   taxSlab: string;
   variants: Variant[];
   gallery?: string[];
+  return_days: number;
   
   // Product fields
   short_description: string;
@@ -253,15 +262,16 @@ const handleImageUpload = async (type: 'main' | 'thumbnail', file: File) => {
 
     const formData = new FormData();
     
-    // ✅ CRITICAL: Include ALL existing data along with the image
+    // CRITICAL: Include ALL existing data along with the image
     formData.append(`${type}_image`, file);
     
-    // ✅ Preserve all text fields
+    //  Preserve all text fields
     formData.append('short_description', item.short_description || '');
     formData.append('full_description', item.full_description || '');
     formData.append('keywords', item.keywords || '');
     formData.append('product_condition', item.product_condition || 'New');
     formData.append('return_policy', item.return_policy || '');
+    formData.append('return_days', String(item.return_days ?? 7));  
     formData.append('estimated_delivery_time', item.estimated_delivery_time || '');
     formData.append('free_shipping', item.free_shipping ? 'true' : 'false');
     formData.append('warranty_available', item.warranty_available ? 'true' : 'false');
@@ -269,11 +279,11 @@ const handleImageUpload = async (type: 'main' | 'thumbnail', file: File) => {
     formData.append('warranty_type', item.warranty_type || '');
     formData.append('warranty_description', item.warranty_description || '');
     
-    // ✅ Preserve JSON fields
+    //  Preserve JSON fields
     formData.append('description_features', JSON.stringify(item.description_features || []));
     formData.append('specifications', JSON.stringify(item.specifications || []));
     
-    // ✅ Preserve existing gallery URLs
+    //  Preserve existing gallery URLs
     if (existingGalleryUrls.length > 0) {
         const galleryPaths = existingGalleryUrls.map(url => {
             let path = url;
@@ -1356,18 +1366,23 @@ const handleSave = async () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Return Policy</label>
-                  <select
-                    value={item.return_policy || ''}
-                    onChange={(e) => handleFieldChange('return_policy', e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select Return Policy</option>
-                    <option value="7 Days Return">7 Days Return</option>
-                    <option value="15 Days Return">15 Days Return</option>
-                    <option value="30 Days Return">30 Days Return</option>
-                    <option value="No Return">No Return</option>
-                    <option value="Exchange Only">Exchange Only</option>
-                  </select>
+<select
+  value={item.return_policy || ''}
+  onChange={(e) => {
+    const opt = RETURN_OPTIONS.find(o => o.label === e.target.value);
+    setItem({
+      ...item,
+      return_policy: e.target.value,
+      return_days: opt ? opt.days : 7,
+    });
+  }}
+  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+>
+  <option value="">Select Return Policy</option>
+  {RETURN_OPTIONS.map(o => (
+    <option key={o.label} value={o.label}>{o.label}</option>
+  ))}
+</select>
                 </div>
                 
                 <div>

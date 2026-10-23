@@ -1,6 +1,5 @@
 // src/pages/branch/BranchMaster.tsx
-
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Formik, Form, useField } from "formik";
 import * as Yup from "yup";
 import api from "../../api/api";
@@ -16,6 +15,7 @@ import { MdClose, MdLocationOn } from "react-icons/md";
 import * as XLSX from "xlsx";
 import { Country, State, City } from "country-state-city";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 /* ---------------- TYPES ---------------- */
 interface Branch {
@@ -53,6 +53,15 @@ interface Branch {
     pan_number?: string;
     pan_card?: string;
 
+}
+
+interface PaginationInfo {
+    count: number;
+    total_pages: number;
+    current_page: number;
+    page_size: number;
+    has_next: boolean;
+    has_previous: boolean;
 }
 
 interface BranchFormValues {
@@ -594,13 +603,16 @@ const BranchMaster: React.FC = () => {
     const [viewModalOpen, setViewModalOpen] = useState(false);
     const [viewBranchId, setViewBranchId] = useState<number | null>(null);
     const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
-    const [searchTerm, setSearchTerm] = useState("");
-    const [filterStatus, setFilterStatus] = useState("");
-    const [currentPage, setCurrentPage] = useState(1);
-    const [pageSize, setPageSize] = useState(15);
-    const [totalItems, setTotalItems] = useState(0);
-    const [totalPages, setTotalPages] = useState(1);
-    const [isSubmitting, setIsSubmitting] = useState(false);
+const [searchTerm, setSearchTerm] = useState("");
+const [debouncedSearch, setDebouncedSearch] = useState("");
+const [filterStatus, setFilterStatus] = useState("");
+const [pagination, setPagination] = useState<PaginationInfo>({
+    count: 0, total_pages: 1, current_page: 1,
+    page_size: 15, has_next: false, has_previous: false,
+});
+
+const reqIdRef = useRef(0);
+const [isSubmitting, setIsSubmitting] = useState(false);
     const [debitorAccounts, setDebitorAccounts] = useState<{ id: number, account_name: string }[]>([]);
     const [creditorAccounts, setCreditorAccounts] = useState<{ id: number, account_name: string }[]>([]);
     const [countries] = useState(Country.getAllCountries());
@@ -618,38 +630,58 @@ const BranchMaster: React.FC = () => {
     });
 
     // Fetch branches
-    const fetchBranches = async (page = 1) => {
-        setLoading(true);
-        try {
-            const token = sessionStorage.getItem("accessToken");
-            if (!token) {
-                setLoading(false);
-                return;
-            }
-
-            const res = await api.get(`/branches/?page=${page}&page_size=${pageSize}`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-
-            if (res.data.success) {
-                const data = res.data.data || [];
-                setBranches(data);
-                setTotalItems(res.data.count || data.length);
-                setTotalPages(Math.ceil((res.data.count || data.length) / pageSize));
-                setCurrentPage(page);
-            } else {
-                setBranches([]);
-                setTotalItems(0);
-                setTotalPages(1);
-            }
-        } catch (err: any) {
-            console.error("Error fetching branches:", err.response || err);
-            toast.error("Failed to load branches");
-            setBranches([]);
-        } finally {
+const fetchBranches = useCallback(async () => {
+    const reqId = ++reqIdRef.current;
+    setLoading(true);
+    try {
+        const token = sessionStorage.getItem("accessToken");
+        if (!token) {
             setLoading(false);
+            return;
         }
-    };
+
+        const params: Record<string, any> = {
+            page: pagination.current_page,
+            page_size: pagination.page_size,
+        };
+        if (debouncedSearch) params.search = debouncedSearch;
+        if (filterStatus) params.status = filterStatus;
+
+        const res = await api.get(`/branches/`, {
+            params,
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (reqId !== reqIdRef.current) return;
+
+        if (res.data.success) {
+            const items = res.data.data || [];
+            setBranches(items);
+            if (res.data.pagination) {
+                setPagination(res.data.pagination);
+            } else {
+                // fallback agar purana backend ho
+                setPagination({
+                    count: res.data.count ?? items.length,
+                    total_pages: Math.max(1, Math.ceil((res.data.count ?? items.length) / pagination.page_size)),
+                    current_page: pagination.current_page,
+                    page_size: pagination.page_size,
+                    has_next: false,
+                    has_previous: false,
+                });
+            }
+        } else {
+            setBranches([]);
+            setPagination(prev => ({ ...prev, count: 0, total_pages: 1 }));
+        }
+    } catch (err: any) {
+        if (reqId !== reqIdRef.current) return;
+        console.error("Error fetching branches:", err.response || err);
+        toast.error("Failed to load branches");
+        setBranches([]);
+    } finally {
+        if (reqId === reqIdRef.current) setLoading(false);
+    }
+}, [pagination.current_page, pagination.page_size, debouncedSearch, filterStatus]);
     useEffect(() => {
         const params = editingBranch ? `?branch_id=${editingBranch.id}` : "";
         api.get(`/branch-linkable-accounts/${params}`).then(res => {
@@ -685,9 +717,19 @@ useEffect(() => {
     }
 }, [editingBranch]);
 
-    useEffect(() => {
-        fetchBranches(currentPage);
-    }, [currentPage, pageSize]);
+// ✅ Search debounce
+useEffect(() => {
+    const t = setTimeout(() => {
+        setDebouncedSearch(searchTerm.trim());
+        setPagination(prev => ({ ...prev, current_page: 1 }));
+    }, 400);
+    return () => clearTimeout(t);
+}, [searchTerm]);
+
+// ✅ Auto fetch on page / pageSize / search / status change
+useEffect(() => {
+    fetchBranches();
+}, [fetchBranches]);
 useEffect(() => {
     const fetchSuperadminTax = async () => {
         try {
@@ -707,50 +749,27 @@ useEffect(() => {
 }, []);
 
     // Filter branches
-    const filteredBranches = branches.filter((branch) => {
-        const term = searchTerm.toLowerCase();
-        const matchesSearch =
-            branch.branch_name?.toLowerCase().includes(term) ||
-            branch.owner_name?.toLowerCase().includes(term) ||
-            branch.email?.toLowerCase().includes(term) ||
-            branch.phone?.includes(term) ||
-            branch.city?.toLowerCase().includes(term);
-        if (!matchesSearch) return false;
-        if (filterStatus && branch.status !== filterStatus) return false;
-        return true;
-    });
+// ✅ Server-side pagination derived values
+const totalCount = pagination.count;
+const totalPages = Math.max(1, pagination.total_pages);
+const currentPageNum = pagination.current_page;
+const pageSize = pagination.page_size;
 
-    useEffect(() => {
-        setTotalItems(filteredBranches.length);
-        setTotalPages(Math.ceil(filteredBranches.length / pageSize));
-        setCurrentPage(1);
-    }, [filteredBranches.length, pageSize]);
+const clearFilters = () => {
+    setSearchTerm("");
+    setFilterStatus("");
+    setPagination(prev => ({ ...prev, current_page: 1 }));
+};
+const handlePageChange = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+        setPagination(prev => ({ ...prev, current_page: page }));
+    }
+};
 
-    const getCurrentPageItems = () => {
-        const start = (currentPage - 1) * pageSize;
-        const end = start + pageSize;
-        return filteredBranches.slice(start, end);
-    };
-
-    const currentItems = getCurrentPageItems();
-
-    const clearFilters = () => {
-        setSearchTerm("");
-        setFilterStatus("");
-    };
-
-    const handlePageChange = (page: number) => {
-        if (page >= 1 && page <= totalPages) {
-            setCurrentPage(page);
-        }
-    };
-
-    const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newSize = parseInt(e.target.value);
-        setPageSize(newSize);
-        setCurrentPage(1);
-    };
-
+const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newSize = parseInt(e.target.value);
+    setPagination(prev => ({ ...prev, page_size: newSize, current_page: 1 }));
+};
     // Get full URL for files
     const getFullUrl = (url: string | undefined) => {
         if (!url) return "#";
@@ -777,13 +796,13 @@ useEffect(() => {
     };
 
     // Export to Excel
-    const exportToExcel = () => {
-        if (filteredBranches.length === 0) {
-            toast.warning("No data to export");
-            return;
-        }
+const exportToExcel = () => {
+    if (branches.length === 0) {
+        toast.warning("No data to export");
+        return;
+    }
 
-        const exportData = filteredBranches.map((branch, index) => ({
+    const exportData = branches.map((branch, index) => ({
             "SR No": index + 1,
             "Branch Name": branch.branch_name || "-",
             "Type": getBranchTypeDisplay(branch.branch_type),
@@ -815,7 +834,7 @@ useEffect(() => {
         const fileName = `Branch_Master_${new Date().toISOString().slice(0, 10)}.xlsx`;
         XLSX.writeFile(wb, fileName);
 
-        toast.success(`Exported ${filteredBranches.length} branches successfully`);
+        toast.success(`Exported ${branches.length} branches successfully`);
     };
 
     // Handle add
@@ -860,10 +879,14 @@ useEffect(() => {
 
         try {
             const res = await api.delete(`/branches/${branch.id}/`);
-            if (res.data.success) {
-                toast.success("Branch deleted successfully");
-                fetchBranches(currentPage);
-            } else {
+if (res.data.success) {
+    toast.success("Branch deleted successfully");
+    if (branches.length === 1 && pagination.current_page > 1) {
+        setPagination(prev => ({ ...prev, current_page: prev.current_page - 1 }));
+    } else {
+        fetchBranches();
+    }
+} else {
                 toast.error(res.data.message || "Failed to delete branch");
             }
         } catch (error) {
@@ -885,10 +908,10 @@ useEffect(() => {
 
         try {
             const res = await api.patch(`/branches/${branch.id}/`, { status: newStatus });
-            if (res.data.success) {
-                toast.success(`Status changed to ${newStatus}`);
-                fetchBranches(currentPage);
-            } else {
+if (res.data.success) {
+    toast.success(`Status changed to ${newStatus}`);
+    fetchBranches();
+} else {
                 toast.error(res.data.message || "Failed to change status");
             }
         } catch (error) {
@@ -925,20 +948,24 @@ const handleSubmit = async (values: BranchFormValues, { resetForm }: any) => {
                 headers: { "Content-Type": "multipart/form-data" },
             };
 
-            let res;
-            if (editingBranch) {
-                res = await api.patch(`/branches/${editingBranch.id}/`, formData, config);
-                if (res.data.success) {
-                    toast.success("Branch updated successfully");
-                }
-            } else {
-                res = await api.post("/branches/", formData, config);
-                if (res.data.success) {
-                    toast.success("Branch created successfully");
-                }
-            }
+let res;
+if (editingBranch) {
+    res = await api.patch(`/branches/${editingBranch.id}/`, formData, config);
+    if (res.data.success) {
+        toast.success("Branch updated successfully");
+    }
+} else {
+    res = await api.post("/branches/", formData, config);
+    if (res.data.success) {
+        toast.success("Branch created successfully");
+    }
+}
 
-            setModalOpen(false);
+if (res.data.success) {
+    fetchBranches();
+}
+
+setModalOpen(false);
             resetForm();
             setFileUploads({
                 licence_file: null,
@@ -947,7 +974,7 @@ const handleSubmit = async (values: BranchFormValues, { resetForm }: any) => {
                 id_proof: null,
                 
             });
-            fetchBranches(currentPage);
+            
         } catch (err: any) {
             console.error("Submit error:", err.response || err);
             const errorMsg = err.response?.data?.message || err.response?.data?.email?.[0] || "Failed to save branch";
@@ -1016,7 +1043,10 @@ const handleSubmit = async (values: BranchFormValues, { resetForm }: any) => {
 
                 <select
                     value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
+                    onChange={(e) => {
+    setFilterStatus(e.target.value);
+    setPagination(prev => ({ ...prev, current_page: 1 }));
+}}
                     className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
                 >
                     <option value="">All Status</option>
@@ -1055,12 +1085,12 @@ const handleSubmit = async (values: BranchFormValues, { resetForm }: any) => {
                         </tr>
                     </thead>
                     <tbody className="text-center">
-                        {currentItems.length > 0 ? (
-                            currentItems.map((branch, i) => (
-                                <tr key={branch.id} className="border-t hover:bg-gray-50">
-                                    <td className="p-3 border border-gray-200 whitespace-nowrap">
-                                        {(currentPage - 1) * pageSize + i + 1}
-                                    </td>
+{branches.length > 0 ? (
+    branches.map((branch, i) => (
+        <tr key={branch.id} className="border-t hover:bg-gray-50">
+            <td className="p-3 border border-gray-200 whitespace-nowrap">
+                {(currentPageNum - 1) * pageSize + i + 1}
+            </td>
                                     <td className="p-3 border border-gray-200 whitespace-nowrap">
                                         {branch.branch_logo ? (
                                             <img
@@ -1158,90 +1188,50 @@ const handleSubmit = async (values: BranchFormValues, { resetForm }: any) => {
                                 </tr>
                             ))
                         ) : (
-                            <tr>
-                                <td colSpan={12} className="p-6 text-center text-gray-500">
-                                    No branches found
-                                </td>
-                            </tr>
+    <tr>
+        <td colSpan={12} className="p-6 text-center text-gray-500">
+            {debouncedSearch || filterStatus ? "No matching branches found" : "No branches found"}
+        </td>
+    </tr>
                         )}
                     </tbody>
                 </table>
             </div>
 
-            {/* Pagination */}
-            {filteredBranches.length > 0 && (
-                <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
-                    <div className="flex items-center gap-3">
-                        <span className="text-sm text-gray-700">
-                            Showing {(currentPage - 1) * pageSize + 1}–
-                            {Math.min(currentPage * pageSize, filteredBranches.length)} of {filteredBranches.length} items
-                        </span>
-                        <select
-                            value={pageSize}
-                            onChange={handlePageSizeChange}
-                            className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value={10}>10 per page</option>
-                            <option value={15}>15 per page</option>
-                            <option value={25}>25 per page</option>
-                            <option value={50}>50 per page</option>
-                            <option value={100}>100 per page</option>
-                        </select>
-                    </div>
+{totalCount > 0 && (
+    <div className="flex flex-col sm:flex-row justify-between items-center px-4 py-3 bg-white border-t border-gray-200 gap-3 mt-4 rounded-lg shadow">
+        <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-700">
+                Showing{" "}
+                <span className="font-medium">
+                    {(currentPageNum - 1) * pageSize + 1}
+                </span>{" "}
+                to{" "}
+                <span className="font-medium">
+                    {Math.min(currentPageNum * pageSize, totalCount)}
+                </span>{" "}
+                of <span className="font-medium">{totalCount}</span> items
+            </span>
+            <select
+                value={pageSize}
+                onChange={handlePageSizeChange}
+                className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+                <option value={10}>10 per page</option>
+                <option value={15}>15 per page</option>
+                <option value={25}>25 per page</option>
+                <option value={50}>50 per page</option>
+                <option value={100}>100 per page</option>
+            </select>
+        </div>
 
-                    <div className="flex gap-2">
-                        <button
-                            disabled={currentPage === 1}
-                            onClick={() => handlePageChange(currentPage - 1)}
-                            className={`px-3 py-1 border rounded ${currentPage === 1
-                                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                                    : "bg-blue-600 text-white hover:bg-blue-700"
-                                }`}
-                        >
-                            Prev
-                        </button>
-
-                        {(() => {
-                            const maxVisible = 5;
-                            let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-                            let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-
-                            if (endPage - startPage + 1 < maxVisible) {
-                                startPage = Math.max(1, endPage - maxVisible + 1);
-                            }
-
-                            const pages = [];
-                            for (let i = startPage; i <= endPage; i++) {
-                                pages.push(i);
-                            }
-
-                            return pages.map((page) => (
-                                <button
-                                    key={page}
-                                    onClick={() => handlePageChange(page)}
-                                    className={`px-3 py-1 border rounded ${currentPage === page
-                                            ? "bg-blue-600 text-white"
-                                            : "bg-gray-200 hover:bg-gray-300"
-                                        }`}
-                                >
-                                    {page}
-                                </button>
-                            ));
-                        })()}
-
-                        <button
-                            disabled={currentPage === totalPages}
-                            onClick={() => handlePageChange(currentPage + 1)}
-                            className={`px-3 py-1 border rounded ${currentPage === totalPages
-                                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                                    : "bg-blue-600 text-white hover:bg-blue-700"
-                                }`}
-                        >
-                            Next
-                        </button>
-                    </div>
-                </div>
-            )}
+        <Pagination
+            currentPage={currentPageNum}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+        />
+    </div>
+)}
 
             {/* View Modal */}
             <ViewModal

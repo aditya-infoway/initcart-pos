@@ -6,6 +6,7 @@ import { toast } from "react-toastify";
 import { FaFileExcel, FaSearch, FaTimes, FaPlus } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 /* ---------------- VALIDATION ---------------- */
 const today = new Date().toISOString().split("T")[0];
@@ -28,7 +29,6 @@ interface ApiErrorResponse {
   [key: string]: any;
 }
 
-// Paginated Response Type
 interface PaginatedResponse {
   count: number;
   next: string | null;
@@ -469,14 +469,14 @@ const CashPayment: React.FC = () => {
   const [showBillModal, setShowBillModal] = useState(false);
   const [billType, setBillType] = useState<string>('');
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [isSuperAdminOrEmployee, setIsSuperAdminOrEmployee] = useState(false);  
+  const [isSuperAdminOrEmployee, setIsSuperAdminOrEmployee] = useState(false);
 
   // ✅ PERMISSIONS
   const { canAdd } = usePermission("/Cash-Payment");
-  // Note: Edit/Delete nahi hai isme, isliye canEdit/canDelete use nahi kiya
 
   // Search and Filter state
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterType, setFilterType] = useState("");
 
   // Pagination state
@@ -485,75 +485,104 @@ const CashPayment: React.FC = () => {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-// ─── useEffect ───
-useEffect(() => {
-  const role = getUserRole();
-  const isSA = role === "superadmin";
-  const isEmp = role === "employee";
-  
-  setIsSuperAdmin(isSA);
-  setIsSuperAdminOrEmployee(isSA || isEmp);   // ✅ NEW
-}, []);
+  // ─── useEffect ───
+  useEffect(() => {
+    const role = getUserRole();
+    const isSA = role === "superadmin";
+    const isEmp = role === "employee";
 
-  // Add Export to Excel function
-  const exportToExcel = () => {
-    if (filteredRows.length === 0) {
-      toast.warning("No data to export");
-      return;
+    setIsSuperAdmin(isSA);
+    setIsSuperAdminOrEmployee(isSA || isEmp);
+  }, []);
+
+  // ✅ Search debounce (400ms)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // ✅ Export to Excel — full filtered dataset (chunked)
+  const exportToExcel = async () => {
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      if (!token) {
+        toast.error("Authentication required");
+        return;
+      }
+
+      let all: any[] = [];
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("page_size", "500");
+        if (debouncedSearch) params.set("search", debouncedSearch);
+        if (filterType) params.set("type", filterType);
+
+        const res = await api.get<PaginatedResponse>(`cash-payments/?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const results = res.data.results || [];
+        all = [...all, ...results];
+        hasMore = !!res.data.next;
+        page += 1;
+
+        if (!results.length) break;
+      }
+
+      if (all.length === 0) {
+        toast.warning("No data to export");
+        return;
+      }
+
+      const exportData: any[] = all.map((row, index) => ({
+        "SR No": index + 1,
+        "Date": row.date || "-",
+        "Voucher No": row.voucher_no || "-",
+        "Type": row.type || "CP",
+        "Cash Account": row.cash_account_name || row.cash_account || "-",
+        "Party Name": row.party_name || row.op_account || "-",
+        "Amount (₹)": Number(row.amount || 0).toFixed(2),
+        "Narration": row.narration || "-",
+      }));
+
+      const grandTotal = all.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      exportData.push({
+        "SR No": "",
+        "Date": "",
+        "Voucher No": "",
+        "Type": "",
+        "Cash Account": "",
+        "Party Name": "TOTAL",
+        "Amount (₹)": grandTotal.toFixed(2),
+        "Narration": "",
+      });
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws["!cols"] = [
+        { wch: 6 }, { wch: 12 }, { wch: 15 }, { wch: 8 },
+        { wch: 25 }, { wch: 25 }, { wch: 15 }, { wch: 40 },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Cash Payment Register");
+      const fileName = `Cash_Payment_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+      toast.success(`Exported ${all.length} records successfully`);
+    } catch (err) {
+      console.error("Export error:", err);
+      toast.error("Failed to export");
     }
-
-    // Prepare data for export
-    const exportData: any[] = filteredRows.map((row, index) => ({
-      "SR No": index + 1,
-      "Date": row.date || "-",
-      "Voucher No": row.voucher_no || "-",
-      "Type": row.type || "CP",
-      "Cash Account": row.cash_account_name || row.cash_account || "-",
-      "Party Name": row.party_name || row.op_account || "-",
-      "Amount (₹)": Number(row.amount || 0).toFixed(2),
-      "Narration": row.narration || "-",
-    }));
-
-    // Add grand total row
-    const grandTotal = filteredRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    exportData.push({
-      "SR No": "",
-      "Date": "",
-      "Voucher No": "",
-      "Type": "",
-      "Cash Account": "",
-      "Party Name": "TOTAL",
-      "Amount (₹)": grandTotal.toFixed(2),
-      "Narration": "",
-    });
-
-    // Create worksheet
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    
-    // Set column widths
-    ws["!cols"] = [
-      { wch: 6 },
-      { wch: 12 },
-      { wch: 15 },
-      { wch: 8 },
-      { wch: 25 },
-      { wch: 25 },
-      { wch: 15 },
-      { wch: 40 },
-    ];
-
-    // Create workbook and download
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Cash Payment Register");
-    
-    // Generate filename with current date
-    const fileName = `Cash_Payment_Register_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-    
-    toast.success(`Exported ${filteredRows.length} records successfully`);
   };
 
-  // Fetch payments with pagination
+  // Fetch payments with server-side pagination + search + filter
   const fetchPayments = async (page = 1) => {
     setLoading(true);
     try {
@@ -563,14 +592,20 @@ useEffect(() => {
         return;
       }
 
-      const res = await api.get<PaginatedResponse>(`cash-payments/?page=${page}&page_size=${pageSize}`, {
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("page_size", String(pageSize));
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      if (filterType) params.set("type", filterType);
+
+      const res = await api.get<PaginatedResponse>(`cash-payments/?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (res.data && res.data.results) {
         setRows(res.data.results);
         setTotalItems(res.data.count || 0);
-        setTotalPages(Math.ceil((res.data.count || 0) / pageSize));
+        setTotalPages(Math.max(1, Math.ceil((res.data.count || 0) / pageSize)));
         setCurrentPage(page);
       } else if (Array.isArray(res.data)) {
         setRows(res.data);
@@ -590,52 +625,17 @@ useEffect(() => {
     }
   };
 
-  // Fetch when page or pageSize changes
   useEffect(() => {
     fetchPayments(currentPage);
-  }, [currentPage, pageSize]);
+  }, [currentPage, pageSize, debouncedSearch, filterType]);
 
-  // Filtered rows based on search and type filter
-  const filteredRows = rows.filter(row => {
-    // Filter by search term
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      const matchesSearch = 
-        (row.voucher_no?.toLowerCase().includes(term)) ||
-        (row.cash_account_name?.toLowerCase().includes(term)) ||
-        (row.party_name?.toLowerCase().includes(term));
-      if (!matchesSearch) return false;
-    }
-    
-    // Filter by type
-    if (filterType && row.type !== filterType) return false;
-    
-    return true;
-  });
-
-  // Update total items and pages when filter changes
-  useEffect(() => {
-    setTotalItems(filteredRows.length);
-    setTotalPages(Math.ceil(filteredRows.length / pageSize));
-    setCurrentPage(1);
-  }, [filteredRows.length, pageSize]);
-
-  // Get current page items
-  const getCurrentPageItems = () => {
-    const start = (currentPage - 1) * pageSize;
-    const end = start + pageSize;
-    return filteredRows.slice(start, end);
-  };
-
-  const currentItems = getCurrentPageItems();
-
-  // Clear filters
   const clearFilters = () => {
     setSearchTerm("");
+    setDebouncedSearch("");
     setFilterType("");
+    setCurrentPage(1);
   };
 
-  // Pagination handlers
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) {
       setCurrentPage(page);
@@ -768,7 +768,6 @@ useEffect(() => {
     setOpen(true);
   };
 
-  // Loading State
   if (loading && rows.length === 0) {
     return (
       <div className="p-6 bg-gray-50 min-h-screen flex justify-center items-center">
@@ -779,11 +778,9 @@ useEffect(() => {
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-      {/* Header with Export Button */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">Cash Payment Register</h1>
         <div className="flex gap-2">
-          {/* Export Excel Button */}
           <button
             onClick={exportToExcel}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow transition"
@@ -791,8 +788,7 @@ useEffect(() => {
             <FaFileExcel size={16} />
             Export Excel
           </button>
-          
-          {/* ✅ ADD BUTTON - Sirf canAdd wale ko dikhe */}
+
           {canAdd && (
             <button
               onClick={handleOpenModal}
@@ -805,7 +801,6 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Search and Filter Bar */}
       <div className="mb-4 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 max-w-md">
           <div className="absolute inset-y-0 left-0 flex items-center pl-3">
@@ -831,7 +826,10 @@ useEffect(() => {
 
         <select
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
+          onChange={(e) => {
+            setFilterType(e.target.value);
+            setCurrentPage(1);
+          }}
           className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white"
         >
           <option value="">All Types</option>
@@ -852,7 +850,6 @@ useEffect(() => {
         )}
       </div>
 
-      {/* TABLE */}
       <div className="bg-white rounded-lg shadow overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-blue-600 text-white text-center">
@@ -869,8 +866,8 @@ useEffect(() => {
             </tr>
           </thead>
           <tbody className="text-center">
-            {currentItems.length > 0 ? (
-              currentItems.map((r, i) => (
+            {rows.length > 0 ? (
+              rows.map((r, i) => (
                 <tr key={r.id || i} className="border-t hover:bg-gray-50">
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{(currentPage - 1) * pageSize + i + 1}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.date || "-"}</td>
@@ -896,14 +893,15 @@ useEffect(() => {
                   <td className="p-3 border border-gray-200 whitespace-nowrap font-semibold">₹{Number(r.amount || 0).toLocaleString()}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap">{r.narration || "-"}</td>
                   <td className="p-3 border border-gray-200 whitespace-nowrap text-sm text-gray-600">
-  {r.created_by_name || "-"}   {/* ✅ ADD */}
-</td>
+                    {r.created_by_name || "-"}
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
                 <td colSpan={9} className="p-6 text-center text-gray-500">
                   No cash payments found
+                  {debouncedSearch || filterType ? " — try different search/filter" : ""}
                 </td>
               </tr>
             )}
@@ -911,15 +909,20 @@ useEffect(() => {
         </table>
       </div>
 
-      {/* Pagination Controls */}
-      {filteredRows.length > 0 && (
+      {totalItems > 0 && (
         <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">
-              Showing {(currentPage - 1) * pageSize + 1}–
-              {Math.min(currentPage * pageSize, filteredRows.length)} of {filteredRows.length} items
+              Showing{" "}
+              <span className="font-medium">
+                {(currentPage - 1) * pageSize + 1}
+              </span>–
+              <span className="font-medium">
+                {Math.min(currentPage * pageSize, totalItems)}
+              </span>{" "}
+              of <span className="font-medium">{totalItems}</span> items
             </span>
-            
+
             <select
               value={pageSize}
               onChange={handlePageSizeChange}
@@ -933,64 +936,14 @@ useEffect(() => {
             </select>
           </div>
 
-          <div className="flex gap-2">
-            <button
-              disabled={currentPage === 1}
-              onClick={() => handlePageChange(currentPage - 1)}
-              className={`px-3 py-1 border rounded ${
-                currentPage === 1
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Prev
-            </button>
-
-            {(() => {
-              const maxVisible = 5;
-              let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-              let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-              
-              if (endPage - startPage + 1 < maxVisible) {
-                startPage = Math.max(1, endPage - maxVisible + 1);
-              }
-              
-              const pages = [];
-              for (let i = startPage; i <= endPage; i++) {
-                pages.push(i);
-              }
-              
-              return pages.map((page) => (
-                <button
-                  key={page}
-                  onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1 border rounded ${
-                    currentPage === page
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                  }`}
-                >
-                  {page}
-                </button>
-              ));
-            })()}
-
-            <button
-              disabled={currentPage === totalPages}
-              onClick={() => handlePageChange(currentPage + 1)}
-              className={`px-3 py-1 border rounded ${
-                currentPage === totalPages
-                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Next
-            </button>
-          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
         </div>
       )}
 
-      {/* MODAL */}
       {open && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white w-[95%] sm:w-[90%] md:w-full md:max-w-4xl rounded-lg relative overflow-hidden">
@@ -1046,7 +999,7 @@ useEffect(() => {
       }} />
       <span>Manual</span>
     </label>
-    
+
     <label className="flex items-center gap-2">
       <input type="radio" value="salesReturn" checked={values.paymentType === "salesReturn"} onChange={() => {
         setFieldValue("paymentType", "salesReturn");
@@ -1056,7 +1009,7 @@ useEffect(() => {
       }} />
       <span>Sales Return</span>
     </label>
-    
+
     <label className="flex items-center gap-2">
       <input type="radio" value="purchaseEntry" checked={values.paymentType === "purchaseEntry"} onChange={() => {
         setFieldValue("paymentType", "purchaseEntry");
@@ -1067,7 +1020,6 @@ useEffect(() => {
       <span>Purchase Entry</span>
     </label>
 
-    {/* ✅ Stock Received - Sirf normal branch users (superadmin/employee nahi) */}
     {!isSuperAdminOrEmployee && (
       <label className="flex items-center gap-2">
         <input type="radio" value="stockReceived" checked={values.paymentType === "stockReceived"} onChange={() => {
@@ -1080,7 +1032,6 @@ useEffect(() => {
       </label>
     )}
 
-    {/* ✅ Stock Return refund - Superadmin OR Employee (donon ko dikhe) */}
     {isSuperAdminOrEmployee && (
       <label className="flex items-center gap-2">
         <input type="radio" value="stockReturn" checked={values.paymentType === "stockReturn"} onChange={() => {
@@ -1128,7 +1079,6 @@ useEffect(() => {
                         </div>
                       )}
 
-                      {/* Stock Received section */}
                       {values.paymentType === "stockReceived" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <StockReceivedDropdown
@@ -1151,7 +1101,6 @@ useEffect(() => {
                         </div>
                       )}
 
-                      {/* Stock Return refund section */}
                       {values.paymentType === "stockReturn" && (
                         <div className="bg-gray-50 p-4 rounded-lg border">
                           <StockReturnRefundDropdown

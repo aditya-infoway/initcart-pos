@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import api from "../../api/api";
 import * as XLSX from "xlsx";
+import Pagination from "../../components/common/pagination";
 
 interface SalesReturn {
   id: number;
@@ -16,7 +17,7 @@ interface SalesReturn {
   grand_total: string;
   items: any[];
   approved_by: string;
-   created_by_name?: string;
+  created_by_name?: string;
 }
 
 // ✅ Paginated Response Type
@@ -47,7 +48,7 @@ const SalesReturnList: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<SalesReturn | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
-  
+
   // ✅ Search and Filter state
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [debouncedSearch, setDebouncedSearch] = useState<string>("");
@@ -57,7 +58,7 @@ const SalesReturnList: React.FC = () => {
     startDate: "",
     endDate: "",
   });
-  
+
   // ✅ Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
@@ -293,7 +294,7 @@ const SalesReturnList: React.FC = () => {
               <FaFileExcel size={16} />
               {exporting ? "Exporting..." : "Export Excel"}
             </button>
-            
+
             <button
               onClick={() => navigate("/sales-return")}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow flex items-center gap-2 transition"
@@ -487,16 +488,22 @@ const SalesReturnList: React.FC = () => {
             </div>
           )}
         </div>
-        
-        {/* ✅ Enhanced Pagination Controls */}
+
+        {/* ✅ Reusable Pagination Controls */}
         {totalCount > 0 && (
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 p-4">
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-700">
-                Showing {(currentPage - 1) * pageSize + 1}–
-                {Math.min(currentPage * pageSize, totalCount)} of {totalCount} items
+                Showing{" "}
+                <span className="font-medium">
+                  {(currentPage - 1) * pageSize + 1}
+                </span>–
+                <span className="font-medium">
+                  {Math.min(currentPage * pageSize, totalCount)}
+                </span>{" "}
+                of <span className="font-medium">{totalCount}</span> items
               </span>
-              
+
               <select
                 value={pageSize}
                 onChange={handlePageSizeChange}
@@ -510,60 +517,11 @@ const SalesReturnList: React.FC = () => {
               </select>
             </div>
 
-            <div className="flex gap-2 flex-wrap justify-center">
-              <button
-                disabled={currentPage === 1}
-                onClick={() => handlePageChange(currentPage - 1)}
-                className={`px-3 py-1 rounded ${
-                  currentPage === 1
-                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                    : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
-              >
-                Prev
-              </button>
-
-              {(() => {
-                const maxVisible = 5;
-                let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-                let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-                
-                if (endPage - startPage + 1 < maxVisible) {
-                  startPage = Math.max(1, endPage - maxVisible + 1);
-                }
-                
-                const pages = [];
-                for (let i = startPage; i <= endPage; i++) {
-                  pages.push(i);
-                }
-                
-                return pages.map((page) => (
-                  <button
-                    key={page}
-                    onClick={() => handlePageChange(page)}
-                    className={`px-3 py-1 rounded ${
-                      currentPage === page
-                        ? "bg-blue-500 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ));
-              })()}
-
-              <button
-                disabled={currentPage === totalPages}
-                onClick={() => handlePageChange(currentPage + 1)}
-                className={`px-3 py-1 rounded ${
-                  currentPage === totalPages
-                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                    : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
-              >
-                Next
-              </button>
-            </div>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={handlePageChange}
+            />
           </div>
         )}
       </div>

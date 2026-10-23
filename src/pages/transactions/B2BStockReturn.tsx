@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  FaArrowLeft, FaArrowRight, FaBox, FaCheckCircle, FaExchangeAlt,
+  FaArrowLeft, FaArrowRight, FaBox, FaCheckCircle, FaRoute,
   FaEye, FaPlus, FaSearch, FaSpinner, FaTimes,
-  FaWarehouse, FaClipboardList, FaBoxes,
-  FaChevronLeft, FaChevronRight, FaTrash, FaSave,
-  FaCalendarAlt, FaFileInvoice, FaEdit, FaFilter, FaRoute,
+  FaWarehouse, FaBoxes,
+  FaTrash, FaSave,
+  FaCalendarAlt, FaFileInvoice, FaEdit, FaFilter,
 } from "react-icons/fa";
 import { MdPendingActions, MdClose } from "react-icons/md";
 import { BsCheckAll } from "react-icons/bs";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import Swal from "sweetalert2";
+import Pagination from "../../components/common/pagination";
 
 function useDebounce(value: string, delay: number = 300) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -30,10 +31,6 @@ const safeNum = (val: any): number => {
 };
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-/**
- * Mirrors pos/utils/gst_calc.py -> calculate_gst_split(..., gst_toggle=False, ...)
- * Used only for a live client-side ESTIMATE on the Create screen.
- */
 function calcGstSplitInclusive(
   rate: number,
   quantity: number,
@@ -72,7 +69,7 @@ interface TransferHop {
 }
 
 interface EligibleItem {
-  id: number; // B2BStockTransferItem.id
+  id: number;
   item_name: string;
   variant_info: string;
   barcode: string;
@@ -80,7 +77,7 @@ interface EligibleItem {
   color: string;
   hsnCode: string;
   taxSlab: string;
-  quantity: number; // remaining returnable qty
+  quantity: number;
   original_quantity: number;
   returned_quantity: number;
   rate: number;
@@ -209,7 +206,7 @@ const DisplayField: React.FC<{ label: string; value: string | number; icon?: any
   </div>
 );
 
-// ── ✅ NEW — Transfer Chain Trail visual: origin (superadmin) → ... → current branch ──
+// ── Transfer Chain Trail visual ──
 function TransferChainTrail({ chain, compact = false }: { chain: TransferHop[]; compact?: boolean }) {
   if (!chain || chain.length === 0) {
     return <span className="text-xs text-gray-400 italic">Chain info unavailable</span>;
@@ -291,50 +288,6 @@ const GstSummaryCard: React.FC<{ totals: GstTotals; title?: string; estimateNote
   </div>
 );
 
-// ── Pagination Bar ──────────────────────────────────────────
-
-function PaginationBar({ pagination, onPage, label = "records" }: {
-  pagination: PaginationState; onPage: (page: number) => void; label?: string;
-}) {
-  const { count, page, totalPages, previous, next } = pagination;
-  if (count <= PAGE_SIZE) return null;
-  const from = (page - 1) * PAGE_SIZE + 1;
-  const to = Math.min(page * PAGE_SIZE, count);
-  const pages: (number | "...")[] = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-  } else {
-    pages.push(1);
-    if (page > 3) pages.push("...");
-    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
-    if (page < totalPages - 2) pages.push("...");
-    pages.push(totalPages);
-  }
-  return (
-    <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
-      <span className="text-sm text-gray-700">Showing {from}–{to} of {count} {label}</span>
-      <div className="flex gap-2 flex-wrap justify-center">
-        <button onClick={() => onPage(page - 1)} disabled={!previous}
-          className={`px-3 py-1 rounded transition flex items-center gap-1 ${!previous ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
-          <FaChevronLeft size={9} /> Prev
-        </button>
-        {pages.map((p, i) => p === "..." ? (
-          <span key={`dots-${i}`} className="px-2 text-sm text-gray-400">…</span>
-        ) : (
-          <button key={p} onClick={() => onPage(p as number)}
-            className={`px-3 py-1 rounded transition ${p === page ? "bg-blue-500 text-white" : "bg-gray-200 hover:bg-gray-300"}`}>
-            {p}
-          </button>
-        ))}
-        <button onClick={() => onPage(page + 1)} disabled={!next}
-          className={`px-3 py-1 rounded transition flex items-center gap-1 ${!next ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
-          Next <FaChevronRight size={9} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Main Component ──────────────────────────────────────────
 
 export default function B2BStockReturn() {
@@ -412,7 +365,7 @@ export default function B2BStockReturn() {
       const count = res.data.count || 0;
       setReturnsPagination({
         count, next: res.data.next || null, previous: res.data.previous || null,
-        page, totalPages: Math.ceil(count / PAGE_SIZE),
+        page, totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
       });
     } catch {
       toast.error("Could not load B2B returns");
@@ -468,7 +421,7 @@ export default function B2BStockReturn() {
       const count = res.data.count || items.length;
       setModalPagination({
         count, next: res.data.next || null, previous: res.data.previous || null,
-        page, totalPages: Math.ceil(count / PAGE_SIZE),
+        page, totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
       });
     } catch (error) {
       console.error("Error loading eligible B2B items:", error);
@@ -660,6 +613,19 @@ export default function B2BStockReturn() {
     }
   };
 
+  const handleListPageChange = (p: number) => {
+    if (p >= 1 && p <= returnsPagination.totalPages) {
+      loadReturns(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handleModalPageChange = (p: number) => {
+    if (p >= 1 && p <= modalPagination.totalPages) {
+      loadModalItems(p);
+    }
+  };
+
   // ── Render: Detail view ──
   if (selectedReturn) {
     return (
@@ -831,7 +797,28 @@ export default function B2BStockReturn() {
           </table>
         </div>
 
-        <PaginationBar pagination={returnsPagination} onPage={loadReturns} label="returns" />
+        {/* ✅ Reusable Pagination (list) */}
+        {returnsPagination.count > 0 && (
+          <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
+            <span className="text-sm text-gray-700">
+              Showing{" "}
+              <span className="font-medium">
+                {(returnsPagination.page - 1) * PAGE_SIZE + 1}
+              </span>
+              –
+              <span className="font-medium">
+                {Math.min(returnsPagination.page * PAGE_SIZE, returnsPagination.count)}
+              </span>{" "}
+              of <span className="font-medium">{returnsPagination.count}</span> returns
+            </span>
+
+            <Pagination
+              currentPage={returnsPagination.page}
+              totalPages={returnsPagination.totalPages}
+              onPageChange={handleListPageChange}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -920,7 +907,6 @@ export default function B2BStockReturn() {
               </div>
             </div>
 
-            {/* ✅ Full transfer chain trail for the currently selected item */}
             {current.eligibleItemId && (
               <div className="mt-3 p-2.5 bg-blue-50/60 border border-blue-100 rounded-lg">
                 <div className="text-[11px] text-gray-400 mb-1.5 flex items-center gap-1">
@@ -1118,7 +1104,28 @@ export default function B2BStockReturn() {
                     </table>
                   </div>
 
-                  <PaginationBar pagination={modalPagination} onPage={loadModalItems} label="items" />
+                  {/* ✅ Reusable Pagination (modal items) */}
+                  {modalPagination.count > 0 && (
+                    <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
+                      <span className="text-sm text-gray-700">
+                        Showing{" "}
+                        <span className="font-medium">
+                          {(modalPagination.page - 1) * PAGE_SIZE + 1}
+                        </span>
+                        –
+                        <span className="font-medium">
+                          {Math.min(modalPagination.page * PAGE_SIZE, modalPagination.count)}
+                        </span>{" "}
+                        of <span className="font-medium">{modalPagination.count}</span> items
+                      </span>
+
+                      <Pagination
+                        currentPage={modalPagination.page}
+                        totalPages={modalPagination.totalPages}
+                        onPageChange={handleModalPageChange}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-center py-4 border-t bg-white flex-shrink-0">

@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api from "../../api/api";
 import { useAuthStore } from "../../store/authStore";
+import Pagination from "../../components/common/pagination";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -81,10 +82,9 @@ const termsColor = (t: string) => {
 const SalesProfitReport: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  
+
   const isSuperAdmin = user?.role === 'superadmin';
   const isEmployee = user?.role === 'employee';
-  // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
   const canViewAllBranches = isSuperAdmin || isEmployee;
 
   const [allItems, setAllItems] = useState<ProfitRecord[]>([]);
@@ -97,12 +97,11 @@ const SalesProfitReport: React.FC = () => {
   const [pageSize, setPageSize] = useState(15);
   const [selectedBill, setSelectedBill] = useState<ProfitRecord | null>(null);
 
-  // ✅ Branch state
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   const [selectedBranchName, setSelectedBranchName] = useState<string>("All Branches");
 
-  // ✅ Fetch branches - agar canViewAllBranches true hai toh
+  // ✅ Fetch branches
   useEffect(() => {
     if (canViewAllBranches) {
       api.get("branches/")
@@ -121,32 +120,24 @@ const SalesProfitReport: React.FC = () => {
     }
   }, [canViewAllBranches]);
 
-  // ✅ FIX: fetchData function with branch parameter
+  // ✅ fetchData with branch parameter
   const fetchData = async (branchId?: string) => {
     setLoading(true);
     try {
-      // ✅ Use provided branchId or current selectedBranchId
       const effectiveBranchId = branchId !== undefined ? branchId : selectedBranchId;
       const branchParam = effectiveBranchId ? `&branch_id=${effectiveBranchId}` : "";
       const dateFromParam = filters.dateFrom ? `&date_from=${filters.dateFrom}` : "";
       const dateToParam = filters.dateTo ? `&date_to=${filters.dateTo}` : "";
 
       const url = `sales-bill-wise-profit/?page=1&page_size=1000${branchParam}${dateFromParam}${dateToParam}`;
-      console.log("🔄 Fetching profit report with URL:", url);
 
       const res = await api.get(url);
-
-      console.log("API Full Response:", res.data);
-
-      // ✅ FIX: Check response structure
       const responseData = res.data?.results?.data || res.data?.data || [];
-      
+
       if (responseData.length > 0) {
         setAllItems(responseData);
         setFilteredItems(responseData);
-        console.log("✅ Records loaded:", responseData.length);
       } else {
-        console.warn("⚠️ No data found in response");
         setAllItems([]);
         setFilteredItems([]);
       }
@@ -203,7 +194,7 @@ const SalesProfitReport: React.FC = () => {
     totals.sales_net > 0 ? (totals.profit / totals.sales_net) * 100 : 0;
 
   // ── pagination ──
-  const totalPages = Math.ceil(filteredItems.length / pageSize);
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const paginatedItems = filteredItems.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize
@@ -225,7 +216,6 @@ const SalesProfitReport: React.FC = () => {
       Terms: item.payment_terms,
     }));
 
-    // Summary row
     rows.push({
       SR: "TOTAL",
       "Bill No": `${filteredItems.length} bills`,
@@ -242,17 +232,8 @@ const SalesProfitReport: React.FC = () => {
 
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [
-      { wch: 6 },
-      { wch: 20 },
-      { wch: 12 },
-      { wch: 28 },
-      { wch: 8 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 16 },
-      { wch: 14 },
-      { wch: 12 },
-      { wch: 10 },
+      { wch: 6 }, { wch: 20 }, { wch: 12 }, { wch: 28 }, { wch: 8 },
+      { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 10 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Profit Report");
@@ -261,6 +242,18 @@ const SalesProfitReport: React.FC = () => {
 
   const hasActiveFilters = () => !!(filters.dateFrom || filters.dateTo);
   const clearFilters = () => setFilters({ dateFrom: "", dateTo: "" });
+
+  const handlePageChange = (p: number) => {
+    if (p >= 1 && p <= totalPages) {
+      setCurrentPage(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(Number(e.target.value));
+    setCurrentPage(1);
+  };
 
   // ── render ──
   return (
@@ -282,7 +275,6 @@ const SalesProfitReport: React.FC = () => {
                 Sales Bill Wise Profit Report
               </h1>
               <p className="text-xs text-gray-400">
-                {/* ✅ Branch name show karo */}
                 {canViewAllBranches && selectedBranchId && (
                   <span className="font-semibold text-gray-600">{selectedBranchName} · </span>
                 )}
@@ -292,7 +284,6 @@ const SalesProfitReport: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
-            {/* ✅ Branch Filter - Superadmin + Employee */}
             {canViewAllBranches && (
               <div className="flex items-center gap-2">
                 <label className="text-xs font-medium text-gray-500 whitespace-nowrap flex items-center gap-1">
@@ -366,9 +357,7 @@ const SalesProfitReport: React.FC = () => {
 
         {/* ── Print header ── */}
         <div className="hidden print:block mb-6 text-center border-b-2 border-gray-800 pb-4">
-          <h1 className="text-2xl font-bold">SALES BILL WISE PROFIT REPORT 
-             
-          </h1>
+          <h1 className="text-2xl font-bold">SALES BILL WISE PROFIT REPORT</h1>
           <p className="text-sm text-gray-600 mt-1">
             Generated:{" "}
             {new Date().toLocaleDateString("en-IN", {
@@ -637,19 +626,22 @@ const SalesProfitReport: React.FC = () => {
                 </table>
               </div>
 
-              {/* ── Pagination ── */}
-              {totalPages > 1 && (
+              {/* ✅ Reusable Pagination */}
+              {filteredItems.length > 0 && (
                 <div className="no-print flex flex-col sm:flex-row justify-between items-center gap-4 px-4 py-3 border-t border-gray-200 bg-gray-50/60">
                   <div className="flex items-center gap-3 text-sm text-gray-600">
-                    Showing {(currentPage - 1) * pageSize + 1}–
-                    {Math.min(currentPage * pageSize, filteredItems.length)} of{" "}
-                    {filteredItems.length}
+                    Showing{" "}
+                    <span className="font-medium">
+                      {(currentPage - 1) * pageSize + 1}
+                    </span>
+                    –
+                    <span className="font-medium">
+                      {Math.min(currentPage * pageSize, filteredItems.length)}
+                    </span>{" "}
+                    of <span className="font-medium">{filteredItems.length}</span>
                     <select
                       value={pageSize}
-                      onChange={e => {
-                        setPageSize(Number(e.target.value));
-                        setCurrentPage(1);
-                      }}
+                      onChange={handlePageSizeChange}
                       className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-blue-400"
                     >
                       {[10, 15, 25, 50, 100].map(n => (
@@ -660,53 +652,11 @@ const SalesProfitReport: React.FC = () => {
                     </select>
                   </div>
 
-                  <div className="flex gap-1.5 flex-wrap justify-center">
-                    <button
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(p => p - 1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${
-                        currentPage === 1
-                          ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                          : "bg-slate-700 text-white hover:bg-slate-800"
-                      }`}
-                    >
-                      ← Prev
-                    </button>
-                    {(() => {
-                      const max = 5;
-                      let start = Math.max(1, currentPage - 2);
-                      let end = Math.min(totalPages, start + max - 1);
-                      if (end - start + 1 < max)
-                        start = Math.max(1, end - max + 1);
-                      return Array.from(
-                        { length: end - start + 1 },
-                        (_, i) => start + i
-                      ).map(p => (
-                        <button
-                          key={p}
-                          onClick={() => setCurrentPage(p)}
-                          className={`px-3 py-1.5 rounded text-sm transition ${
-                            currentPage === p
-                              ? "bg-blue-600 text-white"
-                              : "bg-gray-200 hover:bg-gray-300"
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      ));
-                    })()}
-                    <button
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(p => p + 1)}
-                      className={`px-3 py-1.5 rounded text-sm transition ${
-                        currentPage === totalPages
-                          ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                          : "bg-slate-700 text-white hover:bg-slate-800"
-                      }`}
-                    >
-                      Next →
-                    </button>
-                  </div>
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={handlePageChange}
+                  />
                 </div>
               )}
             </>
@@ -718,7 +668,6 @@ const SalesProfitReport: React.FC = () => {
       {selectedBill && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start justify-center pt-12 z-50 no-print px-4 pb-8 overflow-y-auto">
           <div className="bg-white w-full max-w-6xl rounded-2xl shadow-2xl overflow-hidden mt-4">
-            {/* Modal header */}
             <div className="flex justify-between items-start px-6 py-4 bg-slate-700 text-white">
               <div>
                 <h2 className="font-bold text-base flex items-center gap-2">
@@ -729,7 +678,6 @@ const SalesProfitReport: React.FC = () => {
                   {selectedBill.payment_terms}
                 </p>
               </div>
-              {/* Bill-level profit summary */}
               <div className="flex items-center gap-6 mr-8">
                 <div className="text-right">
                   <p className="text-[10px] text-slate-400 uppercase">
@@ -773,7 +721,6 @@ const SalesProfitReport: React.FC = () => {
               </button>
             </div>
 
-            {/* Modal table */}
             <div className="overflow-x-auto max-h-[55vh]">
               <table className="w-full text-sm">
                 <thead className="bg-gray-100 sticky top-0 z-10">
@@ -864,14 +811,10 @@ const SalesProfitReport: React.FC = () => {
                   )}
                 </tbody>
 
-                {/* Modal footer totals */}
                 {selectedBill.line_items.length > 0 && (
                   <tfoot>
                     <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-sm">
-                      <td
-                        colSpan={8}
-                        className="px-3 py-2.5 text-gray-700"
-                      >
+                      <td colSpan={8} className="px-3 py-2.5 text-gray-700">
                         TOTAL
                       </td>
                       <td className="px-3 py-2.5 text-right text-blue-700">

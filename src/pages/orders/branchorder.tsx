@@ -3,11 +3,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import Swal from "sweetalert2";
 import DataTable from "../../components/common/DataTable";
-import { FaEye, FaSearch, FaTruck, FaBox, FaClock, FaBuilding } from "react-icons/fa";
+import { FaEye, FaSearch, FaBuilding } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { useAuthStore } from "../../store/authStore";
-import Pagination from "../../components/common/pagination";
 
 interface Order {
   id: number;
@@ -44,7 +43,7 @@ interface Branch {
 const BranchOrders: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  
+
   const isSuperAdmin = user?.role === 'superadmin';
   const isEmployee = user?.role === 'employee';
   // ✅ Employee ko bhi branch filter dikhega (same as superadmin)
@@ -98,15 +97,15 @@ const BranchOrders: React.FC = () => {
   }, []); // Empty dependency array - only runs once
 
   // ✅ Branch change handler
+  // NOTE: fetchOrderStats/fetchOrders ko yahan call NAHI karenge.
+  // selectedBranchId niche wale useEffect me dependency hai,
+  // isliye state update hone ke baad automatically fetch hoga (stale data avoid).
   const handleBranchChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
     const name = branches.find(b => String(b.id) === val)?.branch_name || "My Branch";
     setSelectedBranchId(val);
     setSelectedBranchName(name);
-    // Reset page when branch changes
     setPagination(prev => ({ ...prev, page: 1 }));
-    fetchOrderStats();
-    fetchOrders();
   };
 
   // Handle filter changes (except search term)
@@ -115,43 +114,42 @@ const BranchOrders: React.FC = () => {
       isInitialMount.current = false;
       return;
     }
-    
+
     // Reset page when filter changes
     setPagination(prev => ({ ...prev, page: 1 }));
+  }, [activeFilter]); // Only depend on activeFilter
+
+  // ✅ Jab bhi filter / page / page_size / branch badle → fetch
+  // (isInitialMount guard initial mount pe double fetch rokta hai)
+  useEffect(() => {
+    if (isInitialMount.current) return;
     fetchOrderStats();
     fetchOrders();
-  }, [activeFilter]); // Only depend on activeFilter, not searchTerm
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter, pagination.page, pagination.page_size, selectedBranchId]);
 
   // Handle search with debounce
   useEffect(() => {
     // Skip on initial mount
     if (isInitialMount.current) return;
-    
+
     // Clear previous timeout
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
-    
+
     // Set new timeout
     searchTimeoutRef.current = window.setTimeout(() => {
       setPagination(prev => ({ ...prev, page: 1 }));
       fetchOrders();
     }, 500);
-    
+
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
       }
     };
   }, [searchTerm]);
-
-  // Handle pagination changes
-  useEffect(() => {
-    // Skip on initial mount
-    if (isInitialMount.current) return;
-    
-    fetchOrders();
-  }, [pagination.page]);
 
   const fetchOrderStats = async () => {
     try {
@@ -169,28 +167,28 @@ const BranchOrders: React.FC = () => {
     setLoading(true);
     try {
       let statusParam = activeFilter === "all" ? "all" : activeFilter.toLowerCase();
-      
+
       const statusMapping: Record<string, string> = {
         "packaging": "processing",
         "out for delivery": "shipped",
         "returned": "refunded"
       };
-      
+
       if (statusParam in statusMapping) {
         statusParam = statusMapping[statusParam];
       }
-      
+
       const params: any = {
         status: statusParam,
         page: pagination.page,
         page_size: pagination.page_size
       };
-      
+
       if (searchTerm) params.search = searchTerm;
       if (selectedBranchId) params.branch_id = selectedBranchId;
-      
+
       const response = await api.get('/branch/orders/', { params });
-      
+
       if (response.data.success) {
         setOrders(response.data.data.orders);
         setPagination(prev => ({
@@ -243,7 +241,7 @@ const BranchOrders: React.FC = () => {
 
   const handleFilterChange = (filter: string) => {
     setActiveFilter(filter);
-    setPagination({ ...pagination, page: 1 });
+    setPagination(prev => ({ ...prev, page: 1 }));
   };
 
   // Handle search input change without losing focus
@@ -272,7 +270,7 @@ const BranchOrders: React.FC = () => {
             Manage and track all orders from your branch
           </p>
         </div>
-        
+
         {/* ✅ Branch Filter - Superadmin + Employee */}
         {canViewAllBranches && (
           <div className="flex items-center gap-2">
@@ -343,7 +341,7 @@ const BranchOrders: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
           <h2 className="text-lg font-semibold text-gray-700">Order List</h2>
 
-          {/* Search Bar - Fixed */}
+          {/* Search Bar */}
           <div className="relative w-full md:w-80">
             <div className="absolute inset-y-0 left-0 flex items-center pl-3">
               <FaSearch className="text-gray-400" />
@@ -435,10 +433,18 @@ const BranchOrders: React.FC = () => {
           </button>
         </div>
 
-        {/* Data Table */}
+        {/* Data Table — server-side pagination mode */}
         <DataTable
           title=""
           data={orders}
+          loading={loading}
+          totalItems={pagination.total}
+          currentPage={pagination.page}
+          pageSize={pagination.page_size}
+          onPageChange={(page) => setPagination(prev => ({ ...prev, page }))}
+          onPageSizeChange={(size) =>
+            setPagination(prev => ({ ...prev, page_size: size, page: 1 }))
+          }
           columns={[
             { key: "order_number", label: "Order ID", render: (item: Order) => (
               <span className="font-medium text-gray-900">{item.order_number}</span>
@@ -466,8 +472,8 @@ const BranchOrders: React.FC = () => {
               </span>
             )},
             { key: "action", label: "Action", render: (item: Order) => (
-              <button 
-                onClick={() => handleView(item)} 
+              <button
+                onClick={() => handleView(item)}
                 className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
                 title="View Order Details"
               >
@@ -477,26 +483,7 @@ const BranchOrders: React.FC = () => {
           ]}
         />
 
-        {/* Pagination */}
-        {pagination.total_pages > 1 && (
-          <div className="flex justify-center items-center gap-2 mt-6">
-            <button
-              onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
-              disabled={pagination.page === 1}
-              className="px-4 py-2 border rounded-md disabled:opacity-50 hover:bg-gray-50"
-            >
-              Previous
-            </button>
-            <span className="px-4 py-2">Page {pagination.page} of {pagination.total_pages}</span>
-            <button
-              onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
-              disabled={pagination.page === pagination.total_pages}
-              className="px-4 py-2 border rounded-md disabled:opacity-50 hover:bg-gray-50"
-            >
-              Next
-            </button>
-          </div>
-        )}
+        {/* ❌ Manual pagination block removed — DataTable khud render karega */}
       </div>
     </div>
   );

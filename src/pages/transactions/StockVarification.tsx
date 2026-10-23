@@ -1,23 +1,15 @@
 // src/pages/branch/StockVerification.tsx
-// Stock Verification Page — Branch users ke liye incoming transfers verify karne ki page
-// Roles: branch, vendor, branch_customer, branch_agent, branch_both
-// ✅ UPDATED — GST Summary card added (Transfer create karte waqt jo GST summary dikhti hai,
-//    ab wahi summary yaha verify karte waqt bhi dikhegi — chahe Manual transfer ho ya
-//    Order Tracking se aaya hua transfer ho, dono me same tarike se dikhega)
-
 import { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   FaCheckCircle,
-  FaBox,
   FaArrowLeft,
   FaWarehouse,
   FaShippingFast,
   FaSearch,
 } from "react-icons/fa";
 import {
-  MdClose,
   MdVerified,
   MdPendingActions,
   MdOutlineInventory,
@@ -26,6 +18,7 @@ import { HiOutlineDocumentText } from "react-icons/hi";
 import { BsCheckAll } from "react-icons/bs";
 import api from "../../api/api";
 import { toast } from "react-toastify";
+import Pagination from "../../components/common/pagination";
 
 // ── Helpers ───────────────────────────────────────────────
 const safeNumber = (val: any): number => {
@@ -69,7 +62,6 @@ interface TransferItemDetail {
   branch_price: number;
   sales_price: number;
   mrp: number;
-  // ✅ GST breakup fields
   tax_percent?: string;
   basic_amount?: number;
   tax_amount?: number;
@@ -101,8 +93,6 @@ interface TransferDetail {
   items: TransferItemDetail[];
 }
 
-
-
 // ════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════
@@ -125,6 +115,7 @@ export default function StockVerification() {
     next: null as string | null,
     previous: null as string | null,
     page: 1,
+    totalPages: 1,
   });
 
   useEffect(() => {
@@ -139,11 +130,13 @@ export default function StockVerification() {
       );
       if (res.data.results?.success) {
         setTransfers(res.data.results.data || []);
+        const count = res.data.count || 0;
         setPagination({
-          count: res.data.count || 0,
+          count,
           next: res.data.next || null,
           previous: res.data.previous || null,
           page,
+          totalPages: Math.max(1, Math.ceil(count / 15)),
         });
       }
     } catch {
@@ -164,39 +157,41 @@ export default function StockVerification() {
     }
     setDetailLoading(false);
   }
-// ── CreditorPopup Component ──────────────────────────────────
-const CreditorPopup = () =>
-  showCreditorPopup ? (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4">
-        <h3 className="text-lg font-bold text-gray-800 mb-2">Account Required</h3>
-        <p className="text-sm text-gray-600 mb-5">
-          Before verifying stock, you need to create a "Sundry Creditor(Main)" account.
-          Click OK to go to the account creation page.
-        </p>
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={() => setShowCreditorPopup(false)}
-            className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => {
-              setShowCreditorPopup(false);
-              navigate("/accounts", {
-                state: { presetGroup: "Sundry Creditor(Main)" },
-              });
-            }}
-            className="px-4 py-2 rounded-lg text-sm text-white bg-emerald-600 hover:bg-emerald-700 font-semibold"
-          >
-            OK, Create Account
-          </button>
+
+  // ── CreditorPopup Component ──────────────────────────────────
+  const CreditorPopup = () =>
+    showCreditorPopup ? (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4">
+          <h3 className="text-lg font-bold text-gray-800 mb-2">Account Required</h3>
+          <p className="text-sm text-gray-600 mb-5">
+            Before verifying stock, you need to create a "Sundry Creditor(Main)" account.
+            Click OK to go to the account creation page.
+          </p>
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setShowCreditorPopup(false)}
+              className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                setShowCreditorPopup(false);
+                navigate("/accounts", {
+                  state: { presetGroup: "Sundry Creditor(Main)" },
+                });
+              }}
+              className="px-4 py-2 rounded-lg text-sm text-white bg-emerald-600 hover:bg-emerald-700 font-semibold"
+            >
+              OK, Create Account
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  ) : null;
-async function verifySingleItem(transferId: number, itemId: number) {
+    ) : null;
+
+  async function verifySingleItem(transferId: number, itemId: number) {
     setVerifyingItem(itemId);
     try {
       const res = await api.post(
@@ -212,7 +207,7 @@ async function verifySingleItem(transferId: number, itemId: number) {
       }
     } catch (e: any) {
       if (e.response?.data?.error_code === 'NO_SUNDRY_CREDITOR_ACCOUNT') {
-        setShowCreditorPopup(true);   // ✅ NEW
+        setShowCreditorPopup(true);
       } else {
         toast.error(e.response?.data?.message || "Error verifying item");
       }
@@ -220,7 +215,7 @@ async function verifySingleItem(transferId: number, itemId: number) {
     setVerifyingItem(null);
   }
 
-async function verifyAllItems(transferId: number) {
+  async function verifyAllItems(transferId: number) {
     if (!confirm("verify all items?.")) return;
     setVerifyingAll(true);
     try {
@@ -237,7 +232,7 @@ async function verifyAllItems(transferId: number) {
       }
     } catch (e: any) {
       if (e.response?.data?.error_code === 'NO_SUNDRY_CREDITOR_ACCOUNT') {
-        setShowCreditorPopup(true);   // ✅ NEW
+        setShowCreditorPopup(true);
       } else {
         toast.error(e.response?.data?.message || "Error verifying items");
       }
@@ -245,7 +240,7 @@ async function verifyAllItems(transferId: number) {
     setVerifyingAll(false);
   }
 
-  // Filtered transfers
+  // Filtered transfers (client-side search — same as original)
   const filteredTransfers = transfers.filter((t) => {
     const q = search.toLowerCase();
     return (
@@ -254,31 +249,38 @@ async function verifyAllItems(transferId: number) {
     );
   });
 
+  const handlePageChange = (p: number) => {
+    if (p >= 1 && p <= pagination.totalPages) {
+      loadTransfers(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   // ── Detail View ──────────────────────────────────────────
-if (selectedTransfer) {
-  return (
-    <>
-      <CreditorPopup />
-      <DetailView
-        transferId={selectedTransfer.id}
-        detail={selectedTransfer.detail}
-        loading={detailLoading}
-        websiteDisplay={websiteDisplay}
-        onWebsiteDisplayChange={setWebsiteDisplay}
-        verifyingItem={verifyingItem}
-        verifyingAll={verifyingAll}
-        onVerifyItem={verifySingleItem}
-        onVerifyAll={verifyAllItems}
-        onBack={() => setSelectedTransfer(null)}
-      />
-    </>
-  );
-}
+  if (selectedTransfer) {
+    return (
+      <>
+        <CreditorPopup />
+        <DetailView
+          transferId={selectedTransfer.id}
+          detail={selectedTransfer.detail}
+          loading={detailLoading}
+          websiteDisplay={websiteDisplay}
+          onWebsiteDisplayChange={setWebsiteDisplay}
+          verifyingItem={verifyingItem}
+          verifyingAll={verifyingAll}
+          onVerifyItem={verifySingleItem}
+          onVerifyAll={verifyAllItems}
+          onBack={() => setSelectedTransfer(null)}
+        />
+      </>
+    );
+  }
 
   // ── List View ────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50">
-      <CreditorPopup/>
+      <CreditorPopup />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -290,7 +292,6 @@ if (selectedTransfer) {
               <h1 className="text-xl font-bold text-gray-900">
                 Stock Verification
               </h1>
-
             </div>
           </div>
 
@@ -324,7 +325,6 @@ if (selectedTransfer) {
             />
           </div>
         </div>
-        
 
         {/* Transfers List */}
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -446,31 +446,26 @@ if (selectedTransfer) {
             </div>
           )}
 
-          {/* Pagination */}
-          {pagination.count > 15 && (
-            <div className="px-5 py-4 border-t bg-gray-50 flex items-center justify-between">
-              <p className="text-xs text-gray-500">
-                Total: <b>{pagination.count}</b>
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => loadTransfers(pagination.page - 1)}
-                  disabled={!pagination.previous}
-                  className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100"
-                >
-                  ← Prev
-                </button>
-                <span className="text-xs px-2">
-                  Page <b>{pagination.page}</b>
+          {/* ✅ Reusable Pagination */}
+          {pagination.count > 0 && (
+            <div className="px-5 py-4 border-t bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3">
+              <p className="text-sm text-gray-600">
+                Showing{" "}
+                <span className="font-medium">
+                  {(pagination.page - 1) * 15 + 1}
                 </span>
-                <button
-                  onClick={() => loadTransfers(pagination.page + 1)}
-                  disabled={!pagination.next}
-                  className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-100"
-                >
-                  Next →
-                </button>
-              </div>
+                –
+                <span className="font-medium">
+                  {Math.min(pagination.page * 15, pagination.count)}
+                </span>{" "}
+                of <span className="font-medium">{pagination.count}</span> transfers
+              </p>
+
+              <Pagination
+                currentPage={pagination.page}
+                totalPages={pagination.totalPages}
+                onPageChange={handlePageChange}
+              />
             </div>
           )}
         </div>
@@ -479,27 +474,26 @@ if (selectedTransfer) {
   );
 }
 
-
 // ════════════════════════════════════════════════════════════
 // DETAIL VIEW COMPONENT
 // ════════════════════════════════════════════════════════════
- 
-// ── Per-item helpers (Rate × Qty, Discount, Amount after discount) ──
+
+// ── Per-item helpers ──
 type VerifyItem = TransferItemDetail & {
   discount_percent?: number | string;
   discount_amount?: number | string;
 };
- 
+
 const getItemGross = (i: VerifyItem): number => safeNumber(i.quantity) * safeNumber(i.rate);
 const getItemDiscountPercent = (i: VerifyItem): number => safeNumber(i.discount_percent);
 const getItemDiscount = (i: VerifyItem): number => {
   const stored = safeNumber(i.discount_amount);
   if (stored > 0) return stored;
-  const pct = getItemDiscountPercent(i);        // fallback agar sirf % aaya ho
+  const pct = getItemDiscountPercent(i);
   return pct > 0 ? (getItemGross(i) * pct) / 100 : 0;
 };
 const getItemAmount = (i: VerifyItem): number => getItemGross(i) - getItemDiscount(i);
- 
+
 interface DetailViewProps {
   transferId: number;
   detail: TransferDetail | null;
@@ -512,7 +506,7 @@ interface DetailViewProps {
   onVerifyAll: (transferId: number) => void;
   onBack: () => void;
 }
- 
+
 function DetailView({
   transferId,
   detail,
@@ -525,7 +519,6 @@ function DetailView({
   onVerifyAll,
   onBack,
 }: DetailViewProps) {
-  // ✅ Totals — amount, discount aur GST (backend ne discounted price par GST save kiya hai)
   const gstTotals = useMemo(() => {
     const items = (detail?.items || []) as VerifyItem[];
     const gross = items.reduce((a, b) => a + getItemGross(b), 0);
@@ -542,12 +535,12 @@ function DetailView({
       net: items.reduce((a, b) => a + safeNumber(b.net_amount), 0),
     };
   }, [detail]);
- 
+
   const hasGst = (detail?.items || []).some(
     (i) => safeNumber(i.basic_amount) > 0
   );
   const hasDiscount = gstTotals.discount > 0;
- 
+
   if (loading || !detail) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -558,11 +551,11 @@ function DetailView({
       </div>
     );
   }
- 
+
   const pendingItems = detail.items.filter((i) => !i.is_stock_updated);
   const verifiedItems = detail.items.filter((i) => i.is_stock_updated);
   const allVerified = pendingItems.length === 0;
- 
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-4">
@@ -587,7 +580,7 @@ function DetailView({
               </span>
             )}
           </div>
- 
+
           {/* Branch Info Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
@@ -624,7 +617,7 @@ function DetailView({
                 </div>
               </div>
             </div>
- 
+
             <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
@@ -663,7 +656,7 @@ function DetailView({
             </div>
           </div>
         </div>
- 
+
         {/* Website Display Toggle + Verify All */}
         {!allVerified && (
           <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-wrap items-center gap-4 justify-between">
@@ -686,11 +679,10 @@ function DetailView({
                   <div className="text-sm font-semibold text-gray-700">
                     Website Display
                   </div>
- 
                 </div>
               </label>
             </div>
- 
+
             <button
               onClick={() => onVerifyAll(transferId)}
               disabled={verifyingAll || pendingItems.length === 0}
@@ -701,7 +693,7 @@ function DetailView({
             </button>
           </div>
         )}
- 
+
         {/* Items Table */}
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <div className="px-5 py-3.5 border-b bg-gray-50 flex items-center gap-2">
@@ -718,45 +710,22 @@ function DetailView({
               </span>
             )}
           </div>
- 
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[1100px]">
               <thead className="bg-gradient-to-r from-emerald-700 to-emerald-500 text-white">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs border-r border-emerald-500">
-                    #
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs border-r border-emerald-500">
-                    Item Name
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">
-                    Variant
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">
-                    Barcode
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">
-                    HSN
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">
-                    GST
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">
-                    Qty
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs border-r border-emerald-500">
-                   purchase 
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">
-                    Disc %
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs border-r border-emerald-500">
-                    Amount (₹)
-                  </th>
- 
-                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">
-                    Status
-                  </th>
+                  <th className="px-4 py-3 text-left text-xs border-r border-emerald-500">#</th>
+                  <th className="px-4 py-3 text-left text-xs border-r border-emerald-500">Item Name</th>
+                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">Variant</th>
+                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">Barcode</th>
+                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">HSN</th>
+                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">GST</th>
+                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">Qty</th>
+                  <th className="px-4 py-3 text-right text-xs border-r border-emerald-500">purchase</th>
+                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">Disc %</th>
+                  <th className="px-4 py-3 text-right text-xs border-r border-emerald-500">Amount (₹)</th>
+                  <th className="px-4 py-3 text-center text-xs border-r border-emerald-500">Status</th>
                   <th className="px-4 py-3 text-center text-xs">Action</th>
                 </tr>
               </thead>
@@ -767,128 +736,118 @@ function DetailView({
                   const discAmt = getItemDiscount(vItem);
                   const rowHasDiscount = discAmt > 0;
                   return (
-                  <motion.tr
-                    key={item.id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: idx * 0.02 }}
-                    className={`border-b transition-colors
-                      ${item.is_stock_updated
-                        ? "bg-emerald-50/40"
-                        : idx % 2 === 0
-                        ? "bg-white hover:bg-emerald-50/20"
-                        : "bg-gray-50/40 hover:bg-emerald-50/20"
-                      }`}
-                  >
-                    <td className="px-4 py-3 text-gray-400 text-xs border-r border-gray-200">
-                      {idx + 1}
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-gray-800 border-r border-gray-200">
-                      {item.from_item_name}
-                    </td>
-                    <td className="px-4 py-3 text-center border-r border-gray-200">
-                      <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg">
-                        {item.from_variant_info || "Default"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center font-mono text-xs text-gray-500 border-r border-gray-200">
-                      {item.from_barcode || "—"}
-                    </td>
-                    <td className="px-4 py-3 text-center font-mono text-xs text-gray-500 border-r border-gray-200">
-                      {item.hsnCode || "—"}
-                    </td>
-                    <td className="px-4 py-3 text-center text-xs border-r border-gray-200">
-                      <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded text-xs">
-                        {item.taxSlab || "0%"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center border-r border-gray-200">
-                      <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs font-bold">
-                        {item.quantity}
-                      </span>
-                    </td>
- 
-                    <td className="px-4 py-3 text-right text-xs font-mono font-semibold text-indigo-700 border-r border-gray-200">
-                      ₹{item.branch_price?.toFixed(2)}
-                    </td>
-                    <td className="px-4 py-3 text-center border-r border-gray-200">
-                      {rowHasDiscount ? (
-                        <div className="leading-tight">
-                          <span className="inline-block bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-lg text-xs font-bold">
-                            {discPct > 0 ? `${Number(discPct.toFixed(2))}%` : "—"}
-                          </span>
-                          <div className="text-[11px] text-emerald-600 mt-0.5">
-                            − ₹{discAmt.toFixed(2)}
+                    <motion.tr
+                      key={item.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: idx * 0.02 }}
+                      className={`border-b transition-colors
+                        ${item.is_stock_updated
+                          ? "bg-emerald-50/40"
+                          : idx % 2 === 0
+                          ? "bg-white hover:bg-emerald-50/20"
+                          : "bg-gray-50/40 hover:bg-emerald-50/20"
+                        }`}
+                    >
+                      <td className="px-4 py-3 text-gray-400 text-xs border-r border-gray-200">{idx + 1}</td>
+                      <td className="px-4 py-3 font-semibold text-gray-800 border-r border-gray-200">{item.from_item_name}</td>
+                      <td className="px-4 py-3 text-center border-r border-gray-200">
+                        <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg">
+                          {item.from_variant_info || "Default"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center font-mono text-xs text-gray-500 border-r border-gray-200">
+                        {item.from_barcode || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-center font-mono text-xs text-gray-500 border-r border-gray-200">
+                        {item.hsnCode || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-center text-xs border-r border-gray-200">
+                        <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded text-xs">
+                          {item.taxSlab || "0%"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center border-r border-gray-200">
+                        <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs font-bold">
+                          {item.quantity}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs font-mono font-semibold text-indigo-700 border-r border-gray-200">
+                        ₹{item.branch_price?.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3 text-center border-r border-gray-200">
+                        {rowHasDiscount ? (
+                          <div className="leading-tight">
+                            <span className="inline-block bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-lg text-xs font-bold">
+                              {discPct > 0 ? `${Number(discPct.toFixed(2))}%` : "—"}
+                            </span>
+                            <div className="text-[11px] text-emerald-600 mt-0.5">
+                              − ₹{discAmt.toFixed(2)}
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <span className="text-gray-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right text-xs font-mono font-semibold text-gray-800 border-r border-gray-200">
-                      {rowHasDiscount && (
-                        <div className="text-[11px] text-gray-400 line-through font-normal">
-                          ₹{getItemGross(vItem).toFixed(2)}
-                        </div>
-                      )}
-                      ₹{getItemAmount(vItem).toFixed(2)}
-                    </td>
-                    <td className="px-4 py-3 text-center border-r border-gray-200">
-                      {item.is_stock_updated ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-emerald-600 font-semibold bg-emerald-100 px-2 py-1 rounded-lg">
-                          <FaCheckCircle size={10} /> Verified
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-1 rounded-lg">
-                          <MdPendingActions size={11} /> Pending
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {item.is_stock_updated ? (
-                        <span className="text-gray-400 text-xs">✓ Done</span>
-                      ) : (
-                        <button
-                          onClick={() => onVerifyItem(transferId, item.id)}
-                          disabled={
-                            verifyingItem === item.id || verifyingAll
-                          }
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-emerald-500 disabled:opacity-40 hover:shadow-md transition-all mx-auto"
-                        >
-                          {verifyingItem === item.id ? (
-                            <>
-                              <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
-                              ...
-                            </>
-                          ) : (
-                            <>
-                              <FaCheckCircle size={10} /> Verify
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </td>
-                  </motion.tr>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs font-mono font-semibold text-gray-800 border-r border-gray-200">
+                        {rowHasDiscount && (
+                          <div className="text-[11px] text-gray-400 line-through font-normal">
+                            ₹{getItemGross(vItem).toFixed(2)}
+                          </div>
+                        )}
+                        ₹{getItemAmount(vItem).toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3 text-center border-r border-gray-200">
+                        {item.is_stock_updated ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-emerald-600 font-semibold bg-emerald-100 px-2 py-1 rounded-lg">
+                            <FaCheckCircle size={10} /> Verified
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-1 rounded-lg">
+                            <MdPendingActions size={11} /> Pending
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {item.is_stock_updated ? (
+                          <span className="text-gray-400 text-xs">✓ Done</span>
+                        ) : (
+                          <button
+                            onClick={() => onVerifyItem(transferId, item.id)}
+                            disabled={verifyingItem === item.id || verifyingAll}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-emerald-500 disabled:opacity-40 hover:shadow-md transition-all mx-auto"
+                          >
+                            {verifyingItem === item.id ? (
+                              <>
+                                <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                                ...
+                              </>
+                            ) : (
+                              <>
+                                <FaCheckCircle size={10} /> Verify
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </td>
+                    </motion.tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
- 
+
           {/* Summary Footer */}
           <div className="px-5 py-4 border-t bg-gray-50 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-4 text-sm">
               <span className="text-gray-500">
-                Total Items:{" "}
-                <b className="text-gray-700">{detail.items.length}</b>
+                Total Items: <b className="text-gray-700">{detail.items.length}</b>
               </span>
               <span className="text-emerald-600">
-                Verified:{" "}
-                <b>{verifiedItems.length}</b>
+                Verified: <b>{verifiedItems.length}</b>
               </span>
               <span className="text-amber-600">
-                Pending:{" "}
-                <b>{pendingItems.length}</b>
+                Pending: <b>{pendingItems.length}</b>
               </span>
             </div>
             {allVerified && (
@@ -899,8 +858,8 @@ function DetailView({
             )}
           </div>
         </div>
- 
-        {/* ✅ GST Summary card — discount minus hone ke baad ka poora breakup */}
+
+        {/* GST Summary card */}
         {(hasGst || hasDiscount) && (
           <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl shadow-sm p-6 border border-emerald-200">
             <div className="flex items-center gap-2 mb-4">

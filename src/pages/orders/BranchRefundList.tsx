@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import api from "../../api/api";
+import Pagination from "../../components/common/pagination";
 
 interface RefundItem {
   id: number;
@@ -73,42 +74,6 @@ const StatCard = ({
   </div>
 );
 
-const Pagination = ({
-  pagination, onPage, onSize,
-}: { pagination: PaginationInfo; onPage: (p: number) => void; onSize: (s: number) => void }) => {
-  const { count, total_pages, current_page, page_size, has_next, has_previous } = pagination;
-  if (count === 0) return null;
-
-  const start = (current_page - 1) * page_size + 1;
-  const end = Math.min(current_page * page_size, count);
-  const from = Math.max(1, Math.min(current_page - 2, total_pages - 4));
-  const to = Math.min(total_pages, from + 4);
-  const pages: number[] = [];
-  for (let i = from; i <= to; i++) pages.push(i);
-
-  return (
-    <div className="flex flex-col md:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-gray-200 text-sm">
-      <div className="flex items-center gap-3 text-gray-600">
-        <span>Showing {start}–{end} of {count}</span>
-        <select value={page_size} onChange={(e) => onSize(Number(e.target.value))}
-          className="border border-gray-300 rounded px-2 py-1 text-sm">
-          {PAGE_SIZES.map((s) => <option key={s} value={s}>{s} / page</option>)}
-        </select>
-      </div>
-      <div className="flex items-center gap-1">
-        <button disabled={!has_previous} onClick={() => onPage(current_page - 1)}
-          className="px-3 py-1 rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50">Prev</button>
-        {pages.map((p) => (
-          <button key={p} onClick={() => onPage(p)}
-            className={`px-3 py-1 rounded border ${p === current_page ? "bg-blue-600 text-white border-blue-600" : "border-gray-300 hover:bg-gray-50"}`}>{p}</button>
-        ))}
-        <button disabled={!has_next} onClick={() => onPage(current_page + 1)}
-          className="px-3 py-1 rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50">Next</button>
-      </div>
-    </div>
-  );
-};
-
 const BranchRefundList: React.FC = () => {
   const navigate = useNavigate();
   const [refunds, setRefunds] = useState<RefundItem[]>([]);
@@ -122,6 +87,7 @@ const BranchRefundList: React.FC = () => {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
 
+  // Search debounce
   useEffect(() => {
     const t = setTimeout(() => {
       setSearch(searchInput.trim());
@@ -130,6 +96,7 @@ const BranchRefundList: React.FC = () => {
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  // Fetch on page / pageSize / filters / search change
   useEffect(() => {
     fetchRefunds();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -271,9 +238,38 @@ const BranchRefundList: React.FC = () => {
           </div>
         )}
 
-        {pagination && (
-          <Pagination pagination={pagination} onPage={setPage}
-            onSize={(s) => { setPageSize(s); setPage(1); }} />
+        {/* ✅ Reusable Pagination (server-side) */}
+        {pagination && pagination.count > 0 && (
+          <div className="flex flex-col md:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-gray-200 text-sm">
+            <div className="flex items-center gap-3 text-gray-600">
+              <span>
+                Showing{" "}
+                <span className="font-medium">
+                  {(pagination.current_page - 1) * pagination.page_size + 1}
+                </span>{" "}
+                to{" "}
+                <span className="font-medium">
+                  {Math.min(pagination.current_page * pagination.page_size, pagination.count)}
+                </span>{" "}
+                of <span className="font-medium">{pagination.count}</span>
+              </span>
+              <select
+                value={pagination.page_size}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                className="border border-gray-300 rounded px-2 py-1 text-sm"
+              >
+                {PAGE_SIZES.map((s) => (
+                  <option key={s} value={s}>{s} / page</option>
+                ))}
+              </select>
+            </div>
+
+            <Pagination
+              currentPage={pagination.current_page}
+              totalPages={Math.max(1, pagination.total_pages)}
+              onPageChange={setPage}
+            />
+          </div>
         )}
       </div>
     </div>

@@ -7,17 +7,18 @@ import {
   FaSearch, FaTrash, FaCheckCircle, FaBox, FaPlus,
   FaMinus, FaArrowLeft, FaListAlt, FaSave,
   FaClipboardList, FaSpinner, FaBarcode,
-  FaChevronLeft, FaChevronRight, FaFilter, FaTimes,
+  FaFilter, FaTimes,
   FaCalendarAlt, FaEdit, FaWarehouse, FaShoppingBag,
 } from "react-icons/fa";
-import { MdShoppingCartCheckout, MdPendingActions, MdClose } from "react-icons/md";
+import { MdPendingActions, MdClose } from "react-icons/md";
 import { HiOutlineDocumentText } from "react-icons/hi";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useAuthStore } from "../../store/authStore";
 import { useNavigate } from "react-router-dom";
+import Pagination from "../../components/common/pagination";
 
-// ── Debounce hook (mirrors Stock Return page) ──────────────────────────────────
+// ── Debounce hook ─────────────────────────────────────────────────────────────
 function useDebounce(value: string, delay: number = 300) {
   const [debouncedValue, setDebouncedValue] = useState(value);
 
@@ -123,7 +124,7 @@ interface PaginationState {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 15; // must match backend StandardResultsSetPagination.page_size
+const PAGE_SIZE = 15;
 const today = new Date().toISOString().split("T")[0];
 
 const STATUS_STYLE: Record<string, string> = {
@@ -156,78 +157,6 @@ const DisplayField: React.FC<{ label: string; value: string | number; icon?: any
   </div>
 );
 
-// ── Reusable Pagination Bar ───────────────────────────────────────────────────
-
-function PaginationBar({
-  pagination,
-  onPage,
-  label = "records",
-}: {
-  pagination: PaginationState;
-  onPage: (page: number) => void;
-  label?: string;
-}) {
-  const { count, page, totalPages, previous, next } = pagination;
-  if (count <= PAGE_SIZE) return null;
-
-  const from = (page - 1) * PAGE_SIZE + 1;
-  const to = Math.min(page * PAGE_SIZE, count);
-
-  const pages: (number | "...")[] = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-  } else {
-    pages.push(1);
-    if (page > 3) pages.push("...");
-    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
-    if (page < totalPages - 2) pages.push("...");
-    pages.push(totalPages);
-  }
-
-  return (
-    <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4 px-1">
-      <span className="text-sm text-gray-700">
-        Showing {from}–{to} of {count} {label}
-      </span>
-      <div className="flex gap-2 flex-wrap justify-center">
-        <button
-          onClick={() => onPage(page - 1)}
-          disabled={!previous}
-          className={`px-3 py-1 rounded transition flex items-center gap-1 ${
-            !previous ? "bg-gray-300 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"
-          }`}
-        >
-          <FaChevronLeft size={9} /> Prev
-        </button>
-        {pages.map((p, i) =>
-          p === "..." ? (
-            <span key={`dots-${i}`} className="px-2 text-sm text-gray-400">…</span>
-          ) : (
-            <button
-              key={p}
-              onClick={() => onPage(p as number)}
-              className={`px-3 py-1 rounded transition ${
-                p === page ? "bg-indigo-500 text-white" : "bg-gray-200 hover:bg-gray-300"
-              }`}
-            >
-              {p}
-            </button>
-          )
-        )}
-        <button
-          onClick={() => onPage(page + 1)}
-          disabled={!next}
-          className={`px-3 py-1 rounded transition flex items-center gap-1 ${
-            !next ? "bg-gray-300 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"
-          }`}
-        >
-          Next <FaChevronRight size={9} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function BranchOrderRequest() {
@@ -256,7 +185,7 @@ export default function BranchOrderRequest() {
   const [cart, setCart] = useState<CartRow[]>([]);
   const [orderIdPreview, setOrderIdPreview] = useState("Loading...");
 
-  // Item selection modal (Purchase-Entry style: pick ONE variant, fill inputs, Add)
+  // Item selection modal
   const [openModal, setOpenModal] = useState(false);
   const [modalItems, setModalItems] = useState<CompanyItem[]>([]);
   const [modalLoading, setModalLoading] = useState(false);
@@ -266,7 +195,7 @@ export default function BranchOrderRequest() {
     count: 0, next: null, previous: null, page: 1, totalPages: 1,
   });
 
-  // Current "entry row" — mirrors Purchase Entry's single active item row
+  // Current "entry row"
   const [current, setCurrent] = useState<{
     variantId: number | null;
     item_name: string;
@@ -318,12 +247,11 @@ export default function BranchOrderRequest() {
     setOrderLoading(false);
   }, [debouncedListSearch, statusFilter]);
 
-  // ── Single effect: (re)loads whenever tab is "list", or search/status filter changes ──
   useEffect(() => {
     if (tab === "list") loadOrders(1);
   }, [tab, debouncedListSearch, statusFilter]);
 
-  // ── Compute the likely next Order ID (mirrors backend's ORD/{FY}/{NNNN} generation) ──
+  // ── Compute the likely next Order ID ──
   const fetchOrderId = async () => {
     try {
       const res = await api.get(`branch-orders/?page=1`);
@@ -390,7 +318,6 @@ export default function BranchOrderRequest() {
     setModalLoading(false);
   }, [debouncedModalSearch]);
 
-  // Auto search — jaise hi debounced value change hoti hai, modal open hone par re-fetch
   useEffect(() => {
     if (openModal) loadModalItems(1);
   }, [debouncedModalSearch]);
@@ -403,7 +330,6 @@ export default function BranchOrderRequest() {
 
   const cartVariantIds = new Set(cart.map((c) => c.source_variant_id));
 
-  // ── Pick a variant from modal → fills the entry row, closes modal ──
   const pickVariant = (item: CompanyItem, variant: VariantOption) => {
     if (variant.current_stock <= 0) {
       toast.warning("Out of stock");
@@ -431,7 +357,6 @@ export default function BranchOrderRequest() {
     setOpenModal(false);
   };
 
-  // ── Add current row into cart (below) ──
   const handleAddItem = () => {
     if (!current.variantId) {
       toast.error("Please select an item first");
@@ -466,7 +391,6 @@ export default function BranchOrderRequest() {
 
     toast.success(`${current.item_name} added`);
 
-    // reset entry row
     setCurrent({
       variantId: null, item_name: "", variant_label: "", size: null, color: null,
       barcode: null, hsnCode: null, taxSlab: null, price: 0, maxStock: 0, quantity: "",
@@ -721,7 +645,28 @@ export default function BranchOrderRequest() {
           </table>
         </div>
 
-        <PaginationBar pagination={ordersPagination} onPage={loadOrders} label="orders" />
+        {/* ✅ Reusable Pagination (orders) */}
+        {ordersPagination.count > 0 && (
+          <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4 px-1">
+            <span className="text-sm text-gray-700">
+              Showing{" "}
+              <span className="font-medium">
+                {(ordersPagination.page - 1) * PAGE_SIZE + 1}
+              </span>
+              –
+              <span className="font-medium">
+                {Math.min(ordersPagination.page * PAGE_SIZE, ordersPagination.count)}
+              </span>{" "}
+              of <span className="font-medium">{ordersPagination.count}</span> orders
+            </span>
+
+            <Pagination
+              currentPage={ordersPagination.page}
+              totalPages={Math.max(1, ordersPagination.totalPages)}
+              onPageChange={(p) => loadOrders(p)}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -771,7 +716,7 @@ export default function BranchOrderRequest() {
             </div>
           </div>
 
-          {/* ── Item Entry (single active row, like Purchase Entry) ── */}
+          {/* ── Item Entry ── */}
           <div className="bg-white rounded-xl shadow-lg p-6">
             <h3 className="text-sm font-semibold text-indigo-700 border-b pb-2 mb-4 flex items-center gap-2">
               <FaBox className="text-indigo-600" /> Item Entry
@@ -971,7 +916,7 @@ export default function BranchOrderRequest() {
           </button>
         </div>
 
-        {/* ── Item Selection Modal (single pick, closes on select) ── */}
+        {/* ── Item Selection Modal ── */}
         <AnimatePresence>
           {openModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -1023,7 +968,6 @@ export default function BranchOrderRequest() {
                           <th className="px-3 py-2 text-center">HSN</th>
                           <th className="px-3 py-2 text-center">GST%</th>
                           <th className="px-3 py-2 text-right">Price ₹</th>
-                          
                         </tr>
                       </thead>
                       <tbody>
@@ -1084,7 +1028,6 @@ export default function BranchOrderRequest() {
                                     <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded text-xs">{variant.taxSlab || item.taxSlab || "0%"}</span>
                                   </td>
                                   <td className="px-3 py-2 text-right">₹{variant.branch_price}</td>
-
                                 </tr>
                               );
                             })
@@ -1094,7 +1037,28 @@ export default function BranchOrderRequest() {
                     </table>
                   </div>
 
-                  <PaginationBar pagination={modalPagination} onPage={loadModalItems} label="items" />
+                  {/* ✅ Reusable Pagination (modal items) */}
+                  {modalPagination.count > 0 && (
+                    <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
+                      <span className="text-sm text-gray-700">
+                        Showing{" "}
+                        <span className="font-medium">
+                          {(modalPagination.page - 1) * PAGE_SIZE + 1}
+                        </span>
+                        –
+                        <span className="font-medium">
+                          {Math.min(modalPagination.page * PAGE_SIZE, modalPagination.count)}
+                        </span>{" "}
+                        of <span className="font-medium">{modalPagination.count}</span> items
+                      </span>
+
+                      <Pagination
+                        currentPage={modalPagination.page}
+                        totalPages={Math.max(1, modalPagination.totalPages)}
+                        onPageChange={(p) => loadModalItems(p)}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-center py-4 border-t bg-white flex-shrink-0">
@@ -1129,7 +1093,6 @@ function OrderDetailFullView({ order, onBack }: { order: OrderDetail; onBack: ()
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
       className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
 
-      {/* Header */}
       <div className="px-6 py-4 border-b bg-gradient-to-r from-gray-50 to-indigo-50">
         <div className="flex items-center gap-3 mb-4">
           <button onClick={onBack}
@@ -1170,7 +1133,6 @@ function OrderDetailFullView({ order, onBack }: { order: OrderDetail; onBack: ()
         )}
       </div>
 
-      {/* Stats */}
       <div className="px-6 py-3 bg-gray-50 border-b flex flex-wrap gap-2">
         <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
           <FaCheckCircle size={10} /> Transferred: {transferredItems}
@@ -1188,7 +1150,6 @@ function OrderDetailFullView({ order, onBack }: { order: OrderDetail; onBack: ()
         )}
       </div>
 
-      {/* Items Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[900px]">
           <thead>
@@ -1278,7 +1239,6 @@ function OrderDetailFullView({ order, onBack }: { order: OrderDetail; onBack: ()
         </table>
       </div>
 
-      {/* Footer messages */}
       {order.status === "sent" && (
         <div className="mx-5 mb-5 mt-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 flex items-center gap-2 text-sm">
           <FaCheckCircle size={16} /> All approved items have been sent. Please verify in Stock Verification page.

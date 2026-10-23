@@ -1,20 +1,21 @@
 // SchemeOfferManagement.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Formik, Form, useField } from "formik";
 import * as Yup from "yup";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
 import { toast } from "react-toastify";
 import {
-  FaGift, FaPlus, FaEdit, FaTrash, FaEye, FaTimes,
+  FaGift, FaPlus, FaEdit, FaTrash, FaEye,
   FaCalendarAlt, FaMoneyBill, FaBuilding, FaToggleOn,
-  FaChevronDown, FaChevronUp, FaUsers, FaPhone,
+  FaChevronDown, FaSearch, FaTimes,
 } from "react-icons/fa";
 import { MdClose } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermissions";
+import Pagination from "../../components/common/pagination";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,13 @@ interface FormValues {
   amount: string;
   scheme_type: string;
   status: "active" | "inactive";
+}
+
+interface PaginatedResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: SchemeOffer[];
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -128,9 +136,9 @@ const FormSelect: React.FC<any> = ({ label, options, icon: Icon, ...props }) => 
 
 // ─── Branch Multi-Select with Dropdown ──────────────────────────────────────
 
-const BranchMultiSelect: React.FC<{ name: string; branchOptions: BranchOption[] }> = ({ 
-  name, 
-  branchOptions 
+const BranchMultiSelect: React.FC<{ name: string; branchOptions: BranchOption[] }> = ({
+  name,
+  branchOptions
 }) => {
   const [field, meta, helpers] = useField(name);
   const [isOpen, setIsOpen] = useState(false);
@@ -169,7 +177,7 @@ const BranchMultiSelect: React.FC<{ name: string; branchOptions: BranchOption[] 
           <FaChevronDown className={`text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
         </div>
       </div>
-      
+
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -200,7 +208,7 @@ const BranchMultiSelect: React.FC<{ name: string; branchOptions: BranchOption[] 
           </motion.div>
         )}
       </AnimatePresence>
-      
+
       {meta.touched && meta.error && <p className="text-xs text-red-500">{meta.error}</p>}
     </div>
   );
@@ -232,8 +240,6 @@ const SchemeFormModal: React.FC<{
     api
       .get("branches/")
       .then((res) => {
-        console.log("Branches API response:", res.data);
-        
         let branchData = [];
         if (res.data?.data && Array.isArray(res.data.data)) {
           branchData = res.data.data;
@@ -244,12 +250,11 @@ const SchemeFormModal: React.FC<{
         } else {
           branchData = [];
         }
-        
-        console.log("Branch data extracted:", branchData);
+
         setBranchOptions(
-          branchData.map((b: any) => ({ 
-            id: b.id, 
-            branch_name: b.branch_name 
+          branchData.map((b: any) => ({
+            id: b.id,
+            branch_name: b.branch_name
           }))
         );
       })
@@ -389,18 +394,10 @@ const SchemeFormModal: React.FC<{
 // ─── Helper to extract data from API response ───────────────────────────────
 
 const extractDataFromResponse = (response: any): any[] => {
-  if (response?.data && Array.isArray(response.data)) {
-    return response.data;
-  }
-  if (response?.results && Array.isArray(response.results)) {
-    return response.results;
-  }
-  if (Array.isArray(response)) {
-    return response;
-  }
-  if (response?.data?.results && Array.isArray(response.data.results)) {
-    return response.data.results;
-  }
+  if (response?.data && Array.isArray(response.data)) return response.data;
+  if (response?.results && Array.isArray(response.results)) return response.results;
+  if (Array.isArray(response)) return response;
+  if (response?.data?.results && Array.isArray(response.data.results)) return response.data.results;
   return [];
 };
 
@@ -416,31 +413,75 @@ const SchemeOfferManagement: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingScheme, setEditingScheme] = useState<SchemeOffer | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(10);
 
-  const fetchSchemes = () => {
+  // ✅ Server-side pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // ✅ Search state (debounced)
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // ✅ Search debounce (400ms)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // ✅ Fetch schemes with server-side pagination
+  const fetchSchemes = async (page = 1) => {
     setLoading(true);
     const endpoint = isMainBranch ? "scheme-offers/" : "my-branch-schemes/";
-    api
-      .get(endpoint)
-      .then((res) => {
-        console.log("Schemes API response:", res.data);
-        const schemeData = extractDataFromResponse(res.data);
-        console.log("Scheme data extracted:", schemeData);
-        setSchemes(Array.isArray(schemeData) ? schemeData : []);
-      })
-      .catch((err) => {
-        console.error("Failed to load scheme offers:", err);
-        toast.error("Failed to load scheme offers");
-        setSchemes([]);
-      })
-      .finally(() => setLoading(false));
+    try {
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("page_size", String(pageSize));
+      if (debouncedSearch) params.set("search", debouncedSearch);
+
+      const res = await api.get(`${endpoint}?${params.toString()}`);
+      const data = res.data;
+
+      // Paginated response
+      if (data && !Array.isArray(data) && data.results) {
+        setSchemes(data.results || []);
+        setTotalItems(data.count || 0);
+        setTotalPages(Math.max(1, Math.ceil((data.count || 0) / pageSize)));
+        setCurrentPage(page);
+      } else if (Array.isArray(data)) {
+        // Fallback (purana backend)
+        const all = extractDataFromResponse(data);
+        setTotalItems(all.length);
+        setTotalPages(Math.max(1, Math.ceil(all.length / pageSize)));
+        setCurrentPage(page);
+        const start = (page - 1) * pageSize;
+        setSchemes(all.slice(start, start + pageSize));
+      } else {
+        const all = extractDataFromResponse(data);
+        setSchemes(all);
+        setTotalItems(all.length);
+        setTotalPages(1);
+        setCurrentPage(1);
+      }
+    } catch (err) {
+      console.error("Failed to load scheme offers:", err);
+      toast.error("Failed to load scheme offers");
+      setSchemes([]);
+      setTotalItems(0);
+      setTotalPages(1);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchSchemes();
-  }, []);
+    fetchSchemes(currentPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, pageSize, debouncedSearch]);
 
   const handleDelete = async (scheme: SchemeOffer) => {
     const result = await Swal.fire({
@@ -456,7 +497,12 @@ const SchemeOfferManagement: React.FC = () => {
     try {
       await api.delete(`scheme-offers/${scheme.id}/`);
       toast.success("Scheme deleted");
-      fetchSchemes();
+      // If last item on page, go back
+      if (schemes.length === 1 && currentPage > 1) {
+        setCurrentPage(currentPage - 1);
+      } else {
+        fetchSchemes(currentPage);
+      }
     } catch (err) {
       console.error(err);
       toast.error("Failed to delete scheme");
@@ -467,9 +513,20 @@ const SchemeOfferManagement: React.FC = () => {
     navigate(`/SchemeOffers/${schemeId}/report`);
   };
 
-  // Pagination
-  const totalPages = Math.ceil(schemes.length / pageSize);
-  const paginatedSchemes = schemes.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const clearSearch = () => {
+    setSearchTerm("");
+    setDebouncedSearch("");
+    setCurrentPage(1);
+  };
+
+  const handlePageChange = (page: number) => {
+    if (page >= 1 && page <= totalPages) setCurrentPage(page);
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(parseInt(e.target.value));
+    setCurrentPage(1);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-6">
@@ -480,8 +537,7 @@ const SchemeOfferManagement: React.FC = () => {
               <FaGift /> SCHEME OFFERS
             </h1>
           </div>
-        
-          {/* ✅ New Scheme - Sirf superadmin OR employee with canAdd */}
+
           {(isMainBranch || canAdd) && (
             <button
               onClick={() => { setEditingScheme(null); setShowFormModal(true); }}
@@ -490,7 +546,31 @@ const SchemeOfferManagement: React.FC = () => {
               <FaPlus /> New Scheme
             </button>
           )}
-        
+        </div>
+
+        {/* ✅ Search Bar */}
+        <div className="mb-4 flex flex-wrap gap-3 items-center">
+          <div className="relative flex-1 max-w-md">
+            <div className="absolute inset-y-0 left-0 flex items-center pl-3">
+              <FaSearch className="text-gray-400" size={14} />
+            </div>
+            <input
+              type="text"
+              placeholder="Search by Offer Name or Branch..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white"
+              autoComplete="off"
+            />
+            {searchTerm && (
+              <button
+                onClick={clearSearch}
+                className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+              >
+                <FaTimes size={14} />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-lg overflow-hidden">
@@ -504,23 +584,23 @@ const SchemeOfferManagement: React.FC = () => {
                   <th className="px-4 py-3 text-right">Amount</th>
                   <th className="px-4 py-3 text-center">Type</th>
                   <th className="px-4 py-3 text-center">Status</th>
-                  <th className="px-4 py-3 text-left">Created By</th> 
+                  <th className="px-4 py-3 text-left">Created By</th>
                   <th className="px-4 py-3 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={7} className="text-center py-8 text-gray-400 italic">Loading...</td></tr>
+                  <tr><td colSpan={8} className="text-center py-8 text-gray-400 italic">Loading...</td></tr>
                 )}
-                {!loading && paginatedSchemes.length === 0 && (
+                {!loading && schemes.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="text-center py-10 text-gray-400">
+                    <td colSpan={8} className="text-center py-10 text-gray-400">
                       <FaGift className="inline mr-2 text-2xl text-gray-300" /><br />
                       No scheme offers found
                     </td>
                   </tr>
                 )}
-                {paginatedSchemes.map((scheme) => (
+                {schemes.map((scheme) => (
                   <tr key={scheme.id} className="border-b border-gray-100 hover:bg-gray-50 transition">
                     <td className="px-4 py-3 font-medium">{scheme.offer_name}</td>
                     <td className="px-4 py-3 text-gray-600 text-xs">{scheme.start_date} → {scheme.end_date}</td>
@@ -529,11 +609,10 @@ const SchemeOfferManagement: React.FC = () => {
                     <td className="px-4 py-3 text-center capitalize text-xs">{scheme.scheme_type.replace("_", " ")}</td>
                     <td className="px-4 py-3 text-center"><StatusBadge status={scheme.status} /></td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-  {scheme.created_by_name || "-"}   {/* ✅ ADD */}
-</td>
+                      {scheme.created_by_name || "-"}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-center gap-2">
-                        {/* ✅ View - Sabko dikhe */}
                         <button
                           title="View Report"
                           onClick={() => handleViewReport(scheme.id)}
@@ -541,8 +620,7 @@ const SchemeOfferManagement: React.FC = () => {
                         >
                           <FaEye />
                         </button>
-                        
-                        {/* ✅ Edit - Sirf superadmin OR employee with canEdit */}
+
                         {(isMainBranch || canEdit) && (
                           <button
                             title="Edit"
@@ -552,8 +630,7 @@ const SchemeOfferManagement: React.FC = () => {
                             <FaEdit />
                           </button>
                         )}
-                        
-                        {/* ✅ Delete - Sirf superadmin OR employee with canDelete */}
+
                         {(isMainBranch || canDelete) && (
                           <button
                             title="Delete"
@@ -571,53 +648,38 @@ const SchemeOfferManagement: React.FC = () => {
             </table>
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex justify-between items-center px-4 py-3 border-t">
-              <span className="text-sm text-gray-500">
-                Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, schemes.length)} of {schemes.length}
-              </span>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          {/* ✅ Reusable Pagination */}
+          {totalItems > 0 && (
+            <div className="flex flex-col sm:flex-row justify-between items-center px-4 py-3 border-t gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-500">
+                  Showing{" "}
+                  <span className="font-medium">
+                    {(currentPage - 1) * pageSize + 1}
+                  </span>
+                  –{" "}
+                  <span className="font-medium">
+                    {Math.min(currentPage * pageSize, totalItems)}
+                  </span>{" "}
+                  of <span className="font-medium">{totalItems}</span>
+                </span>
+                <select
+                  value={pageSize}
+                  onChange={handlePageSizeChange}
+                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  Previous
-                </button>
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  let pageNum;
-                  if (totalPages <= 5) {
-                    pageNum = i + 1;
-                  } else if (currentPage <= 3) {
-                    pageNum = i + 1;
-                  } else if (currentPage >= totalPages - 2) {
-                    pageNum = totalPages - 4 + i;
-                  } else {
-                    pageNum = currentPage - 2 + i;
-                  }
-                  return (
-                    <button
-                      key={pageNum}
-                      onClick={() => setCurrentPage(pageNum)}
-                      className={`px-3 py-1 border rounded text-sm ${
-                        currentPage === pageNum
-                          ? "bg-blue-600 text-white border-blue-600"
-                          : "hover:bg-gray-100"
-                      }`}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                >
-                  Next
-                </button>
+                  <option value={10}>10 per page</option>
+                  <option value={15}>15 per page</option>
+                  <option value={25}>25 per page</option>
+                  <option value={50}>50 per page</option>
+                </select>
               </div>
+
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+              />
             </div>
           )}
         </div>
@@ -628,7 +690,7 @@ const SchemeOfferManagement: React.FC = () => {
           <SchemeFormModal
             editingScheme={editingScheme}
             onClose={() => setShowFormModal(false)}
-            onSaved={fetchSchemes}
+            onSaved={() => fetchSchemes(currentPage)}
           />
         )}
       </AnimatePresence>

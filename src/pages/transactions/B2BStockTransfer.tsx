@@ -1,23 +1,9 @@
 // src/pages/branch/B2BStockTransfer.tsx
-// B2B Stock Transfer — Fulfiller side (I'm the SOURCE branch, A).
-// NO TABS. One branch-wise summary landing -> filtered list -> ONE unified
-// order detail page where every stage's action is enabled progressively.
-//
-//   order.pending            -> Verify Qty inputs + "Verify Order" button (creates transfer)
-//   transfer.pending         -> info only ("waiting for B to confirm")     — B acts on B2BOrderRequest.tsx
-//   transfer.confirmed       -> "Start Packaging" button (no stock movement yet)
-//   transfer.packaging_start -> "Mark Packaging Ready" button (deducts MY stock)
-//   transfer.packaging_ready -> info only ("waiting for B to receive")    — B acts on B2BOrderRequest.tsx
-//   transfer.received        -> done, success message
-//
-// "My own placed orders" (B2BOrderRequest.tsx) are NOT shown here — this page
-// is only for orders OTHER branches placed against me.
-
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
-  FaArrowLeft, FaBox, FaCheckCircle, FaTruck, FaEye, FaSearch, FaSpinner,
-  FaTimes, FaClipboardList, FaChevronLeft, FaChevronRight, FaCheckDouble,
+  FaArrowLeft, FaCheckCircle, FaTruck, FaEye, FaSearch, FaSpinner,
+  FaTimes, FaClipboardList, FaCheckDouble,
   FaBoxOpen, FaWarehouse, FaClipboardCheck, FaExclamationTriangle,
 } from "react-icons/fa";
 import { MdPendingActions } from "react-icons/md";
@@ -26,6 +12,7 @@ import Swal from "sweetalert2";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
+import Pagination from "../../components/common/pagination";
 
 // ── numeric helpers ───────────────────────────────────────────────────────
 const safeNum = (val: any): number => {
@@ -151,7 +138,6 @@ function stageOf(order: OrderListItem, transferByOrderNo: Map<string, TransferLi
   if (order.status === "pending") return "pending";
   if (order.status === "no_stock") return "no_stock";
   if (order.status === "cancelled") return "cancelled";
-  // status === 'sent' -> look at linked transfer
   const t = transferByOrderNo.get(order.order_id);
   if (!t) return "awaiting_confirm";
   switch (t.status) {
@@ -236,47 +222,7 @@ const GstSummaryCard: React.FC<{ totals: GstTotals; title?: string }> = ({ total
   </div>
 );
 
-// ── Pagination Bar ───────────────────────────────────────────────────────
 interface PaginationState { count: number; next: string | null; previous: string | null; page: number; totalPages: number; }
-
-function PaginationBar({ pagination, onPage, label = "records" }: { pagination: PaginationState; onPage: (p: number) => void; label?: string }) {
-  const { count, page, totalPages, previous, next } = pagination;
-  if (count <= PAGE_SIZE) return null;
-  const from = (page - 1) * PAGE_SIZE + 1, to = Math.min(page * PAGE_SIZE, count);
-  const pages: (number | "...")[] = [];
-  if (totalPages <= 7) for (let i = 1; i <= totalPages; i++) pages.push(i);
-  else {
-    pages.push(1);
-    if (page > 3) pages.push("...");
-    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
-    if (page < totalPages - 2) pages.push("...");
-    pages.push(totalPages);
-  }
-  return (
-    <div className="px-5 py-3.5 border-t bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-3">
-      <p className="text-xs text-gray-500">
-        Showing <span className="font-semibold text-gray-700">{from}–{to}</span> of{" "}
-        <span className="font-semibold text-gray-700">{count}</span> {label}
-      </p>
-      <div className="flex items-center gap-1">
-        <button onClick={() => onPage(page - 1)} disabled={!previous}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-          <FaChevronLeft size={9} /> Prev
-        </button>
-        {pages.map((p, i) => p === "..." ? <span key={`d${i}`} className="px-2 text-xs text-gray-400">…</span> : (
-          <button key={p} onClick={() => onPage(p as number)}
-            className={`w-8 h-8 text-xs rounded-lg font-semibold transition-all ${p === page ? "bg-indigo-600 text-white shadow-sm" : "border border-gray-200 text-gray-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-600"}`}>
-            {p}
-          </button>
-        ))}
-        <button onClick={() => onPage(page + 1)} disabled={!next}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-          Next <FaChevronRight size={9} />
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ── Branch-wise status summary table ────────────────────────────────────
 function BranchStatusSummaryTable({
@@ -440,17 +386,18 @@ export default function B2BStockTransfer() {
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pagedRows = filteredRows.slice((listPage - 1) * PAGE_SIZE, listPage * PAGE_SIZE);
-  const pagination: PaginationState = {
-    count: filteredRows.length,
-    next: listPage < totalPages ? "next" : null,
-    previous: listPage > 1 ? "prev" : null,
-    page: listPage, totalPages,
-  };
 
   function openBranchStatus(branch_name: string, status: Stage | "") {
     setBranchFilter({ branch_name, status });
     setSearch(""); setListPage(1); setView("list");
   }
+
+  const handleListPageChange = (p: number) => {
+    if (p >= 1 && p <= totalPages) {
+      setListPage(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   // ── Detail view ──
   if (selectedOrderId !== null) {
@@ -587,7 +534,25 @@ export default function B2BStockTransfer() {
                       </tbody>
                     </table>
                   </div>
-                  <PaginationBar pagination={pagination} onPage={setListPage} label="requests" />
+
+                  {/* ✅ Reusable Pagination */}
+                  {filteredRows.length > 0 && (
+                    <div className="px-5 py-3.5 border-t bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <p className="text-xs text-gray-500">
+                        Showing{" "}
+                        <span className="font-semibold text-gray-700">
+                          {(listPage - 1) * PAGE_SIZE + 1}–{Math.min(listPage * PAGE_SIZE, filteredRows.length)}
+                        </span>{" "}
+                        of <span className="font-semibold text-gray-700">{filteredRows.length}</span> requests
+                      </p>
+
+                      <Pagination
+                        currentPage={listPage}
+                        totalPages={totalPages}
+                        onPageChange={handleListPageChange}
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -600,7 +565,6 @@ export default function B2BStockTransfer() {
 
 // ════════════════════════════════════════════════════════════
 // UNIFIED ORDER + TRANSFER DETAIL VIEW
-// One page — every stage's action lives right here, enabled progressively.
 // ════════════════════════════════════════════════════════════
 function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack: () => void }) {
   const { checkLocation } = useBranchLocationCheck();
@@ -648,7 +612,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
     setAdjusted(prev => ({ ...prev, [itemId]: { ...prev[itemId], [field]: value } }));
   };
 
-  // ── Verify Order (creates transfer) ──
   const handleVerify = async () => {
     if (!order) return;
     const confirmed = await showConfirmAlert(
@@ -684,7 +647,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
     setActing(false);
   };
 
-  // ── Cancel Order (only while pending) ──
   const handleCancelOrder = async () => {
     if (!order) return;
     const confirmed = await showConfirmAlert("Cancel this order?", "This action cannot be undone.", "warning", "Yes, cancel", "No");
@@ -698,7 +660,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
     setActing(false);
   };
 
-  // ── Start Packaging (no stock movement yet) ──
   const handlePackagingStart = async () => {
     if (!transfer) return;
     const confirmed = await showConfirmAlert(
@@ -722,7 +683,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
     setActing(false);
   };
 
-  // ── Mark Packaging Ready (deducts my stock) ──
   const handlePackagingReady = async () => {
     if (!transfer) return;
     const confirmed = await showConfirmAlert(
@@ -746,7 +706,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
     setActing(false);
   };
 
-  // ── Cancel Transfer (only while pending/confirmed/packaging_start) ──
   const handleCancelTransfer = async () => {
     if (!transfer) return;
     const confirmed = await showConfirmAlert("Cancel this transfer?", "This action cannot be undone.", "warning", "Yes, cancel", "No");
@@ -804,7 +763,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
       className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
 
-      {/* Header */}
       <div className="px-6 py-4 border-b bg-indigo-50/50">
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <button onClick={onBack} className="flex items-center gap-1.5 text-indigo-600 text-sm font-medium hover:text-indigo-800">
@@ -839,7 +797,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
         )}
       </div>
 
-      {/* Transfer settings — only shown while verifying */}
       {canVerify && (
         <div className="px-6 py-4 border-b bg-gray-50">
           <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2 text-sm">
@@ -860,7 +817,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
         </div>
       )}
 
-      {/* Items table — Verify inputs while pending, else the real shipped transfer items */}
       <div className="overflow-x-auto">
         {canVerify ? (
           <table className="w-full text-sm min-w-[950px]">
@@ -959,14 +915,12 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
         )}
       </div>
 
-      {/* GST Summary — only once a transfer exists */}
       {hasGst && (
         <div className="px-5 pt-4">
           <GstSummaryCard totals={gstTotals} />
         </div>
       )}
 
-      {/* Action panel — progressive, one action enabled per stage */}
       <div className="px-6 py-4 border-t bg-gray-50 flex flex-wrap items-center gap-3 justify-between">
         <div className="flex items-center gap-2 flex-wrap">
           {canVerify && (
@@ -1015,7 +969,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
             </>
           )}
 
-
           {!canVerify && !canStartPackaging && !canMarkPackagingReady && canCancelTransfer && (
             <button onClick={handleCancelTransfer} disabled={acting}
               className="px-5 py-2.5 border-2 border-red-200 text-red-500 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-40">
@@ -1031,7 +984,6 @@ function OrderTransferDetailView({ orderId, onBack }: { orderId: number; onBack:
         )}
       </div>
 
-      {/* Footer status messages — progressive */}
       {stage === "awaiting_confirm" && (
         <div className="mx-5 mb-5 mt-1 p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 flex items-center gap-2 text-sm">
           <MdPendingActions size={16} /> Verified — waiting for {order.requesting_branch_name} to confirm this transfer before you can start packaging.

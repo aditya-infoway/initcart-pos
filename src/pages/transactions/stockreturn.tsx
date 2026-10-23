@@ -3,17 +3,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   FaArrowLeft, FaBox, FaCheckCircle, FaExchangeAlt,
   FaEye, FaPlus, FaSearch, FaSpinner, FaTimes,
-  FaWarehouse, FaClipboardList, FaBoxes,
-  FaChevronLeft, FaChevronRight, FaTrash, FaSave,
+  FaWarehouse, FaBoxes,
+  FaTrash, FaSave,
   FaCalendarAlt, FaFileInvoice, FaEdit, FaFilter,
 } from "react-icons/fa";
 import { MdPendingActions, MdClose } from "react-icons/md";
-import { HiOutlineDocumentText } from "react-icons/hi";
 import { BsCheckAll } from "react-icons/bs";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import Swal from "sweetalert2";
-
+import Pagination from "../../components/common/pagination";
 
 function useDebounce(value: string, delay: number = 300) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -32,8 +31,6 @@ function useDebounce(value: string, delay: number = 300) {
 }
 
 // ── GST helpers ───────────────────────────────────────────
-// Backend (pos/utils/gst_calc.py) values come back as Decimal → DRF
-// serializes them as strings. safeNum() parses either safely.
 const safeNum = (val: any): number => {
   if (val === null || val === undefined || val === "") return 0;
   const n = typeof val === "string" ? parseFloat(val) : val;
@@ -42,14 +39,6 @@ const safeNum = (val: any): number => {
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-/**
- * Mirrors pos/utils/gst_calc.py -> calculate_gst_split(..., gst_toggle=False, ...)
- * i.e. INCLUSIVE mode only (rate is the net price, GST already included) —
- * same as what StockReturnCreateFromItemsView always uses on the backend.
- * Used only for a live client-side ESTIMATE on the Create screen, before
- * the return actually exists. The Detail view always shows the real,
- * backend-persisted values.
- */
 function calcGstSplitInclusive(
   rate: number,
   quantity: number,
@@ -74,8 +63,6 @@ function calcGstSplitInclusive(
     } else if (sameState === false) {
       igst = tax;
     }
-    // sameState === null → branch/company state not known yet on the
-    // create screen; we still show basic/tax/net, just no CGST/SGST/IGST split.
   }
 
   return { basic: basicAmount, tax, cgst, sgst, igst, net: netAmount };
@@ -123,8 +110,6 @@ interface ReturnItem {
   branch_stock: number;
   branch_variant_id: number;
   company_variant_id: number;
-  // ✅ GST fields — already computed & stored by backend
-  // (StockReturnItemReadSerializer already returns these)
   tax_percent?: string;
   basic_amount?: number | string;
   tax_amount?: number | string;
@@ -207,7 +192,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 const today = new Date().toISOString().split("T")[0];
 
-// ── Small reusable field components (Purchase-Entry style) ──
+// ── Small reusable field components ──
 
 const DisplayField: React.FC<{ label: string; value: string | number; icon?: any }> = ({ label, value, icon: Icon }) => (
   <div className="space-y-1">
@@ -221,7 +206,7 @@ const DisplayField: React.FC<{ label: string; value: string | number; icon?: any
   </div>
 );
 
-// ── Reusable GST Summary Card (same look as StockTransfer.tsx) ──
+// ── Reusable GST Summary Card ──
 
 interface GstTotals {
   basic: number;
@@ -280,78 +265,6 @@ const GstSummaryCard: React.FC<{ totals: GstTotals; title?: string; estimateNote
   </div>
 );
 
-// ── Pagination Bar ──────────────────────────────────────────
-
-function PaginationBar({
-  pagination,
-  onPage,
-  label = "records",
-}: {
-  pagination: PaginationState;
-  onPage: (page: number) => void;
-  label?: string;
-}) {
-  const { count, page, totalPages, previous, next } = pagination;
-  if (count <= PAGE_SIZE) return null;
-
-  const from = (page - 1) * PAGE_SIZE + 1;
-  const to = Math.min(page * PAGE_SIZE, count);
-
-  const pages: (number | "...")[] = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-  } else {
-    pages.push(1);
-    if (page > 3) pages.push("...");
-    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
-    if (page < totalPages - 2) pages.push("...");
-    pages.push(totalPages);
-  }
-
-  return (
-    <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
-      <span className="text-sm text-gray-700">
-        Showing {from}–{to} of {count} {label}
-      </span>
-      <div className="flex gap-2 flex-wrap justify-center">
-        <button
-          onClick={() => onPage(page - 1)}
-          disabled={!previous}
-          className={`px-3 py-1 rounded transition flex items-center gap-1 ${
-            !previous ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"
-          }`}
-        >
-          <FaChevronLeft size={9} /> Prev
-        </button>
-        {pages.map((p, i) =>
-          p === "..." ? (
-            <span key={`dots-${i}`} className="px-2 text-sm text-gray-400">…</span>
-          ) : (
-            <button
-              key={p}
-              onClick={() => onPage(p as number)}
-              className={`px-3 py-1 rounded transition ${
-                p === page ? "bg-blue-500 text-white" : "bg-gray-200 hover:bg-gray-300"
-              }`}
-            >
-              {p}
-            </button>
-          )
-        )}
-        <button
-          onClick={() => onPage(page + 1)}
-          disabled={!next}
-          className={`px-3 py-1 rounded transition flex items-center gap-1 ${
-            !next ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"
-          }`}
-        >
-          Next <FaChevronRight size={9} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Main Component ──────────────────────────────────────────
 
 export default function StockReturn() {
@@ -374,12 +287,9 @@ export default function StockReturn() {
   const [returnNote, setReturnNote] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ same_state flag — needed to know CGST+SGST vs IGST split on the
-  // create screen. true/false once known from user-branch/ response,
-  // null while unknown (estimate shows combined tax only in that case).
   const [sameState, setSameState] = useState<boolean | null>(null);
 
-  // Item selection modal (Purchase-Entry style: pick ONE item, fill inputs, Add)
+  // Item selection modal
   const [openModal, setOpenModal] = useState(false);
   const [modalItems, setModalItems] = useState<VerifiedItem[]>([]);
   const [modalLoading, setModalLoading] = useState(false);
@@ -391,7 +301,6 @@ export default function StockReturn() {
   const [debouncedModalSearch, setDebouncedModalSearch] = useState("");
   const debouncedSearch = useDebounce(modalSearch, 300);
 
-  // Current "entry row" — mirrors Purchase Entry's single active item row
   const [current, setCurrent] = useState<{
     verifiedItemId: number | null;
     item_name: string;
@@ -419,7 +328,6 @@ export default function StockReturn() {
   const [processingAction, setProcessingAction] = useState(false);
   const [packagingItems, setPackagingItems] = useState<Set<number>>(new Set());
 
-  // ── Confirm helper ──
   const showConfirm = async (message: string): Promise<boolean> => {
     const result = await Swal.fire({
       title: "Are you sure?",
@@ -451,7 +359,7 @@ export default function StockReturn() {
         next: res.data.next || null,
         previous: res.data.previous || null,
         page,
-        totalPages: Math.ceil(count / PAGE_SIZE),
+        totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
       });
     } catch {
       toast.error("Could not load returns");
@@ -463,31 +371,25 @@ export default function StockReturn() {
     if (tab === "list") loadReturns(1);
   }, [tab, statusFilter]);
 
-  // ── Compute the actual next Return No by mirroring backend's generation logic ──
-const fetchReturnNo = async () => {
-  try {
-    const res = await api.get(`stock-returns/next-number-preview/`);
-    if (res.data.success) {
-      setReturnNo(res.data.next_return_no);
-      // ✅ Backend compares branch.state vs company Branch.state (same
-      // logic as calculate_gst_split) and returns it directly — no
-      // guessing needed on the frontend, so the GST summary can show
-      // the correct CGST+SGST / IGST split right away, before submit.
-      if (typeof res.data.same_state === "boolean") {
-        setSameState(res.data.same_state);
+  // ── Compute the actual next Return No ──
+  const fetchReturnNo = async () => {
+    try {
+      const res = await api.get(`stock-returns/next-number-preview/`);
+      if (res.data.success) {
+        setReturnNo(res.data.next_return_no);
+        if (typeof res.data.same_state === "boolean") {
+          setSameState(res.data.same_state);
+        } else {
+          setSameState(null);
+        }
       } else {
-        setSameState(null);
+        setReturnNo("Will be generated on save");
       }
-    } else {
+    } catch {
       setReturnNo("Will be generated on save");
     }
-  } catch {
-    setReturnNo("Will be generated on save");
-  }
-};
+  };
 
-  // ── Fetch To Branch (display name only — same_state now comes from
-  // the next-number-preview/ call above) ──
   const fetchToBranch = async () => {
     try {
       const res = await api.get(`user-branch/`);
@@ -499,10 +401,10 @@ const fetchReturnNo = async () => {
   };
 
   useEffect(() => {
-  if (openModal) {
-    loadModalItems(1);
-  }
-}, [debouncedSearch]); 
+    if (openModal) {
+      loadModalItems(1);
+    }
+  }, [debouncedSearch]);
 
   const openCreateTab = () => {
     setTab("create");
@@ -515,43 +417,41 @@ const fetchReturnNo = async () => {
     fetchToBranch();
   };
 
-const loadModalItems = useCallback(async (page = 1) => {
-  setModalLoading(true);
-  try {
-    const params = new URLSearchParams({ page: String(page) });
-    if (debouncedSearch) params.append("search", debouncedSearch); // Use debouncedSearch instead of modalSearch
-    const res = await api.get(`stock-returns/verified-items/?${params}`);
+  const loadModalItems = useCallback(async (page = 1) => {
+    setModalLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page) });
+      if (debouncedSearch) params.append("search", debouncedSearch);
+      const res = await api.get(`stock-returns/verified-items/?${params}`);
 
-    let items: VerifiedItem[] = [];
-    if (res.data.results?.success) items = res.data.results.data || [];
-    else if (res.data.success) items = res.data.data || [];
+      let items: VerifiedItem[] = [];
+      if (res.data.results?.success) items = res.data.results.data || [];
+      else if (res.data.success) items = res.data.data || [];
 
-    setModalItems(items);
-    const count = res.data.count || items.length;
-    setModalPagination({
-      count,
-      next: res.data.next || null,
-      previous: res.data.previous || null,
-      page,
-      totalPages: Math.ceil(count / PAGE_SIZE),
-    });
-  } catch (error) {
-    console.error("Error loading verified items:", error);
-    toast.error("Could not load verified items");
-  }
-  setModalLoading(false);
-}, [debouncedSearch]); 
+      setModalItems(items);
+      const count = res.data.count || items.length;
+      setModalPagination({
+        count,
+        next: res.data.next || null,
+        previous: res.data.previous || null,
+        page,
+        totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
+      });
+    } catch (error) {
+      console.error("Error loading verified items:", error);
+      toast.error("Could not load verified items");
+    }
+    setModalLoading(false);
+  }, [debouncedSearch]);
 
-const openSelectModal = () => {
-  setModalSearch("");
-  setDebouncedModalSearch("");
-  setOpenModal(true);
-  loadModalItems(1);
-};
+  const openSelectModal = () => {
+    setModalSearch("");
+    setDebouncedModalSearch("");
+    setOpenModal(true);
+    loadModalItems(1);
+  };
 
-  // ── Pick an item from modal → fills the entry row, closes modal ──
   const pickItem = (item: VerifiedItem) => {
-    // Already added items reduce available qty for that same verified item
     const alreadyAdded = addedItems.find((a) => a.verifiedItemId === item.id);
     const remaining = item.quantity - (alreadyAdded ? alreadyAdded.quantity : 0);
 
@@ -576,7 +476,6 @@ const openSelectModal = () => {
     setOpenModal(false);
   };
 
-  // ── Add current row into the added-items list (below) ──
   const handleAddItem = () => {
     if (!current.verifiedItemId) {
       toast.error("Please select an item first");
@@ -595,7 +494,6 @@ const openSelectModal = () => {
     setAddedItems((prev) => {
       const existingIdx = prev.findIndex((a) => a.verifiedItemId === current.verifiedItemId);
       if (existingIdx >= 0) {
-        // merge into existing row for same verified item
         const next = [...prev];
         next[existingIdx] = {
           ...next[existingIdx],
@@ -623,7 +521,6 @@ const openSelectModal = () => {
     });
     setUidCounter((p) => p + 1);
 
-    // reset entry row
     setCurrent({
       verifiedItemId: null, item_name: "", variant_info: "", barcode: "",
       hsnCode: "", taxSlab: "", rate: 0, maxQty: 0, quantity: "",
@@ -640,9 +537,6 @@ const openSelectModal = () => {
     totalAmount: addedItems.reduce((s, i) => s + i.quantity * i.rate, 0),
   };
 
-  // ✅ Live GST estimate for the Create screen — inclusive mode, same
-  // formula as pos/utils/gst_calc.py (gst_toggle=False), split into
-  // CGST+SGST or IGST once sameState is known.
   const createGstTotals: GstTotals = useMemo(() => {
     return addedItems.reduce(
       (acc, i) => {
@@ -661,7 +555,6 @@ const openSelectModal = () => {
     );
   }, [addedItems, sameState]);
 
-  // ── Create return (submit) ──
   const createReturn = async () => {
     if (addedItems.length === 0) {
       toast.error("Please add at least one item");
@@ -689,7 +582,6 @@ const openSelectModal = () => {
     setCreating(false);
   };
 
-  // ── Load return detail ──
   const loadReturnDetail = async (id: number) => {
     setDetailLoading(true);
     try {
@@ -706,7 +598,6 @@ const openSelectModal = () => {
     setDetailLoading(false);
   };
 
-  // ── Packaging update ──
   const updatePackaging = async (returnId: number, itemIds: number[], isReady: boolean) => {
     if (isReady) {
       const confirmed = await showConfirm(
@@ -732,7 +623,6 @@ const openSelectModal = () => {
     setProcessingAction(false);
   };
 
-  // ── Cancel return ──
   const cancelReturn = async (id: number) => {
     const confirmed = await showConfirm("Cancel this return request?");
     if (!confirmed) return;
@@ -745,6 +635,19 @@ const openSelectModal = () => {
       }
     } catch (e: any) {
       toast.error(e.response?.data?.message || "Error cancelling return");
+    }
+  };
+
+  const handleListPageChange = (p: number) => {
+    if (p >= 1 && p <= returnsPagination.totalPages) {
+      loadReturns(p);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handleModalPageChange = (p: number) => {
+    if (p >= 1 && p <= modalPagination.totalPages) {
+      loadModalItems(p);
     }
   };
 
@@ -767,7 +670,7 @@ const openSelectModal = () => {
     );
   }
 
-  // ── Render: List view (Purchase-Register style) ──
+  // ── Render: List view ──
   if (tab === "list") {
     return (
       <div className="p-6 bg-white min-h-screen">
@@ -954,12 +857,33 @@ const openSelectModal = () => {
           </table>
         </div>
 
-        <PaginationBar pagination={returnsPagination} onPage={loadReturns} label="returns" />
+        {/* ✅ Reusable Pagination (list) */}
+        {returnsPagination.count > 0 && (
+          <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
+            <span className="text-sm text-gray-700">
+              Showing{" "}
+              <span className="font-medium">
+                {(returnsPagination.page - 1) * PAGE_SIZE + 1}
+              </span>
+              –
+              <span className="font-medium">
+                {Math.min(returnsPagination.page * PAGE_SIZE, returnsPagination.count)}
+              </span>{" "}
+              of <span className="font-medium">{returnsPagination.count}</span> returns
+            </span>
+
+            <Pagination
+              currentPage={returnsPagination.page}
+              totalPages={returnsPagination.totalPages}
+              onPageChange={handleListPageChange}
+            />
+          </div>
+        )}
       </div>
     );
   }
 
-  // ── Render: Create view (Purchase-Entry style) ──
+  // ── Render: Create view ──
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-6 pb-24">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -982,7 +906,7 @@ const openSelectModal = () => {
 
         <div className="space-y-4">
 
-          {/* ── Bill Details ── */}
+          {/* Return Details */}
           <div className="bg-white rounded-xl shadow-lg p-6">
             <h2 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-4">Return Details</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1014,7 +938,7 @@ const openSelectModal = () => {
             </div>
           </div>
 
-          {/* ── Item Entry (single active row, like Purchase Entry) ── */}
+          {/* Item Entry */}
           <div className="bg-white rounded-xl shadow-lg p-6">
             <h3 className="text-sm font-semibold text-blue-700 border-b pb-2 mb-4 flex items-center gap-2">
               <FaBox className="text-blue-600" /> Item Entry
@@ -1049,7 +973,7 @@ const openSelectModal = () => {
                   onChange={(e) => {
                     const val = e.target.value;
                     const num = Number(val);
-                    if (val === "" ) { setCurrent((p) => ({ ...p, quantity: "" })); return; }
+                    if (val === "") { setCurrent((p) => ({ ...p, quantity: "" })); return; }
                     const clamped = Math.max(0, Math.min(num, current.maxQty));
                     setCurrent((p) => ({ ...p, quantity: String(clamped) }));
                   }}
@@ -1086,7 +1010,7 @@ const openSelectModal = () => {
             )}
           </div>
 
-          {/* ── Added Items Table ── */}
+          {/* Added Items Table */}
           <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
             <div className="overflow-x-auto" style={{ maxHeight: "320px" }}>
               <table className="w-full text-sm min-w-[900px]">
@@ -1157,7 +1081,7 @@ const openSelectModal = () => {
             </div>
           </div>
 
-          {/* ── GST Summary card (live estimate — inclusive GST, same_state → CGST+SGST, else IGST) ── */}
+          {/* GST Summary */}
           {addedItems.length > 0 && (
             <GstSummaryCard
               totals={createGstTotals}
@@ -1185,7 +1109,7 @@ const openSelectModal = () => {
           </div>
         </div>
 
-        {/* ── Action Buttons (sticky bottom) ── */}
+        {/* Action Buttons */}
         <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t p-3 flex gap-3 justify-center z-10">
           <button
             type="button"
@@ -1212,7 +1136,7 @@ const openSelectModal = () => {
           </button>
         </div>
 
-        {/* ── Item Selection Modal (single pick, closes on select) ── */}
+        {/* Item Selection Modal */}
         <AnimatePresence>
           {openModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -1233,16 +1157,16 @@ const openSelectModal = () => {
 
                 <div className="flex-1 overflow-y-auto min-h-0 p-6">
                   <div className="flex justify-between items-center mb-4 gap-4">
-              <input
-                type="text"
-                placeholder="Search item, barcode, transfer no..."
-                value={modalSearch}
-                onChange={(e) => {
-                  setModalSearch(e.target.value);
-                }}
-                className="flex-1 max-w-sm px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
-                autoFocus
-              />
+                    <input
+                      type="text"
+                      placeholder="Search item, barcode, transfer no..."
+                      value={modalSearch}
+                      onChange={(e) => {
+                        setModalSearch(e.target.value);
+                      }}
+                      className="flex-1 max-w-sm px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                      autoFocus
+                    />
                     <div className="px-4 py-2 bg-gray-100 rounded-lg text-sm text-gray-600">
                       <span className="font-semibold">{modalPagination.count}</span> items found
                     </div>
@@ -1310,7 +1234,28 @@ const openSelectModal = () => {
                     </table>
                   </div>
 
-                  <PaginationBar pagination={modalPagination} onPage={loadModalItems} label="items" />
+                  {/* ✅ Reusable Pagination (modal items) */}
+                  {modalPagination.count > 0 && (
+                    <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
+                      <span className="text-sm text-gray-700">
+                        Showing{" "}
+                        <span className="font-medium">
+                          {(modalPagination.page - 1) * PAGE_SIZE + 1}
+                        </span>
+                        –
+                        <span className="font-medium">
+                          {Math.min(modalPagination.page * PAGE_SIZE, modalPagination.count)}
+                        </span>{" "}
+                        of <span className="font-medium">{modalPagination.count}</span> items
+                      </span>
+
+                      <Pagination
+                        currentPage={modalPagination.page}
+                        totalPages={modalPagination.totalPages}
+                        onPageChange={handleModalPageChange}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-center py-4 border-t bg-white flex-shrink-0">
@@ -1357,9 +1302,6 @@ function ReturnDetailView({
   const pendingItems = returnData.items.filter(i => !i.is_packaging_ready);
   const packagedCount = returnData.items.filter(i => i.is_packaging_ready).length;
 
-  // ✅ GST Summary — from the real, backend-persisted values on each item
-  // (StockReturnItemReadSerializer already returns basic_amount/tax_amount/
-  // cgst/sgst/igst/net_amount, computed via calculate_gst_split at creation).
   const gstTotals: GstTotals = useMemo(() => {
     return returnData.items.reduce(
       (acc, i) => ({
@@ -1469,7 +1411,7 @@ function ReturnDetailView({
         )}
       </div>
 
-      {/* Packaging Actions - Only visible when status is 'approved' */}
+      {/* Packaging Actions */}
       {canUpdatePackaging && (
         <div className="px-6 py-3 border-b bg-blue-50/30 flex flex-wrap items-center gap-3 justify-between">
           <div className="flex items-center gap-3">
@@ -1503,7 +1445,7 @@ function ReturnDetailView({
         </div>
       )}
 
-      {/* Status Message - If not approved, show message */}
+      {/* Status Message */}
       {returnData.status === "pending" && (
         <div className="px-6 py-3 bg-amber-50 border-b border-amber-200 text-amber-700 text-sm">
           <MdPendingActions className="inline mr-2" size={16} />
@@ -1606,7 +1548,7 @@ function ReturnDetailView({
         </table>
       </div>
 
-      {/* ✅ GST Summary card — real, backend-persisted totals */}
+      {/* GST Summary */}
       {hasGst && (
         <div className="px-5 pt-4">
           <GstSummaryCard totals={gstTotals} />
