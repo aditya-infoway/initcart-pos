@@ -1,5 +1,6 @@
 // CreateItems.tsx - Complete file with Employee access (same as Superadmin)
-// ✅ SIRF 5 CHANGES: Employee access add kiye hain, baaki sab PURANA WAISA HI HAI
+// ✅ FIX 1: Barcode scan (Enter) se ab variant auto-add nahi hota. Variant sirf Add/Update button se add hoga.
+// ✅ FIX 2: "Company" entry type sirf Superadmin + Employee ke liye. Normal branch ko hide hai aur hamesha "manual" banta hai.
 //old software page with all functionalities
 
 import React, { useEffect, useState } from "react";
@@ -423,11 +424,25 @@ const CreateItems: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const isEditMode = !!id;
 
+  // ==================== User + Permissions ====================
+  const { user, permissions } = useAuthStore();
+  const isSuperAdmin = user?.role === 'superadmin';
+  const isEmployee = user?.role === 'employee';
+
+  // ✅ Company items sirf Superadmin + Employee bana sakte hain. Baaki sab (normal branch) sirf Manual.
+  const canCreateCompanyItems = isSuperAdmin || isEmployee;
+
+  // Check if employee has add permission for this page
+  const hasAddPermission = isSuperAdmin || permissions?.some(p => p.page_key === "/AddItems" && p.can_add);
+
   const [branchFields, setBranchFields] = useState<any[]>([]);
   const [branchLoaded, setBranchLoaded] = useState(false);
   const [addedItems, setAddedItems] = useState<VariantItem[]>([]);
   const [toggleOk, setToggleOk] = useState<boolean>(false);
-  const [entryType, setEntryType] = useState<"company" | "manual">("manual");
+  // ✅ Default: admin/employee ke liye "company", normal branch ke liye "manual"
+  const [entryType, setEntryType] = useState<"company" | "manual">(
+    canCreateCompanyItems ? "company" : "manual"
+  );
   const [loading, setLoading] = useState(true);
   const [initialItemData, setInitialItemData] = useState<any>(null);
   const [dataFetchComplete, setDataFetchComplete] = useState(false);
@@ -447,17 +462,6 @@ const CreateItems: React.FC = () => {
   const [currentBarcode, setCurrentBarcode] = useState<string>("");
   const [groupsAndUnitsLoaded, setGroupsAndUnitsLoaded] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-
-  // ==================== ✅ CHANGE 1: User + Permissions ====================
-  const { user, permissions } = useAuthStore();
-  const isSuperAdmin = user?.role === 'superadmin';
-  const isEmployee = user?.role === 'employee';
-  
-  // Employee ko bhi company items create karne do (same as Superadmin)
-  const canCreateCompanyItems = isSuperAdmin || isEmployee;
-  
-  // Check if employee has add permission for this page
-  const hasAddPermission = isSuperAdmin || permissions?.some(p => p.page_key === "/AddItems" && p.can_add);
 
   const [selectedUnit, setSelectedUnit] = useState<{
     id: number;
@@ -615,12 +619,21 @@ const CreateItems: React.FC = () => {
     }
   }, [entryType]);
 
-  // ==================== ✅ CHANGE 2: Entry Type useEffect ====================
+  // ==================== Entry Type useEffect ====================
+  // Employee ke paas add permission nahi hai to manual
   useEffect(() => {
     if (isEmployee && !hasAddPermission) {
       setEntryType("manual");
     }
   }, [isEmployee, hasAddPermission]);
+
+  // ✅ Normal branch (na superadmin, na employee) naya item banate time hamesha "manual"
+  // (edit mode me item ka apna entry_type load hota hai, usko change nahi karte)
+  useEffect(() => {
+    if (!isEditMode && !canCreateCompanyItems) {
+      setEntryType("manual");
+    }
+  }, [isEditMode, canCreateCompanyItems]);
 
   // ------------------ Fetch Item Data (Edit Mode) ------------------
   useEffect(() => {
@@ -650,7 +663,7 @@ const CreateItems: React.FC = () => {
             const variantsData = response.data.variants;
             const entryTypeVal = itemData.entry_type || "company";
 
-            // ==================== ✅ CHANGE 3: Edit Mode Validation ====================
+            // ==================== Edit Mode Validation ====================
             const canEditItems = isSuperAdmin || permissions?.some(
               p => p.page_key === "/AddItems" && p.can_edit
             );
@@ -783,12 +796,16 @@ const CreateItems: React.FC = () => {
       unitIdValue = Number(unitIdValue);
     }
 
+    // ✅ Safety: naya item banate time normal branch ka entry_type kabhi "company" nahi jayega
+    const finalEntryType: "company" | "manual" =
+      !isEditMode && !canCreateCompanyItems ? "manual" : entryType;
+
     let brandValue = values.brand;
     let categoryValue = values.category;
     let subCategoryValue = values.subCategory;
     let subSubCategoryValue = values.subSubCategory;
 
-    if (entryType === "company") {
+    if (finalEntryType === "company") {
       brandValue = brandValue && !isNaN(Number(brandValue)) ? Number(brandValue) : null;
       categoryValue = categoryValue && !isNaN(Number(categoryValue)) ? Number(categoryValue) : null;
       subCategoryValue = subCategoryValue && !isNaN(Number(subCategoryValue)) ? Number(subCategoryValue) : null;
@@ -797,7 +814,7 @@ const CreateItems: React.FC = () => {
 
     const payload = {
       itemName: values.itemName,
-      entry_type: entryType,
+      entry_type: finalEntryType,
       brand: brandValue,
       category: categoryValue,
       subCategory: subCategoryValue,
@@ -1086,10 +1103,11 @@ const CreateItems: React.FC = () => {
               <BranchWatcher branchFields={branchFields} />
               <ItemCalculatorWatcher />
 
-              {/* ==================== ✅ CHANGE 4: Entry Type Selection ==================== */}
-              <div className="col-span-full flex items-center justify-between mt-1 gap-6">
-                <div className="flex gap-6 items-center">
-                  {canCreateCompanyItems && (
+              {/* ==================== Entry Type Selection ==================== */}
+              {/* ✅ Sirf Superadmin + Employee ko dikhega. Normal branch ko ye poora section hide hai (hamesha Manual) */}
+              {canCreateCompanyItems && (
+                <div className="col-span-full flex items-center justify-between mt-1 gap-6">
+                  <div className="flex gap-6 items-center">
                     <label className="flex items-center gap-2 text-sm font-medium">
                       <input
                         type="radio"
@@ -1099,18 +1117,18 @@ const CreateItems: React.FC = () => {
                       />
                       Company
                     </label>
-                  )}
-                  <label className="flex items-center gap-2 text-sm font-medium">
-                    <input
-                      type="radio"
-                      checked={entryType === "manual"}
-                      onChange={() => setEntryType("manual")}
-                      disabled={isEditMode}
-                    />
-                    Manual
-                  </label>
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <input
+                        type="radio"
+                        checked={entryType === "manual"}
+                        onChange={() => setEntryType("manual")}
+                        disabled={isEditMode}
+                      />
+                      Manual
+                    </label>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Item Details Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
@@ -1252,7 +1270,7 @@ const CreateItems: React.FC = () => {
 
                   <FormInput label="P.Price (Source)" name="items[0].purchasePrice" type="number" />
 
-                  {/* ==================== ✅ CHANGE 5: Branch Price - Employee ko bhi dikhao ==================== */}
+                  {/* Branch Price - Employee ko bhi dikhao */}
                   {(isSuperAdmin || isEmployee) && (
                     <FormInput label="Branch Price" name="items[0].branchPrice" type="number" />
                   )}
@@ -1266,28 +1284,21 @@ const CreateItems: React.FC = () => {
                       type="text"
                       name="items[0].barcode"
                       value={values.items?.[0]?.barcode || ""}
-                      onKeyDown={async (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();  
-    e.stopPropagation();
-
-    const errors = await validateForm();
-    setTouched({
-      items: [
-        {
-          purchasePrice: true,
-          salesPrice: true,
-          mrp: true,
-          opStock: true,
-          barcode: true,
-        },
-      ],
-    });
-    if (errors.items) return;
-
-    handleAddVariant(values, setFieldValue);
-  }
-}}
+                      onKeyDown={(e) => {
+                        // ✅ FIX: Scanner barcode ke baad Enter bhejta hai.
+                        // Pehle yahan handleAddVariant() chal jata tha (auto-add).
+                        // Ab Enter sirf cursor ko agle field (Location) pe le jata hai.
+                        // Barcode uniqueness check onBlur pe hota hai.
+                        // Variant sirf Add / Update button se add hoga.
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const nextField = document.querySelector<HTMLInputElement>(
+                            'input[name="items[0].location"]'
+                          );
+                          nextField?.focus();
+                        }
+                      }}
                       onChange={(e) => {
                         const newValue = e.target.value.replace(/[^a-zA-Z0-9]/g, "");
                         setFieldValue("items[0].barcode", newValue);
@@ -1310,7 +1321,7 @@ if (newValue.length < 3) setBarcodeError("");
                     )}
                   </div>
 
-                  {/* ✅ LOCATION INPUT — yahan add karo */}
+                  {/* LOCATION INPUT */}
 <FormInput label="Location" name="items[0].location" type="text" />
 
 <FormInput label="Op.Stock" name="items[0].opStock" type="number" />
