@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { FaEye, FaEdit, FaTrash, FaSearch, FaSync } from "react-icons/fa";
+import { FaEye, FaEdit, FaTrash, FaSearch, FaSync, FaBarcode } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { toast } from "react-toastify";
@@ -38,7 +38,7 @@ interface Item {
   hsnCode?: string;
   taxSlab?: string;
   created_by_superadmin?: boolean;
-  created_by_name?:string;
+  created_by_name?: string;
 }
 
 interface Variant {
@@ -77,10 +77,13 @@ const useDebounce = <T,>(value: T, delay: number): T => {
 /* ------------------ Main Component ------------------ */
 const AddItems: React.FC = () => {
   const navigate = useNavigate();
-  const { canAdd, canEdit,canDelete } = usePermission("/AddItems");
+  const { canAdd, canEdit, canDelete } = usePermission("/AddItems");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null); // barcode scanner input
+  const requestIdRef = useRef(0); // purane (late aaye) response ko ignore karne ke liye
+  const refocusBarcodeRef = useRef(false); // fetch ke baad barcode input me cursor wapas lana hai ya nahi
   const { user } = useAuthStore();
-  const isSuperAdmin = user?.role === 'superadmin';
+  const isSuperAdmin = user?.role === "superadmin";
 
   const [items, setItems] = useState<Item[]>([]);
   const [filteredItems, setFilteredItems] = useState<Item[]>([]);
@@ -91,9 +94,13 @@ const AddItems: React.FC = () => {
   const [loadingPriceHistory, setLoadingPriceHistory] = useState(false);
   const [branchType, setBranchType] = useState<string | null>(null);
   const [branchFields, setBranchFields] = useState<string[]>([]);
+
+  // initialLoading: sirf pehli baar page ka full spinner. Uske baad kabhi page unmount nahi hoga
+  // (isse barcode input ka cursor/focus kabhi nahi jayega)
+  const [initialLoading, setInitialLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
+  const isSearching = loading && !initialLoading;
 
   /* -------- Search and Filters -------- */
   const [searchTerm, setSearchTerm] = useState("");
@@ -101,11 +108,15 @@ const AddItems: React.FC = () => {
   const [brandFilter, setBrandFilter] = useState<string>("All");
   const [groupFilter, setGroupFilter] = useState<string>("All");
   const [entryTypeFilter, setEntryTypeFilter] = useState<string>("All");
-  
-  // ✅ Tab state
+
+  // Barcode scanner / manual barcode search
+  const [barcodeInput, setBarcodeInput] = useState<string>(""); // input box me jo dikh raha hai
+  const [appliedBarcode, setAppliedBarcode] = useState<string>(""); // jo actually search me lag raha hai (Enter ke baad)
+
+  // Tab state
   const [activeTab, setActiveTab] = useState<string>("all");
 
-  // ✅ Tab definitions
+  // Tab definitions
   const tabs = isSuperAdmin
     ? [
         { key: "all", label: "All Items" },
@@ -126,7 +137,7 @@ const AddItems: React.FC = () => {
     categories: [],
     brands: [],
     groups: [],
-    entry_types: []
+    entry_types: [],
   });
 
   /* -------- Pagination -------- */
@@ -164,7 +175,7 @@ const AddItems: React.FC = () => {
           categories: res.data.categories || [],
           brands: res.data.brands || [],
           groups: res.data.groups || [],
-          entry_types: res.data.entry_types || []
+          entry_types: res.data.entry_types || [],
         });
       }
     } catch (err) {
@@ -173,73 +184,89 @@ const AddItems: React.FC = () => {
   };
 
   /* ------------------ Fetch Items WITH PAGINATION ------------------ */
-  const fetchItems = useCallback(async (page = 1, search = debouncedSearchTerm) => {
-    setLoading(true);
-    if (search) {
-      setIsSearching(true);
-    }
-    try {
-      const token = sessionStorage.getItem("token");
+  const fetchItems = useCallback(
+    async (page = 1, search = "") => {
+      const reqId = ++requestIdRef.current;
+      setLoading(true);
+      try {
+        const token = sessionStorage.getItem("token");
 
-      // Build query params
-      const params = new URLSearchParams();
-      params.append('page', page.toString());
-      params.append('page_size', pageSize.toString());
-      params.append('tab', activeTab); 
+        // Build query params
+        const params = new URLSearchParams();
+        params.append("page", page.toString());
+        params.append("page_size", pageSize.toString());
+        params.append("tab", activeTab);
+        params.append("lite", "1"); // halka response: list page ko variants / heavy fields nahi chahiye
 
-      if (search) params.append('search', search);
-      if (categoryFilter !== "All") params.append('category', categoryFilter);
-      if (brandFilter !== "All") params.append('brand', brandFilter);
-      if (groupFilter !== "All") params.append('group', groupFilter);
-      if (entryTypeFilter !== "All") params.append('entry_type', entryTypeFilter);
+        if (search) params.append("search", search);
+        if (appliedBarcode) params.append("barcode", appliedBarcode); // barcode filter
+        if (categoryFilter !== "All") params.append("category", categoryFilter);
+        if (brandFilter !== "All") params.append("brand", brandFilter);
+        if (groupFilter !== "All") params.append("group", groupFilter);
+        if (entryTypeFilter !== "All") params.append("entry_type", entryTypeFilter);
 
-      const response = await api.get(`items/?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+        const response = await api.get(`items/?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-      if (response.data.results) {
-        setItems(response.data.results.items || []);
-        setFilteredItems(response.data.results.items || []);
-        setTotalItems(response.data.count || 0);
-        setTotalPages(Math.ceil(response.data.count / pageSize));
-      } else if (response.data.items) {
-        setItems(response.data.items);
-        setFilteredItems(response.data.items);
-        setTotalItems(response.data.items.length);
-        setTotalPages(1);
+        // Is beech naya request chala gaya ho to ye purana response ignore karo
+        if (reqId !== requestIdRef.current) return;
+
+        if (response.data.results) {
+          setItems(response.data.results.items || []);
+          setFilteredItems(response.data.results.items || []);
+          setTotalItems(response.data.count || 0);
+          setTotalPages(Math.ceil(response.data.count / pageSize));
+        } else if (response.data.items) {
+          setItems(response.data.items);
+          setFilteredItems(response.data.items);
+          setTotalItems(response.data.items.length);
+          setTotalPages(1);
+        }
+      } catch (err) {
+        if (reqId !== requestIdRef.current) return;
+        console.error("Failed to fetch items:", err);
+        toast.error("Failed to fetch items");
+        setItems([]);
+        setFilteredItems([]);
+      } finally {
+        if (reqId === requestIdRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+          setInitialLoading(false);
+          // Barcode search ke baad cursor wapas barcode input me, taki agla scan seedha ho
+          if (refocusBarcodeRef.current) {
+            refocusBarcodeRef.current = false;
+            setTimeout(() => {
+              barcodeInputRef.current?.focus();
+              barcodeInputRef.current?.select();
+            }, 50);
+          }
+        }
       }
-    } catch (err) {
-      console.error("Failed to fetch items:", err);
-      toast.error("Failed to fetch items");
-      setItems([]);
-      setFilteredItems([]);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-      setIsSearching(false);
+    },
+    [pageSize, categoryFilter, brandFilter, groupFilter, entryTypeFilter, activeTab, appliedBarcode]
+  );
+  // Filter options items table ke baad load hon, taaki pehli request ko poori speed mile
+  useEffect(() => {
+    if (!initialLoading) {
+      fetchFilterOptions();
     }
-  }, [pageSize, categoryFilter, brandFilter, groupFilter, entryTypeFilter, activeTab]); // ✅ Added activeTab dependency
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLoading]);
 
-  // ✅ Tab change pe refetch
-  useEffect(() => {
-    setCurrentPage(1);
-    fetchItems(1, debouncedSearchTerm);
-  }, [activeTab]); // ✅ Added activeTab dependency
-
-  // Fetch filter options on mount
-  useEffect(() => {
-    fetchFilterOptions();
-  }, []);
-
-  // Fetch items when debounced search term changes
-  useEffect(() => {
-    fetchItems(1, debouncedSearchTerm);
-  }, [debouncedSearchTerm, fetchItems]);
-
-  // Fetch items when page, pageSize, or dropdown filters change
+  // Ek hi effect: page / search / tab / filters / barcode me se kuch bhi badle to fetch
+  // (fetchItems apni dependencies badalne par khud naya ban jata hai)
   useEffect(() => {
     fetchItems(currentPage, debouncedSearchTerm);
-  }, [currentPage, pageSize, categoryFilter, brandFilter, groupFilter, entryTypeFilter]);
+  }, [fetchItems, currentPage, debouncedSearchTerm]);
+
+  // Page pehli baar load hote hi barcode input me cursor (scanner ready)
+  useEffect(() => {
+    if (!initialLoading) {
+      barcodeInputRef.current?.focus();
+    }
+  }, [initialLoading]);
 
   const canEditDelete = (item: Item) => {
     if (isSuperAdmin) return true;
@@ -260,7 +287,7 @@ const AddItems: React.FC = () => {
     }
   };
 
-    /* ------------------ Fetch Purchase Price History ------------------ */
+  /* ------------------ Fetch Purchase Price History ------------------ */
   const handleViewPriceHistory = async (variantId: number, label: string) => {
     setLoadingPriceHistory(true);
     setPriceHistoryVariantLabel(label);
@@ -314,6 +341,8 @@ const AddItems: React.FC = () => {
   /* ------------------ Reset Filters ------------------ */
   const handleResetFilters = () => {
     setSearchTerm("");
+    setBarcodeInput("");
+    setAppliedBarcode("");
     setCategoryFilter("All");
     setBrandFilter("All");
     setGroupFilter("All");
@@ -337,6 +366,58 @@ const AddItems: React.FC = () => {
     searchInputRef.current?.focus();
   };
 
+  /* ------------------ Barcode Handlers ------------------ */
+  // Scanner barcode type karke Enter bhejta hai; manual me user Enter dabata hai. Dono ka flow same.
+  const handleBarcodeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      // Barcode DB me sirf letters+numbers store hote hain, isliye scanner ke extra/hidden characters hata do
+      const value = e.currentTarget.value.replace(/[^a-zA-Z0-9]/g, "");
+      setBarcodeInput(value);
+      // Agar value pehle jaisi hi hai to naya fetch nahi hoga, sirf text select rakho
+      if (value !== appliedBarcode) {
+        refocusBarcodeRef.current = true;
+        setAppliedBarcode(value);
+        setCurrentPage(1);
+      }
+      // Text select rakho, taki agla scan purane ko replace kare
+      e.currentTarget.select();
+    }
+  };
+
+  const handleBarcodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setBarcodeInput(value);
+    // Input khali kar diya to filter bhi hata do
+    if (value === "" && appliedBarcode !== "") {
+      refocusBarcodeRef.current = true;
+      setAppliedBarcode("");
+      setCurrentPage(1);
+    }
+  };
+
+  const handleClearBarcode = () => {
+    setBarcodeInput("");
+    if (appliedBarcode !== "") {
+      setAppliedBarcode("");
+      setCurrentPage(1);
+    }
+    barcodeInputRef.current?.focus();
+  };
+
+  // Scanner-friendly: Enter na bhi aaye to scan poora hone ke ~0.4s baad barcode khud apply ho jata hai
+  // (Enter dabane par turant apply hota hi hai)
+  useEffect(() => {
+    const cleaned = barcodeInput.replace(/[^a-zA-Z0-9]/g, "");
+    if (cleaned.length < 3 || cleaned === appliedBarcode) return;
+    const t = setTimeout(() => {
+      refocusBarcodeRef.current = true;
+      setAppliedBarcode(cleaned);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [barcodeInput, appliedBarcode]);
+
   /* ------------------ Pagination Handlers ------------------ */
   const handlePageChange = (page: number) => {
     if (page >= 1 && page <= totalPages) {
@@ -349,15 +430,6 @@ const AddItems: React.FC = () => {
     setPageSize(newSize);
     setCurrentPage(1);
   };
-
-  /* ------------------ Loading State ------------------ */
-  if (loading && !refreshing && !isSearching) {
-    return (
-      <div className="p-6 bg-gray-50 min-h-screen flex justify-center items-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
 
   const modalColumns = [...branchFields, ...COMMON_VARIANT_COLUMNS];
 
@@ -377,12 +449,12 @@ const AddItems: React.FC = () => {
             <FaSync className={refreshing ? "animate-spin" : ""} /> Refresh
           </button>
           {canAdd && (
-          <button
-            onClick={() => navigate("/items")}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
-          >
-            + Add Item
-          </button>
+            <button
+              onClick={() => navigate("/items")}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
+            >
+              + Add Item
+            </button>
           )}
         </div>
       </div>
@@ -417,8 +489,35 @@ const AddItems: React.FC = () => {
             )}
           </div>
 
-          {/* Filter Dropdowns */}
+          {/* Filter Dropdowns + chhota Barcode input */}
           <div className="flex flex-wrap gap-3">
+            {/* Chhota Barcode Scanner / Manual input */}
+            <div className="relative w-48">
+              <FaBarcode className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm" />
+              <input
+                ref={barcodeInputRef}
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                placeholder="Scan / enter barcode"
+                title="Barcode scan karo ya type karke Enter dabao"
+                value={barcodeInput}
+                onChange={handleBarcodeChange}
+                onKeyDown={handleBarcodeKeyDown}
+                className="w-full pl-9 pr-8 py-2 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50/40"
+              />
+              {barcodeInput && (
+                <button
+                  onClick={handleClearBarcode}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
+                  type="button"
+                  title="Clear barcode"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
             <select
               value={categoryFilter}
               onChange={(e) => {
@@ -429,7 +528,9 @@ const AddItems: React.FC = () => {
             >
               <option value="All">All Categories</option>
               {filterOptions.categories.map((cat) => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
               ))}
             </select>
 
@@ -443,7 +544,9 @@ const AddItems: React.FC = () => {
             >
               <option value="All">All Brands</option>
               {filterOptions.brands.map((brand) => (
-                <option key={brand.id} value={brand.id}>{brand.name}</option>
+                <option key={brand.id} value={brand.id}>
+                  {brand.name}
+                </option>
               ))}
             </select>
 
@@ -457,7 +560,9 @@ const AddItems: React.FC = () => {
             >
               <option value="All">All Groups</option>
               {filterOptions.groups.map((group) => (
-                <option key={group.id} value={group.id}>{group.name}</option>
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
               ))}
             </select>
 
@@ -471,12 +576,20 @@ const AddItems: React.FC = () => {
             >
               <option value="All">All Entry Types</option>
               {filterOptions.entry_types.map((type) => (
-                <option key={type.value} value={type.value}>{type.label}</option>
+                <option key={type.value} value={type.value}>
+                  {type.label}
+                </option>
               ))}
             </select>
 
             {/* Reset Filters Button */}
-            {(searchTerm || categoryFilter !== "All" || brandFilter !== "All" || groupFilter !== "All" || entryTypeFilter !== "All") && (
+            {(searchTerm ||
+              appliedBarcode ||
+              barcodeInput ||
+              categoryFilter !== "All" ||
+              brandFilter !== "All" ||
+              groupFilter !== "All" ||
+              entryTypeFilter !== "All") && (
               <button
                 onClick={handleResetFilters}
                 className="px-4 py-2 text-sm text-blue-600 hover:text-blue-800 border border-blue-300 rounded hover:bg-blue-50"
@@ -488,16 +601,19 @@ const AddItems: React.FC = () => {
         </div>
       </div>
 
-      {/* ✅ Tabs */}
+      {/* Tabs */}
       <div className="flex gap-1 mb-4 bg-white rounded-xl shadow-sm border border-gray-100 p-1 w-fit">
-        {tabs.map(tab => (
+        {tabs.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => { setActiveTab(tab.key); setCurrentPage(1); }}
+            onClick={() => {
+              setActiveTab(tab.key);
+              setCurrentPage(1);
+            }}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
               activeTab === tab.key
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-gray-500 hover:bg-gray-100'
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-gray-500 hover:bg-gray-100"
             }`}
           >
             {tab.label}
@@ -506,8 +622,12 @@ const AddItems: React.FC = () => {
       </div>
 
       {/* Table Section */}
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
-        {loading && isSearching ? (
+      <div
+        className={`bg-white rounded-lg shadow overflow-x-auto transition-opacity ${
+          loading && filteredItems.length > 0 ? "opacity-50" : ""
+        }`}
+      >
+        {loading && filteredItems.length === 0 ? (
           <div className="flex justify-center items-center p-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
             <span className="ml-3 text-gray-600">Searching...</span>
@@ -534,8 +654,12 @@ const AddItems: React.FC = () => {
             <tbody>
               {filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="text-center p-8 text-gray-500 border border-gray-300">
-                    {searchTerm ? "No matching items found" : "No items found"}
+                  <td colSpan={13} className="text-center p-8 text-gray-500 border border-gray-300">
+                    {appliedBarcode
+                      ? `No item found for barcode "${appliedBarcode}"`
+                      : searchTerm
+                      ? "No matching items found"
+                      : "No items found"}
                   </td>
                 </tr>
               ) : (
@@ -545,11 +669,13 @@ const AddItems: React.FC = () => {
                       {(currentPage - 1) * pageSize + index + 1}
                     </td>
                     <td className="p-3 border border-gray-300 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        item.entry_type === 'company'
-                          ? 'bg-purple-100 text-purple-800'
-                          : 'bg-green-100 text-green-800'
-                      }`}>
+                      <span
+                        className={`px-2 py-1 rounded text-xs font-medium ${
+                          item.entry_type === "company"
+                            ? "bg-purple-100 text-purple-800"
+                            : "bg-green-100 text-green-800"
+                        }`}
+                      >
                         {item.entry_type}
                       </span>
                     </td>
@@ -595,22 +721,22 @@ const AddItems: React.FC = () => {
                         {canEditDelete(item) && (
                           <>
                             {canEdit && (
-                            <button
-                              onClick={() => handleEditItem(item)}
-                              className="bg-green-100 p-2 rounded-full text-green-600 hover:bg-green-200"
-                              title="Edit Item"
-                            >
-                              <FaEdit />
-                            </button>
+                              <button
+                                onClick={() => handleEditItem(item)}
+                                className="bg-green-100 p-2 rounded-full text-green-600 hover:bg-green-200"
+                                title="Edit Item"
+                              >
+                                <FaEdit />
+                              </button>
                             )}
                             {canDelete && (
-                            <button
-                              onClick={() => handleDeleteItem(item)}
-                              className="bg-red-100 p-2 rounded-full text-red-600 hover:bg-red-200"
-                              title="Delete Item"
-                            >
-                              <FaTrash />
-                            </button>
+                              <button
+                                onClick={() => handleDeleteItem(item)}
+                                className="bg-red-100 p-2 rounded-full text-red-600 hover:bg-red-200"
+                                title="Delete Item"
+                              >
+                                <FaTrash />
+                              </button>
                             )}
                           </>
                         )}
@@ -631,7 +757,7 @@ const AddItems: React.FC = () => {
       <div className="flex flex-col sm:flex-row justify-between items-center mt-4 gap-4">
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-700">
-            Showing {filteredItems.length > 0 ? ((currentPage - 1) * pageSize) + 1 : 0}–
+            Showing {filteredItems.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}–
             {Math.min(currentPage * pageSize, totalItems)} of {totalItems} items
           </span>
 
@@ -648,11 +774,7 @@ const AddItems: React.FC = () => {
         </div>
 
         {totalPages > 0 && (
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-          />
+          <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} />
         )}
       </div>
 
@@ -661,9 +783,7 @@ const AddItems: React.FC = () => {
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex justify-center items-start pt-20 z-50">
           <div className="bg-white w-11/12 md:w-3/4 lg:w-1/2 rounded-xl shadow-2xl p-5">
             <div className="flex justify-between items-center border-b pb-2 mb-4">
-              <h2 className="text-lg font-semibold text-blue-700">
-                Item Variants
-              </h2>
+              <h2 className="text-lg font-semibold text-blue-700">Item Variants</h2>
               <button
                 onClick={() => setSelectedItem(null)}
                 className="text-red-500 text-xl hover:text-red-700"
@@ -679,7 +799,7 @@ const AddItems: React.FC = () => {
                     <th className="p-2 border">#</th>
                     {modalColumns.map((col) => (
                       <th key={col} className="border p-2">
-                        {col.replace(/([A-Z])/g, ' $1').trim().toUpperCase()}
+                        {col.replace(/([A-Z])/g, " $1").trim().toUpperCase()}
                       </th>
                     ))}
                     <th className="border p-2">PRICE HISTORY</th>
@@ -703,7 +823,12 @@ const AddItems: React.FC = () => {
                         ))}
                         <td className="border p-2 text-center">
                           <button
-                            onClick={() => handleViewPriceHistory(Number(v.id), `${v.size || ""} ${v.color || ""}`.trim() || `Variant #${v.id}`)}
+                            onClick={() =>
+                              handleViewPriceHistory(
+                                Number(v.id),
+                                `${v.size || ""} ${v.color || ""}`.trim() || `Variant #${v.id}`
+                              )
+                            }
                             className="text-blue-600 hover:text-blue-800 text-xs font-medium underline"
                           >
                             View
@@ -772,7 +897,9 @@ const AddItems: React.FC = () => {
                           <td className="border p-2 whitespace-nowrap">
                             {new Date(h.changed_at).toLocaleString()}
                           </td>
-                          <td className="border p-2">{h.old_price === null ? "—" : `₹${Number(h.old_price).toFixed(2)}`}</td>
+                          <td className="border p-2">
+                            {h.old_price === null ? "—" : `₹${Number(h.old_price).toFixed(2)}`}
+                          </td>
                           <td className="border p-2 font-medium">₹{Number(h.new_price).toFixed(2)}</td>
                           <td className="border p-2">{h.source}</td>
                           <td className="border p-2">{h.reference || "-"}</td>
@@ -797,5 +924,5 @@ const AddItems: React.FC = () => {
     </div>
   );
 };
-  
+
 export default AddItems;

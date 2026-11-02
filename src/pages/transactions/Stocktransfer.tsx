@@ -2529,7 +2529,7 @@ function DetailView({ detail, onBack, onComplete, onCancel }: {
           </div>
         )}
  
-        {detail.status === "pending" && (
+        {detail.status === "pending" && ( 
           <div className="flex gap-3 mt-5">
             <button onClick={() => onComplete(detail.id)}
               className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold">
