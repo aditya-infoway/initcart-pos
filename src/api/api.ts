@@ -1,13 +1,14 @@
 // src/api/api.ts
 import axios from "axios";
+import { Capacitor } from "@capacitor/core";
 import { useAuthStore } from "../store/authStore";
 
-// Production me same-origin (/api/pos/) -> preflight nahi, extra TLS nahi.
-// Local dev (npm run dev) me purana full URL chalega.
+// Web production uses same-origin; local development and native builds use the API host.
 const api = axios.create({
-  baseURL: import.meta.env.PROD
-    ? "/api/pos/"
-    : "http://localhost:8000/api/pos/",
+  baseURL:
+    import.meta.env.PROD && !Capacitor.isNativePlatform()
+      ? "/api/pos/"
+      : "https://api.initcart.com/api/pos/",
 });
 
 api.interceptors.request.use(

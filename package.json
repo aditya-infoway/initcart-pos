@@ -6,10 +6,14 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc -b && vite build",
+    "build:android": "tsc -b && vite build --base=./",
+    "cap:sync": "cap sync android",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "@fontsource/inter": "^5.2.8",
     "@fontsource/lora": "^5.2.8",
     "@fontsource/montserrat": "^5.2.8",
@@ -41,6 +45,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@eslint/js": "^9.36.0",
     "@types/node": "^24.6.2",
     "@types/react": "^19.1.16",

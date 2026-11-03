@@ -181,7 +181,7 @@ const WebsiteItemsList: React.FC = () => {
     if (mediaPath.startsWith('http://') || mediaPath.startsWith('https://')) {
       return mediaPath;
     }
-    const API_BASE_URL = "http://localhost:8000";
+    const API_BASE_URL = "https://api.initcart.com";
     if (mediaPath.startsWith('/media/')) {
       return `${API_BASE_URL}${mediaPath}`;
     }

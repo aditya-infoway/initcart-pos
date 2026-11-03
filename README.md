@@ -71,3 +71,23 @@ export default defineConfig([
   },
 ])
 ```
+
+## Android APK
+
+Capacitor packages the production Vite build as an Android app. Android Studio, a JDK, and the Android SDK must be installed.
+
+```sh
+npm install
+npm run build:android
+npm run cap:sync
+```
+
+Build a debug APK from the repository root:
+
+```powershell
+cd android
+.\gradlew.bat assembleDebug
+```
+
+The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
+Open the native project in Android Studio with `npx cap open android`.

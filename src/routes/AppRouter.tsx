@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
 import PublicRoute from "./PublicRoute";
 import PrivateRoute from "./PrivateRoute";
 import Login from "../pages/auth/Login";
@@ -80,7 +81,7 @@ import BranchRefundList from "../pages/orders/BranchRefundList";
 
 
 const AppRouter = () => (
-  <BrowserRouter basename="/pos">
+  <BrowserRouter basename={Capacitor.isNativePlatform() ? "/" : "/pos"}>
     <Routes>
       {/* Public Routes */}
       <Route element={<PublicRoute />}>
