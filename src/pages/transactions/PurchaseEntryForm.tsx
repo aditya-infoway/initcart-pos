@@ -10,7 +10,7 @@ import {
   FaTruck, FaMoneyBill, FaUniversity, FaPlus,
   FaArrowLeft, FaPercent, FaBox, FaCalendarAlt,
   FaFileInvoice, FaShoppingBag, FaEdit, FaPrint,
-  FaPaperclip, FaBarcode, FaQrcode
+  FaPaperclip, FaBarcode, FaQrcode, FaCamera,
 } from "react-icons/fa";
 import { MdClose } from "react-icons/md";
 import api from "../../api/api";
@@ -18,6 +18,7 @@ import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 import Barcode from "react-barcode";
 import { usePermission } from "../../hooks/usePermissions";
 import { useTaxAccounts } from "../../hooks/useTaxAccounts";
+import { isNativeApp, scanBarcodeWithCamera } from "../../utils/cameraBarcodeScanner";
 
 
 // ─── Module-level constants + mapRow (Block 1) ────────────────────────────────
@@ -116,6 +117,15 @@ const PurchaseBarcodeScanner: React.FC<BarcodeScannerProps> = ({
     }
   };
 
+  const handleCameraScan = async () => {
+  try {
+    const v = await scanBarcodeWithCamera();
+    if (v) await handleBarcodeSearch(v);
+  } catch (e: any) {
+    if (!/cancel/i.test(String(e?.message || e))) toast.error(e?.message || "Camera scan failed");
+  }
+};
+
   return (
     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
       <label className="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-2">
@@ -153,6 +163,12 @@ const PurchaseBarcodeScanner: React.FC<BarcodeScannerProps> = ({
             <FaBarcode />
           )}
         </button>
+        {isNativeApp() && (
+  <button type="button" onClick={handleCameraScan} disabled={scanning}
+    className="bg-emerald-600 text-white px-4 rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50">
+    <FaCamera />
+  </button>
+)}
       </div>
       <p className="text-xs text-gray-500 mt-2">
         ✓ Keep cursor in this field and scan — item will be selected automatically

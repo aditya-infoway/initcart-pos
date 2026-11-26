@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { FaEye, FaEdit, FaTrash, FaSearch, FaSync, FaBarcode } from "react-icons/fa";
+import { FaEye, FaEdit, FaTrash, FaSearch, FaSync, FaBarcode, FaCamera } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermissions";
 import Pagination from "../../components/common/pagination";
+import { isNativeApp, scanBarcodeWithCamera } from "../../utils/cameraBarcodeScanner";
 
 /* ------------------ Branch variant mapping ------------------ */
 export const VARIANT_BY_BRANCH: Record<string, string[]> = {
@@ -112,6 +113,8 @@ const AddItems: React.FC = () => {
   // Barcode scanner / manual barcode search
   const [barcodeInput, setBarcodeInput] = useState<string>(""); // input box me jo dikh raha hai
   const [appliedBarcode, setAppliedBarcode] = useState<string>(""); // jo actually search me lag raha hai (Enter ke baad)
+
+  const [cameraScanning, setCameraScanning] = useState(false);
 
   // Tab state
   const [activeTab, setActiveTab] = useState<string>("all");
@@ -235,13 +238,16 @@ const AddItems: React.FC = () => {
           setRefreshing(false);
           setInitialLoading(false);
           // Barcode search ke baad cursor wapas barcode input me, taki agla scan seedha ho
-          if (refocusBarcodeRef.current) {
-            refocusBarcodeRef.current = false;
-            setTimeout(() => {
-              barcodeInputRef.current?.focus();
-              barcodeInputRef.current?.select();
-            }, 50);
-          }
+// fetchItems ke finally me
+if (refocusBarcodeRef.current) {
+  refocusBarcodeRef.current = false;
+  if (!isNativeApp()) {
+    setTimeout(() => {
+      barcodeInputRef.current?.focus();
+      barcodeInputRef.current?.select();
+    }, 50);
+  }
+}
         }
       }
     },
@@ -262,11 +268,12 @@ const AddItems: React.FC = () => {
   }, [fetchItems, currentPage, debouncedSearchTerm]);
 
   // Page pehli baar load hote hi barcode input me cursor (scanner ready)
-  useEffect(() => {
-    if (!initialLoading) {
-      barcodeInputRef.current?.focus();
-    }
-  }, [initialLoading]);
+// Page load wala effect
+useEffect(() => {
+  if (!initialLoading && !isNativeApp()) {
+    barcodeInputRef.current?.focus();
+  }
+}, [initialLoading]);
 
   const canEditDelete = (item: Item) => {
     if (isSuperAdmin) return true;
@@ -396,6 +403,35 @@ const AddItems: React.FC = () => {
     }
   };
 
+  
+
+const handleCameraScan = async () => {
+  if (cameraScanning) return;
+  setCameraScanning(true);
+  try {
+    const value = await scanBarcodeWithCamera();
+    if (!value) {
+      toast.info("No barcode detected");
+      return;
+    }
+    // Input box me value dikhao + filter apply karo (gun scan jaisa hi flow)
+    setBarcodeInput(value);
+    if (value !== appliedBarcode) {
+      refocusBarcodeRef.current = false; // mobile par keyboard dobara na khule
+      setAppliedBarcode(value);
+      setCurrentPage(1);
+    }
+  } catch (err: any) {
+    // User ne scanner cancel kiya to error nahi dikhana
+    const msg = String(err?.message || err || "");
+    if (!/cancel/i.test(msg)) {
+      toast.error(msg || "Camera scan failed");
+    }
+  } finally {
+    setCameraScanning(false);
+  }
+};
+
   const handleClearBarcode = () => {
     setBarcodeInput("");
     if (appliedBarcode !== "") {
@@ -492,31 +528,49 @@ const AddItems: React.FC = () => {
           {/* Filter Dropdowns + chhota Barcode input */}
           <div className="flex flex-wrap gap-3">
             {/* Chhota Barcode Scanner / Manual input */}
-            <div className="relative w-48">
-              <FaBarcode className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm" />
-              <input
-                ref={barcodeInputRef}
-                type="text"
-                inputMode="text"
-                autoComplete="off"
-                placeholder="Scan / enter barcode"
-                title="Barcode scan karo ya type karke Enter dabao"
-                value={barcodeInput}
-                onChange={handleBarcodeChange}
-                onKeyDown={handleBarcodeKeyDown}
-                className="w-full pl-9 pr-8 py-2 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50/40"
-              />
-              {barcodeInput && (
-                <button
-                  onClick={handleClearBarcode}
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
-                  type="button"
-                  title="Clear barcode"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
+{/* Barcode Scanner / Manual input + Camera button */}
+<div className="flex items-center gap-2">
+  <div className="relative w-48">
+    <FaBarcode className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm" />
+    <input
+      ref={barcodeInputRef}
+      type="text"
+      inputMode="text"
+      autoComplete="off"
+      placeholder="Scan / enter barcode"
+      title="Barcode scan karo ya type karke Enter dabao"
+      value={barcodeInput}
+      onChange={handleBarcodeChange}
+      onKeyDown={handleBarcodeKeyDown}
+      className="w-full pl-9 pr-8 py-2 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50/40"
+    />
+    {barcodeInput && (
+      <button
+        onClick={handleClearBarcode}
+        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
+        type="button"
+        title="Clear barcode"
+      >
+        ✕
+      </button>
+    )}
+  </div>
+  {isNativeApp() && (
+    <button
+      type="button"
+      onClick={handleCameraScan}
+      disabled={cameraScanning}
+      title="Scan barcode with camera"  
+      className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white p-2.5 rounded shadow flex items-center justify-center"
+    >
+      {cameraScanning ? (
+        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+      ) : (
+        <FaCamera />
+      )}
+    </button>
+  )}
+</div>
 
             <select
               value={categoryFilter}

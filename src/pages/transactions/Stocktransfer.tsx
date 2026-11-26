@@ -15,7 +15,7 @@ import {
   FaArrowLeft, FaExchangeAlt, FaEye, FaPlus,
   FaWarehouse, FaShippingFast, FaClipboardList,
   FaTimesCircle, FaCheckDouble, FaBarcode,
-  FaPause, FaRedoAlt, FaBoxOpen,
+  FaPause, FaRedoAlt, FaBoxOpen, FaCamera,
 } from "react-icons/fa";
 import { MdClose, MdSwapHoriz } from "react-icons/md";
 import { HiOutlineDocumentDuplicate } from "react-icons/hi";
@@ -25,6 +25,7 @@ import { toast } from "react-toastify";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 import { usePermission } from "../../hooks/usePermissions";
 import Pagination from "../../components/common/pagination";
+import { isNativeApp, scanBarcodeWithCamera } from "../../utils/cameraBarcodeScanner";
 
 // Add this after the imports
 const safeNumber = (val: any): number => {
@@ -696,6 +697,15 @@ const StockTransferBarcodeScanner: React.FC<StockBarcodeScannerProps> = ({
     ref.current?.focus();
   };
 
+  const handleCameraScan = async () => {
+  try {
+    const v = await scanBarcodeWithCamera();
+    if (v) handleScan(v);
+  } catch (e: any) {
+    if (!/cancel/i.test(String(e?.message || e))) toast.error(e?.message || "Camera scan failed");
+  }
+};
+
 return (
   <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg border border-blue-200">
     <FaBarcode className="text-blue-500 text-sm flex-shrink-0" />
@@ -727,9 +737,21 @@ return (
         <FaBarcode size={12} />
         Scan
       </button>
+      
+    )}
+
+        {isNativeApp() && (
+      <button
+        type="button"
+        onClick={handleCameraScan}
+        className="bg-emerald-600 text-white px-3 py-1.5 rounded-md hover:bg-emerald-700 transition flex items-center gap-1 text-xs flex-shrink-0"
+      >
+        <FaCamera size={12} /> Camera
+      </button>
     )}
   </div>
 );
+
 };
 
 // ════════════════════════════════════════════════════════════

@@ -4,13 +4,14 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import JsBarcode from "jsbarcode";
-import { FaBarcode, FaPrint, FaSync, FaCheck, FaTimes, FaSearch, FaChevronLeft, FaChevronRight, FaEdit } from "react-icons/fa";
+import { FaBarcode, FaPrint, FaSync, FaCheck, FaTimes, FaSearch, FaChevronLeft, FaChevronRight, FaEdit, FaCamera } from "react-icons/fa";
 import { MdOutlineQrCode2, MdClose, MdCheckCircle, MdPrint } from "react-icons/md";
 import api from "../../api/api";
 import { FaLock } from "react-icons/fa6";
 import { useAuthStore } from "../../store/authStore"; 
 import { usePermission } from "../../hooks/usePermissions";
 import Pagination from "../../components/common/pagination";
+import { isNativeApp, scanBarcodeWithCamera } from "../../utils/cameraBarcodeScanner";
 
 // ─── TSC TE244 label presets ────────────────────────────────────
 const LABEL_PRESETS = [
@@ -508,6 +509,15 @@ useEffect(() => {
     setSelectedIds(new Set());
   };
 
+    const scanInto = async (onValue: (v: string) => void) => {
+    try {
+      const v = await scanBarcodeWithCamera();
+      if (v) onValue(v);
+    } catch (e: any) {
+      if (!/cancel/i.test(String(e?.message || e))) toast.error(e?.message || "Scan failed");
+    }
+  };
+
 // ─── CAN EDIT CHECK ─────────────────────────────────────────
 const canEditBarcode = (entryType: string | undefined): boolean => {
     // ✅ SUPERADMIN: company aur manual dono items ka barcode edit kar sakta hai
@@ -647,6 +657,17 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
                   className="absolute right-2 top-2 text-gray-400 hover:text-gray-600"><MdClose size={14} /></button>
               )}
             </div>
+
+                        {isNativeApp() && activeTab === "generated" && (
+              <button
+                type="button"
+                onClick={() => scanInto(val => setGeneratedSearch(val))}
+                className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700"
+                title="Scan barcode to search"
+              >
+                <FaCamera size={13} />
+              </button>
+            )}
             {selectedIds.size > 0 && <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full">{selectedIds.size} selected</span>}
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -734,6 +755,19 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
                                     onChange={e => setManualInputs(prev => new Map(prev).set(v.variant_id, e.target.value.replace(/[^a-zA-Z0-9]/g, "")))}
                                     onBlur={() => manualVal && checkBarcode(v.variant_id, manualVal)}
                                     className="border border-gray-300 rounded px-2 py-1 text-xs w-28 focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                                                                      {isNativeApp() && (
+                                    <button
+                                      type="button"
+                                      onClick={() => scanInto(val => {
+                                        setManualInputs(prev => new Map(prev).set(v.variant_id, val));
+                                        checkBarcode(v.variant_id, val);
+                                      })}
+                                      className="text-blue-600 hover:text-blue-800"
+                                      title="Scan with camera"
+                                    >
+                                      <FaCamera size={14} />
+                                    </button>
+                                  )}
                                   {checking && <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />}
                                 </div>
                               ) : <span className="text-gray-300 text-xs">—</span>}
@@ -951,6 +985,18 @@ const handleUpdateBarcode = async (variantId: number, newBarcode: string) => {
                     }
                 }}
             />
+                        {isNativeApp() && (
+              <button
+                type="button"
+                onClick={() => scanInto(val =>
+                  setEditBarcodeValues(prev => new Map(prev).set(v.variant_id, val))
+                )}
+                className="text-blue-600 hover:text-blue-800"
+                title="Scan with camera"
+              >
+                <FaCamera size={13} />
+              </button>
+            )}
             <button
                 onClick={() => handleUpdateBarcode(
                     v.variant_id, 

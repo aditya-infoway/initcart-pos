@@ -15,13 +15,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   FaCheckCircle, FaBarcode, FaSearch, FaTrash, FaSave, FaTimes,
   FaShoppingCart, FaStore, FaBox, FaCalendarAlt, FaFileInvoice, FaEdit,
-  FaArrowLeft, FaPause, FaPlay, FaListUl, FaClock,
+  FaArrowLeft, FaPause, FaPlay, FaListUl, FaClock, FaCamera
 } from "react-icons/fa";
 import { HiOutlineDocumentText } from "react-icons/hi";
 import { MdClose } from "react-icons/md";
 import api from "../../api/api";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
+import { isNativeApp, scanBarcodeWithCamera } from "../../utils/cameraBarcodeScanner";
 
 // ─── Hold Storage Types & Helpers ─────────────────────────────────────
 interface HeldSale {
@@ -289,6 +290,15 @@ const BarcodeScannerInput: React.FC<{
     }
   };
 
+  const handleCameraScan = async () => {
+  try {
+    const v = await scanBarcodeWithCamera();
+    if (v) await handleBarcodeSearch(v);
+  } catch (e: any) {
+    if (!/cancel/i.test(String(e?.message || e))) toast.error(e?.message || "Camera scan failed");
+  }
+};
+
   return (
     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
       <label className="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-2">
@@ -320,6 +330,12 @@ const BarcodeScannerInput: React.FC<{
         >
           {scanning ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <FaBarcode />}
         </button>
+        {isNativeApp() && (
+  <button type="button" onClick={handleCameraScan} disabled={scanning}
+    className="bg-emerald-600 text-white px-4 rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50">
+    <FaCamera />
+  </button>
+)}
       </div>
       <p className="text-xs text-gray-500 mt-2">✓ Keep cursor in this field and scan — item will be selected automatically</p>
     </div>

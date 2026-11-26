@@ -4,14 +4,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Formik, Form, useField } from "formik";
 import * as Yup from "yup";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, number } from "framer-motion";
 import Barcode from "react-barcode";
 import {
   FaCheckCircle, FaUserPlus, FaBarcode, FaSearch,
   FaTrash, FaSave, FaTimes, FaPrint, FaShoppingCart,
   FaTruck, FaMoneyBill, FaUniversity,
   FaPlus, FaEdit, FaArrowLeft, FaPercent,
-  FaBox, FaCalendarAlt, FaFileInvoice
+  FaBox, FaCalendarAlt, FaFileInvoice, FaCamera
 } from "react-icons/fa";
 import { MdClose } from "react-icons/md";
 import api from "../../api/api";
@@ -21,7 +21,7 @@ import { toast } from "react-toastify";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 import { useTaxAccounts } from "../../hooks/useTaxAccounts";
 import { State } from "country-state-city";
-
+import { isNativeApp, scanBarcodeWithCamera } from "../../utils/cameraBarcodeScanner";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -438,7 +438,7 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
     if (!customerName) {
       toast.error("Please select a customer first");
       setBarcodeValue("");
-      inputRef.current?.focus();
+      if (!isNativeApp()) inputRef.current?.focus();
       return;
     }
 
@@ -471,7 +471,16 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
     } finally {
       setBarcodeValue("");
       setScanning(false);
-      inputRef.current?.focus();
+      if (!isNativeApp()) inputRef.current?.focus();
+    }
+  };
+
+    const handleCameraScan = async () => {
+    try {
+      const v = await scanBarcodeWithCamera();
+      if (v) await handleBarcodeSearch(v);
+    } catch (e: any) {
+      if (!/cancel/i.test(String(e?.message || e))) toast.error(e?.message || "Camera scan failed");
     }
   };
   return (
@@ -511,6 +520,17 @@ const BarcodeScannerInput: React.FC<BarcodeScannerProps> = ({ itemsModalData, on
             <FaBarcode />
           )}
         </button>
+
+                {isNativeApp() && (
+          <button
+            type="button"
+            onClick={handleCameraScan}
+            disabled={scanning}
+            className="bg-emerald-600 text-white px-4 rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50"
+          >
+            <FaCamera />
+          </button>
+        )}
       </div>
       <p className="text-xs text-gray-500 mt-2">
         ✓ Keep cursor in this field and scan — item will be selected automatically
@@ -895,6 +915,8 @@ const mapped: any[] = itemsRes.data.map(mapSaleRow);
     setCurrentItemErrors({});
   };
 
+
+
   // ── Add item ──
   const handleAddItem = async () => {
     const errors: Record<string, string> = {};
@@ -903,7 +925,7 @@ const mapped: any[] = itemsRes.data.map(mapSaleRow);
     if (!currentItem.quantity || Number(currentItem.quantity) <= 0) errors.quantity = "Enter Valid quantity";
     if (!currentItem.price || Number(currentItem.price) <= 0)  errors.price = "Enter Valid price";
     if (!currentItem.per)                                      errors.per = "Unit required";
-
+      
     if (Object.keys(errors).length > 0) {
       setCurrentItemErrors(errors);
       return;

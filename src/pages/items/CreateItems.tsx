@@ -7,13 +7,14 @@ import React, { useEffect, useState } from "react";
 import { Formik, Form, useField, useFormikContext } from "formik";
 import * as Yup from "yup";
 import { motion } from "framer-motion";
-import { FaCheckCircle, FaEdit, FaPlus } from "react-icons/fa";
+import { FaCheckCircle, FaEdit, FaPlus,FaCamera } from "react-icons/fa";
 import { MdDelete } from "react-icons/md";
 import { useNavigate, useParams } from "react-router-dom";
 import { MdArrowBack } from "react-icons/md";
 import api from "../../api/api";
 import { toast } from "react-toastify";
 import { useAuthStore } from "../../store/authStore";
+import { isNativeApp, scanBarcodeWithCamera } from "../../utils/cameraBarcodeScanner";
 
 // ------------------ Validation Schema ------------------
 const generateBarcodeNumber = (): string => {
@@ -504,6 +505,17 @@ const CreateItems: React.FC = () => {
       setCheckingBarcode(false);
     }
   };
+  const handleCameraScanBarcode = async (setFieldValue: any) => {
+  try {
+    const v = await scanBarcodeWithCamera();
+    if (!v) return;
+    setFieldValue("items[0].barcode", v);
+    setCurrentBarcode(v);
+    await checkBarcodeUniqueness(v, editingId ?? undefined);
+  } catch (e: any) {
+    if (!/cancel/i.test(String(e?.message || e))) toast.error(e?.message || "Camera scan failed");
+  }
+};
 
   // ------------------ Edit/Delete Variant ------------------
   const handleEditVariant = (row: VariantItem, setFieldValue: any) => {
@@ -1280,16 +1292,13 @@ const CreateItems: React.FC = () => {
 
                   <div className="text-xs sm:text-sm">
                     <label className="block font-medium text-gray-600">Barcode</label>
+                    <div className="flex gap-1">
                     <input
                       type="text"
                       name="items[0].barcode"
                       value={values.items?.[0]?.barcode || ""}
                       onKeyDown={(e) => {
-                        // ✅ FIX: Scanner barcode ke baad Enter bhejta hai.
-                        // Pehle yahan handleAddVariant() chal jata tha (auto-add).
-                        // Ab Enter sirf cursor ko agle field (Location) pe le jata hai.
-                        // Barcode uniqueness check onBlur pe hota hai.
-                        // Variant sirf Add / Update button se add hoga.
+
                         if (e.key === "Enter") {
                           e.preventDefault();
                           e.stopPropagation();
@@ -1316,6 +1325,13 @@ if (newValue.length < 3) setBarcodeError("");
                         barcodeError ? "border-red-500" : "border-gray-300"
                       } rounded text-xs sm:text-sm bg-white`}
                     />
+                      {isNativeApp() && (
+    <button type="button" onClick={() => handleCameraScanBarcode(setFieldValue)}
+      className="bg-blue-600 text-white px-2 rounded hover:bg-blue-700" title="Scan with camera">
+      <FaCamera size={12} />
+    </button>
+  )}
+</div>
                     {barcodeError && (
                       <div className="text-red-500 text-[10px] sm:text-xs mt-1">{barcodeError}</div>
                     )}

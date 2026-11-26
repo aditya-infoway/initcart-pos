@@ -8,7 +8,7 @@ import {
   FaCheckCircle, FaUserPlus, FaBarcode, FaSearch, FaTrash, FaPrint,
   FaShoppingCart, FaMoneyBill, FaUniversity, FaPlus, FaArrowLeft, FaPercent,
   FaBox, FaCalendarAlt, FaFileInvoice, FaMinus, FaReceipt, FaSave, FaTimes,
-  FaLink, FaUserTie,
+  FaLink, FaUserTie, FaCamera
 } from "react-icons/fa";
 import { MdClose, MdGridView, MdTableRows } from "react-icons/md";
 import api from "../../api/api";
@@ -18,6 +18,7 @@ import MobileSalesEntry from "./MobileSalesEntry";
 import { useBranchLocationCheck } from "../../hooks/useBranchLocationCheck";
 import { useTaxAccounts } from "../../hooks/useTaxAccounts";
 import { State } from "country-state-city";
+import { isNativeApp, scanBarcodeWithCamera } from "../../utils/cameraBarcodeScanner";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -649,6 +650,15 @@ const ItemsPanel = memo(({ onAdd, refreshKey }: { onAdd: (row: any) => void; ref
     finally { setBarcodeValue(""); setScanning(false); setTimeout(() => barcodeRef.current?.focus(), 0); }
   };
 
+  const handleCameraScan = async () => {
+  try {
+    const v = await scanBarcodeWithCamera();
+    if (v) await handleBarcode(v);
+  } catch (e: any) {
+    if (!/cancel/i.test(String(e?.message || e))) toast.error(e?.message || "Camera scan failed");
+  }
+};
+
   const heads = ["Item Name", "HSN", "Barcode", ...variantFields.map(f => f.charAt(0).toUpperCase() + f.slice(1)), "Unit", "Price", "Tax%", "Stock", "Add"];
 
   return (
@@ -683,6 +693,13 @@ const ItemsPanel = memo(({ onAdd, refreshKey }: { onAdd: (row: any) => void; ref
             className="px-3 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-40 text-sm flex items-center gap-1.5">
             <FaBarcode size={11} /> Scan
           </button>
+
+          {isNativeApp() && (
+  <button type="button" onClick={handleCameraScan}
+    className="px-3 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 text-sm flex items-center gap-1.5">
+    <FaCamera size={12} /> Camera
+  </button>
+)}  
         </div>
       </div>
 
