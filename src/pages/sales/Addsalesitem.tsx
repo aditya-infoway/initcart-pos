@@ -42,6 +42,7 @@ const Addsalesitem: React.FC = () => {
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
   const [gstNumber, setGstNumber] = useState("");
+  const [partyGstNumber, setPartyGstNumber] = useState("");
 
   const [initialLoading, setInitialLoading] = useState<boolean>(true);
   const [fetching, setFetching] = useState<boolean>(false);
@@ -260,7 +261,38 @@ const Addsalesitem: React.FC = () => {
       const res = await api.get(`sale-receipt/${itemId}/`, {
         headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` },
       });
-      setSelectedReceipt(res.data);
+      const receipt = res.data;
+      const customer = receipt.customer;
+      const customerId =
+        receipt.customer_id ??
+        receipt.account_id ??
+        (typeof customer === "number" ? customer : customer?.id);
+      let customerGstNumber = customer?.gst_no || receipt.customer_gst_no || "";
+
+      try {
+        if (!customerGstNumber && customerId != null) {
+          const accountRes = await api.get(`account/${customerId}/`);
+          customerGstNumber = accountRes.data?.gst_no || "";
+        } else if (!customerGstNumber && receipt.customer_name) {
+          const accountsRes = await api.get("account/", {
+            params: { search: receipt.customer_name },
+          });
+          const accounts = Array.isArray(accountsRes.data)
+            ? accountsRes.data
+            : accountsRes.data?.results || [];
+          const customerAccount = accounts.find(
+            (account: any) =>
+              account.account_name?.trim().toLowerCase() ===
+              receipt.customer_name.trim().toLowerCase()
+          );
+          customerGstNumber = customerAccount?.gst_no || "";
+        }
+      } catch (gstError) {
+        console.error("Failed to fetch customer GST number:", gstError);
+      }
+
+      setPartyGstNumber(customerGstNumber);
+      setSelectedReceipt(receipt);
     } catch (err) {
       console.error("Failed to fetch receipt:", err);
     }
@@ -564,9 +596,10 @@ const Addsalesitem: React.FC = () => {
 
               <div className="text-sm mb-2">
                 <p><strong>Bill No:</strong> {selectedReceipt.bill_no ?? "-"} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<strong>Date:</strong> {selectedReceipt.date ?? "-"}</p>
-                <p><strong>Customer:</strong> {selectedReceipt.customer_name ?? "-"} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  <strong>Time:</strong> {selectedReceipt.time ?? "-"}</p>
+                <p><strong>Customer:</strong> {selectedReceipt.customer_name ?? "-"} &nbsp; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <strong>Time:</strong> {selectedReceipt.time ?? "-"}</p>
                 <p><strong>Mobile:</strong> {selectedReceipt.mobile ?? "-"}</p>
                 <p><strong>Payment Mode:</strong> {selectedReceipt.payment_mode ?? "-"}</p>
+                <p><strong>Party GST Number:</strong> {partyGstNumber}</p>
               </div>
 
               <hr className="my-2 border-t" />
