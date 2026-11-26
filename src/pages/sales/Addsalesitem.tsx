@@ -41,6 +41,7 @@ const Addsalesitem: React.FC = () => {
   const [variants, setVariants] = useState<any[]>([]);
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
+  const [gstNumber, setGstNumber] = useState("");
 
   const [initialLoading, setInitialLoading] = useState<boolean>(true);
   const [fetching, setFetching] = useState<boolean>(false);
@@ -56,6 +57,18 @@ const Addsalesitem: React.FC = () => {
   const [variantPage, setVariantPage] = useState(1);
 
   const reqIdRef = useRef(0);   // late aaye purane response ignore karne ke liye
+
+  useEffect(() => {
+    const fetchGstNumber = async () => {
+      try {
+        const res = await api.get("/auth/me/");
+        setGstNumber(res.data?.data?.gst_number || "");
+      } catch (err) {
+        console.error("Failed to fetch branch GST number:", err);
+      }
+    };
+    fetchGstNumber();
+  }, []);
 
   const mapSale = (item: any) => ({
     id: item.id,
@@ -545,6 +558,7 @@ const Addsalesitem: React.FC = () => {
               <div className="text-center mb-4">
                 <h2 className="text-lg font-semibold">{selectedReceipt.branch_name ?? "Branch Name"}</h2>
                 <p className="text-sm">{selectedReceipt.address ?? "Branch Address"}</p>
+                {gstNumber && <p className="text-sm">GST No: {gstNumber}</p>}
                 <hr className="my-2 border-t" />
               </div>
 
